@@ -1,0 +1,70 @@
+// API client for the One Property Market — Outbound data function (Supabase edge function).
+// Override at build time with VITE_API_BASE if you ever move the backend.
+const API_BASE =
+  (import.meta as any).env?.VITE_API_BASE ||
+  'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
+
+const TOKEN_KEY = 'opm_outbound_token';
+
+export const tokenStore = {
+  get: () => localStorage.getItem(TOKEN_KEY),
+  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
+  clear: () => localStorage.removeItem(TOKEN_KEY),
+};
+
+async function call(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(API_BASE);
+  url.searchParams.set('action', action);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), {
+    method: opts.method || 'GET',
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+export const api = {
+  login: (username: string, password: string) => call('login', { method: 'POST', body: { username, password } }),
+  me: () => call('me'),
+  logout: () => call('logout', { method: 'POST' }),
+  bootstrap: () => call('bootstrap'),
+  overview: (p: any) => call('overview', { params: p }),
+  workspace: (p: any) => call('workspace', { params: p }),
+  dispositions: (p: any) => call('dispositions', { params: p }),
+  compare: (p: any) => call('compare', { params: p }),
+  agents: (p: any) => call('agents', { params: p }),
+  calls: (p: any) => call('calls', { params: p }),
+  call: (id: string) => call('call', { params: { id } }),
+  admin: {
+    users: () => call('admin.users'),
+    allWorkspaces: () => call('admin.allWorkspaces'),
+    workspaceAgents: (workspace: string) => call('admin.workspaceAgents', { params: { workspace } }),
+    getAccess: (userId: number) => call('admin.getAccess', { params: { userId } }),
+    createUser: (b: any) => call('admin.createUser', { method: 'POST', body: b }),
+    updateUser: (b: any) => call('admin.updateUser', { method: 'PATCH', body: b }),
+    setAccess: (b: any) => call('admin.setAccess', { method: 'POST', body: b }),
+  },
+};
+
+// ---- formatting helpers ----
+export const fmt = {
+  money: (n: number) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+  int: (n: number) => (n || 0).toLocaleString('en-US'),
+  pct: (n: number) => `${((n || 0) * 100).toFixed(1)}%`,
+  dur: (s: number) => {
+    s = Math.round(s || 0);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return m > 0 ? `${m}m ${r}s` : `${r}s`;
+  },
+  dateTime: (ms: number | null) => (ms ? new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'),
+  title: (s: string) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+};
