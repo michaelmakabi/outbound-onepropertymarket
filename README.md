@@ -2,9 +2,9 @@
 
 Gated, multi-workspace outbound-calling analytics dashboard. Rebranded, re-platformed
 replacement for the old Manus "Retell" dashboard — now running on **Vite + React + Supabase**
-(no Manus, no ongoing Manus cost).
+(no Manus, no ongoing Manus cost). Deployed free via GitHub Pages.
 
-**Live target:** `outbound.1propertymarket.com`
+**Live:** `outbound.1propertymarket.com`
 **Stack:** Vite · React · TypeScript · Tailwind · Recharts · Supabase (Postgres + Edge Functions)
 
 ## What it does
@@ -17,11 +17,16 @@ replacement for the old Manus "Retell" dashboard — now running on **Vite + Rea
 
 ## Login
 
-Gated by username/password (bcrypt). Seeded super-admin: `mtip@hey.com` / `Welcome123$` (change after first login).
+Gated by username/password (bcrypt). A super-admin account was seeded during setup and its
+credentials were shared privately. Create more logins and scope their access from the in-app
+**Users & Access** screen.
 
-## Backend (already deployed)
+## Backend
 
-Live on the Supabase project `sehrlbmatklgghrvyxes`: Postgres (RLS-locked) + edge functions `retell-sync` (15-min pg_cron) and `api`. API base: `https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api`. ~9,600 calls across 9 workspaces, self-updating.
+Live on the Supabase project `sehrlbmatklgghrvyxes`: Postgres (RLS-locked) + edge functions
+`retell-sync` (15-min pg_cron) and `api`. API base: `https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api`.
+~9,600 calls across 9 workspaces, self-updating. No API keys live in this repo — the backend reads
+them from the database / Supabase secrets.
 
 ## Run locally
 
@@ -30,12 +35,8 @@ npm install
 npm run dev
 ```
 
-## Deploy via Lovable
+## Hosting
 
-1. Create a new Lovable project connected to this repo.
-2. Publish, then Project → Settings → Domains → Connect Domain → `outbound.1propertymarket.com`.
-3. Add the DNS records Lovable shows you in GoDaddy for `1propertymarket.com`.
-
-## Turning on the AI pages
-
-Add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) as a Supabase Edge Function secret; the AI endpoints activate with no rebuild.
+Deployed via GitHub Pages (`.github/workflows/deploy.yml`) on every push to `main`, served at the
+custom domain in `public/CNAME`. Turning on the AI pages: add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`)
+as a Supabase Edge Function secret — no rebuild needed.
