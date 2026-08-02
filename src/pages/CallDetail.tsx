@@ -3,7 +3,8 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { KpiCard, SectionCard, LoadingBlock, AudioPlayer } from '../components/dash';
 import { usd, secs, dateTime, humanizeDisposition, humanizeProduct, dispositionColor } from '../lib/format';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Clock, DollarSign, Smile, CheckCircle2, Zap } from 'lucide-react';
+import { downloadCallMp3, saveBlob, transcriptText } from '../lib/download';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Clock, DollarSign, Smile, CheckCircle2, Zap, ArrowDownToLine, FileText, Loader2 } from 'lucide-react';
 
 export default function CallDetail() {
   const { callId } = useParams();
@@ -16,6 +17,7 @@ export default function CallDetail() {
 
   const [c, setC] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [dlAudio, setDlAudio] = useState(false);
 
   useEffect(() => { setLoading(true); api.call(callId!).then((d) => setC(d.call)).finally(() => setLoading(false)); }, [callId]);
 
@@ -52,12 +54,21 @@ export default function CallDetail() {
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-extrabold text-ink">
+            {inbound ? <ChevronRight className="h-5 w-5 rotate-180 text-emerald-600" /> : null}
             {contact || 'Call'}
             {c.disposition && <span className="pill" style={{ background: `${dispositionColor(c.disposition)}22`, color: dispositionColor(c.disposition) }}>{humanizeDisposition(c.disposition)}</span>}
           </h1>
           <p className="text-sm text-slate-500">{c.workspace} · {c.agent_name || '—'} · {dateTime(c.start_timestamp)}</p>
         </div>
-        <a href={ghlUrl} target="_blank" rel="noreferrer" className="btn-primary"><ExternalLink className="h-4 w-4" /> Take Action in GoHighLevel</a>
+        <div className="flex flex-wrap items-center gap-2">
+          {c.recording_url && (
+            <button className="btn-ghost" disabled={dlAudio} onClick={async () => { setDlAudio(true); try { await downloadCallMp3(c); } catch (e) { alert('Download failed: ' + String((e as any)?.message || e)); } finally { setDlAudio(false); } }}>
+              {dlAudio ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowDownToLine className="h-4 w-4" />} MP3
+            </button>
+          )}
+          <button className="btn-ghost" onClick={() => saveBlob(new Blob([transcriptText(c)], { type: 'text/plain' }), `transcript-${c.call_id.slice(-6)}.txt`)}><FileText className="h-4 w-4" /> Transcript</button>
+          <a href={ghlUrl} target="_blank" rel="noreferrer" className="btn-primary"><ExternalLink className="h-4 w-4" /> Take Action in GoHighLevel</a>
+        </div>
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
