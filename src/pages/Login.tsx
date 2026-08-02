@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { Radio, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { LOGO_FULL } from '../lib/logo';
 
 export default function Login() {
   const { login } = useAuth();
@@ -29,10 +30,10 @@ export default function Login() {
     <div className="grid min-h-screen place-items-center bg-gradient-to-br from-ink to-ink-soft px-4">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand shadow-lg">
-            <Radio className="h-7 w-7 text-white" />
+          <div className="mb-4 flex items-center justify-center rounded-2xl bg-white px-5 py-4 shadow-lg">
+            <img src={LOGO_FULL} alt="1PropertyMarket" className="h-12 w-auto object-contain" />
           </div>
-          <h1 className="text-xl font-extrabold text-white">One Property Market</h1>
+          <h1 className="text-xl font-extrabold text-white">1PropertyMarket</h1>
           <p className="text-sm text-slate-400">Outbound — campaign command center</p>
         </div>
         <form onSubmit={submit} className="card p-6">
