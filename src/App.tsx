@@ -12,6 +12,7 @@ import CallDetail from './pages/CallDetail';
 import Compare from './pages/Compare';
 import Agents from './pages/Agents';
 import UsersAdmin from './pages/UsersAdmin';
+import UsageAnalytics from './pages/UsageAnalytics';
 import AIPlaceholder from './pages/AIPlaceholder';
 
 function Protected({ children, admin }: { children: JSX.Element; admin?: boolean }) {
@@ -35,9 +36,10 @@ export default function App() {
       <Route path="/calls/:callId" element={<Protected><CallDetail /></Protected>} />
       <Route path="/compare" element={<Protected><Compare /></Protected>} />
       <Route path="/agents" element={<Protected><Agents /></Protected>} />
-      <Route path="/suggestions" element={<Protected><AIPlaceholder title="AI Suggestions" blurb="LLM-generated campaign optimization suggestions across your workspaces." /></Protected>} />
-      <Route path="/prompt-studio" element={<Protected><AIPlaceholder title="Prompt Studio" blurb="Generate and refine outbound agent prompts, scripts, and follow-up flows." /></Protected>} />
-      <Route path="/reports" element={<Protected><AIPlaceholder title="Reports" blurb="Executive-summary reports with AI-written insights." /></Protected>} />
+      <Route path="/suggestions" element={<Protected><AIPlaceholder configKey="suggestions" /></Protected>} />
+      <Route path="/prompt-studio" element={<Protected><AIPlaceholder configKey="prompt-studio" /></Protected>} />
+      <Route path="/reports" element={<Protected><AIPlaceholder configKey="reports" /></Protected>} />
+      <Route path="/usage" element={<Protected admin><UsageAnalytics /></Protected>} />
       <Route path="/users" element={<Protected admin><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
