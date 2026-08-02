@@ -16,7 +16,8 @@ async function call(action: string, opts: { method?: string; params?: Record<str
   const url = new URL(API_BASE);
   url.searchParams.set('action', action);
   for (const [k, v] of Object.entries(opts.params || {})) {
-    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, Array.isArray(v) ? v.join(',') : String(v));
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = tokenStore.get();
@@ -43,6 +44,7 @@ export const api = {
   agents: (p: any) => call('agents', { params: p }),
   calls: (p: any) => call('calls', { params: p }),
   call: (id: string) => call('call', { params: { id } }),
+  usage: () => call('usage'),
   admin: {
     users: () => call('admin.users'),
     allWorkspaces: () => call('admin.allWorkspaces'),
