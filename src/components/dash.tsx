@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Loader2, LucideIcon, SlidersHorizontal, ArrowUp, ArrowDown, ChevronsUpDown,
-  Search, Check, X, RefreshCw, Bookmark, Plus,
+  Search, Check, X, RefreshCw, Bookmark, Plus, Play, Pause,
 } from 'lucide-react';
 import { useFilters, RangePreset } from '../lib/filters';
 
@@ -224,6 +224,52 @@ export function MultiSelect({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ audio player */
+
+export function AudioPlayer({ src, compact }: { src?: string | null; compact?: boolean }) {
+  const ref = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [cur, setCur] = useState(0);
+  const [dur, setDur] = useState(0);
+  const [rate, setRate] = useState(1);
+  const RATES = [1, 1.5, 2];
+
+  if (!src) return <span className="text-xs text-slate-300">No recording</span>;
+
+  const fmtT = (s: number) => (isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--');
+  const toggle = (e: any) => {
+    e.stopPropagation();
+    const a = ref.current; if (!a) return;
+    if (a.paused) { a.play(); setPlaying(true); } else { a.pause(); setPlaying(false); }
+  };
+  const cycleRate = (e: any) => {
+    e.stopPropagation();
+    const next = RATES[(RATES.indexOf(rate) + 1) % RATES.length];
+    setRate(next); if (ref.current) ref.current.playbackRate = next;
+  };
+  const seek = (e: any) => {
+    e.stopPropagation();
+    const a = ref.current; if (!a) return;
+    a.currentTime = Number(e.target.value); setCur(a.currentTime);
+  };
+
+  return (
+    <div className={cx('flex items-center gap-2', compact ? 'w-[210px]' : 'w-full')} onClick={(e) => e.stopPropagation()}>
+      <audio ref={ref} src={src} preload="none"
+        onTimeUpdate={(e) => setCur((e.target as HTMLAudioElement).currentTime)}
+        onLoadedMetadata={(e) => setDur((e.target as HTMLAudioElement).duration)}
+        onEnded={() => setPlaying(false)} />
+      <button onClick={toggle} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-light text-brand hover:bg-brand hover:text-white">
+        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+      </button>
+      <input type="range" min={0} max={dur || 0} value={cur} onChange={seek} onClick={(e) => e.stopPropagation()}
+        className="h-1 flex-1 cursor-pointer accent-[#1f6feb]" style={{ minWidth: compact ? 60 : 120 }} />
+      <span className="shrink-0 font-mono text-[10px] tabular-nums text-slate-500">{fmtT(cur)}/{fmtT(dur)}</span>
+      <button onClick={cycleRate} className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 hover:border-brand hover:text-brand">{rate}×</button>
     </div>
   );
 }
