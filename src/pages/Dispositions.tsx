@@ -1,10 +1,73 @@
-import { useEffect, useState } from 'react';
-import { api, fmt } from '../lib/api';
-import { PageHead, Spinner, RangePicker, rangeToMs } from '../components/ui';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { api } from '../lib/api';
+import { useFilters } from '../lib/filters';
+import {
+  PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, WorkspaceSelect,
+  ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
+} from '../components/dash';
+import { usd, num, pct, humanizeDisposition, dispositionColor, TOOLTIP_STYLE } from '../lib/format';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { PieChart, ListChecks, PhoneOff, CheckCircle2, Search } from 'lucide-react';
+
+type Row = { disposition: string; count: number; percentage: number; costDollars: number; avgCostPerCallDollars: number };
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'disposition', label: 'Disposition', required: true, sortKey: 'disposition' },
+  { key: 'count', label: 'Count', sortKey: 'count', align: 'right' },
+  { key: 'percentage', label: 'Share', sortKey: 'percentage', align: 'right' },
+  { key: 'costDollars', label: 'Spend', sortKey: 'costDollars', align: 'right' },
+  { key: 'avgCostPerCallDollars', label: 'Avg / call', sortKey: 'avgCostPerCallDollars', align: 'right' },
+];
+
+const isPositive = (d: string) => /appointment|booked|transfer|interested|completed/.test(d.toLowerCase()) && !d.toLowerCase().includes('not_interested');
+const isNoContact = (d: string) => /no_answer|busy|voicemail|inactivity|failed/.test(d.toLowerCase());
+
+function DispTable({ rows }: { rows: Row[] }) {
+  const getValue = useCallback((r: Row, key: string) => (r as any)[key], []);
+  const t = useClientTable<Row>({ pageKey: 'dispositions', columns: COLUMNS, rows, getValue, initialSort: { by: 'count', dir: 'desc' } });
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+          <input value={t.search} onChange={(e) => t.setSearch(e.target.value)} placeholder="Search dispositions…" className="input w-[240px] pl-8" />
+        </div>
+        <ColumnToggleMenu columns={COLUMNS} isVisible={t.isVisible} onToggle={t.toggle} />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>{COLUMNS.filter((c) => t.isVisible(c.key)).map((c) => (
+              <SortableHead key={c.key} col={c} sort={t.sort} onSort={t.setSort}>{c.label}</SortableHead>
+            ))}</tr>
+          </thead>
+          <tbody>
+            {t.rows.map((r) => (
+              <tr key={r.disposition} className="border-t border-line hover:bg-surface">
+                {t.isVisible('disposition') && (
+                  <td className="px-3 py-2.5">
+                    <span className="inline-flex items-center gap-2 font-semibold text-ink">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: dispositionColor(r.disposition) }} />
+                      {humanizeDisposition(r.disposition)}
+                    </span>
+                  </td>
+                )}
+                {t.isVisible('count') && <td className="px-3 py-2.5 text-right font-mono">{num(r.count)}</td>}
+                {t.isVisible('percentage') && <td className="px-3 py-2.5 text-right font-mono text-slate-500">{pct(r.percentage)}</td>}
+                {t.isVisible('costDollars') && <td className="px-3 py-2.5 text-right font-mono">{usd(r.costDollars)}</td>}
+                {t.isVisible('avgCostPerCallDollars') && <td className="px-3 py-2.5 text-right font-mono text-slate-500">{usd(r.avgCostPerCallDollars, { precise: true })}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default function Dispositions() {
-  const [range, setRange] = useState('30');
-  const [ws, setWs] = useState<string>('');
+  const { startMs, endMs } = useFilters();
+  const [ws, setWs] = useState('');
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [d, setD] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -12,38 +75,47 @@ export default function Dispositions() {
   useEffect(() => { api.bootstrap().then((b) => setWorkspaces(b.workspaces)); }, []);
   useEffect(() => {
     setLoading(true);
-    const { start, end } = rangeToMs(range);
-    api.dispositions({ start, end, workspace: ws || undefined }).then(setD).finally(() => setLoading(false));
-  }, [range, ws]);
+    api.dispositions({ start: startMs, end: endMs, workspace: ws || undefined }).then(setD).finally(() => setLoading(false));
+  }, [startMs, endMs, ws]);
+
+  const rows: Row[] = d?.dispositions ?? [];
+  const chartData = useMemo(() => rows.slice(0, 12).map((r) => ({ ...r, name: humanizeDisposition(r.disposition) })), [rows]);
+  const positive = rows.filter((r) => isPositive(r.disposition)).reduce((s, r) => s + r.count, 0);
+  const noContact = rows.filter((r) => isNoContact(r.disposition)).reduce((s, r) => s + r.count, 0);
+  const total = d?.total ?? 0;
 
   return (
     <div>
-      <PageHead title="Dispositions" subtitle="Outcome breakdown across outbound calls"
-        right={<div className="flex items-center gap-3">
-          <select className="input w-auto" value={ws} onChange={(e) => setWs(e.target.value)}>
-            <option value="">All workspaces</option>
-            {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
-          </select>
-          <RangePicker value={range} onChange={setRange} />
-        </div>} />
-      {loading || !d ? <Spinner /> : (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
-              <tr><th className="px-5 py-2.5 font-semibold">Disposition</th><th className="px-3 py-2.5 font-semibold">Count</th><th className="px-3 py-2.5 font-semibold">Share</th><th className="px-3 py-2.5 font-semibold">Spend</th><th className="px-3 py-2.5 font-semibold">Avg / call</th></tr>
-            </thead>
-            <tbody>
-              {d.dispositions.map((r: any) => (
-                <tr key={r.disposition} className="border-t border-line hover:bg-surface">
-                  <td className="px-5 py-2.5 font-semibold text-ink">{fmt.title(r.disposition)}</td>
-                  <td className="px-3 py-2.5 tabular-nums">{fmt.int(r.count)}</td>
-                  <td className="px-3 py-2.5 tabular-nums text-slate-500">{r.percentage.toFixed(1)}%</td>
-                  <td className="px-3 py-2.5 tabular-nums">{fmt.money(r.costDollars)}</td>
-                  <td className="px-3 py-2.5 tabular-nums">{fmt.money(r.avgCostPerCallDollars)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <PageHeader title="Dispositions" description="Outcome breakdown across your outbound calls"
+        actions={<WorkspaceSelect workspaces={workspaces} value={ws} onChange={setWs} />} />
+
+      {loading || !d ? <LoadingBlock /> : (
+        <div className="flex flex-col gap-5">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KpiCard label="Total Calls" value={num(total)} icon={PhoneOff} accent="blue" />
+            <KpiCard label="Disposition Types" value={num(rows.length)} icon={ListChecks} />
+            <KpiCard label="Positive Outcomes" value={num(positive)} sub={total > 0 ? pct((positive / total) * 100) : undefined} icon={CheckCircle2} accent="green" />
+            <KpiCard label="No Contact" value={num(noContact)} sub={total > 0 ? pct((noContact / total) * 100) : undefined} icon={PieChart} accent="amber" />
+          </div>
+
+          <SectionCard title="Disposition Distribution" description="Call count by outcome (top 12)">
+            {chartData.length === 0 ? <EmptyState text="No dispositions in this range." /> : (
+              <ResponsiveContainer width="100%" height={Math.max(220, chartData.length * 34)}>
+                <BarChart data={chartData} layout="vertical" margin={{ left: 20, right: 24 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#475569' }} width={150} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number, _n, p: any) => [`${num(v)} calls · ${usd(p.payload.costDollars)}`, 'Calls']} />
+                  <Bar dataKey="count" radius={[0, 6, 6, 0]}>
+                    {chartData.map((r) => <Cell key={r.disposition} fill={dispositionColor(r.disposition)} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </SectionCard>
+
+          <SectionCard title="All Dispositions" description="Search, sort any column, toggle fields">
+            {rows.length === 0 ? <EmptyState text="No dispositions in this range." /> : <DispTable rows={rows} />}
+          </SectionCard>
         </div>
       )}
     </div>
