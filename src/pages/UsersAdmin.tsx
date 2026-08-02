@@ -25,7 +25,7 @@ export default function UsersAdmin() {
   const [creating, setCreating] = useState(false);
   const [editUser, setEditUser] = useState<any>(null);
   const [accessUser, setAccessUser] = useState<any>(null);
-  const [reveal, setReveal] = useState<{ title: string; username?: string; password: string; loginUrl?: string } | null>(null);
+  const [reveal, setReveal] = useState<{ title: string; name?: string; username?: string; password: string; loginUrl?: string } | null>(null);
 
   const refresh = () => Promise.all([api.admin.users(), api.admin.userEvents()]).then(([u, e]) => { setUsers(u.users); setEvents(e.events); });
   useEffect(() => {
@@ -39,12 +39,12 @@ export default function UsersAdmin() {
   const resetPw = async (u: any) => {
     if (!confirm(`Reset password for ${u.name}? A new temporary password will be generated.`)) return;
     const r = await api.admin.resetPassword({ id: u.id });
-    setReveal({ title: `New password for ${u.name}`, username: u.username, password: r.password });
+    setReveal({ title: `New password for ${u.name}`, name: u.name, username: u.username, password: r.password, loginUrl: 'https://outbound.1propertymarket.com/login' });
     refresh();
   };
   const resend = async (u: any) => {
     const r = await api.admin.resendInvite({ id: u.id });
-    setReveal({ title: `Invite for ${u.name}`, username: r.username, password: r.password, loginUrl: r.loginUrl });
+    setReveal({ title: `Invite for ${u.name}`, name: u.name, username: r.username, password: r.password, loginUrl: r.loginUrl });
     refresh();
   };
 
@@ -125,7 +125,7 @@ function UserForm({ mode, isSuper, user, onClose, onDone, onReveal }: any) {
     try {
       if (mode === 'create') {
         const r = await api.admin.createUser({ name: form.name, email: form.email, password: form.password || undefined, role: form.role });
-        if (r.tempPassword) onReveal({ title: `Invite for ${r.user.name}`, username: r.user.username, password: r.tempPassword, loginUrl: 'https://outbound.1propertymarket.com/login' });
+        onReveal({ title: `Invite for ${r.user.name}`, name: r.user.name, username: r.user.username, password: r.tempPassword || form.password, loginUrl: 'https://outbound.1propertymarket.com/login' });
       } else {
         await api.admin.updateUser({ id: user.id, name: form.name, email: form.email, role: isSuper ? form.role : undefined, disabled: form.disabled, password: form.password || undefined });
       }
@@ -162,17 +162,39 @@ function UserForm({ mode, isSuper, user, onClose, onDone, onReveal }: any) {
 
 function RevealModal({ data, onClose }: { data: any; onClose: () => void }) {
   const [copied, setCopied] = useState('');
-  const copy = (k: string, v: string) => { navigator.clipboard.writeText(v); setCopied(k); setTimeout(() => setCopied(''), 1200); };
-  const all = [data.username && `Login: ${data.username}`, `Password: ${data.password}`, data.loginUrl && `URL: ${data.loginUrl}`].filter(Boolean).join('\n');
+  const copy = (k: string, v: string) => { navigator.clipboard.writeText(v); setCopied(k); setTimeout(() => setCopied(''), 1400); };
+  const loginUrl = data.loginUrl || 'https://outbound.1propertymarket.com/login';
+  const onboardMsg =
+`Hi ${data.name || 'there'},
+
+You've been given access to the One Property Market — Outbound dashboard.
+
+Sign in here: ${loginUrl}
+Username (your email): ${data.username || ''}
+Temporary password: ${data.password}
+
+After you sign in, you can change your password anytime under "My account" in the sidebar. Please keep these details private.
+
+Thanks,
+One Property Market`;
   return (
-    <Modal title={data.title} onClose={onClose}>
+    <Modal title={data.title} onClose={onClose} wide>
       <p className="mb-3 text-xs text-slate-500">No email is connected yet, so share these credentials directly. The user becomes “Active” once they sign in.</p>
       <div className="space-y-2">
         {data.username && <CopyRow label="Login" value={data.username} copied={copied === 'u'} onCopy={() => copy('u', data.username)} />}
         <CopyRow label="Password" value={data.password} copied={copied === 'p'} onCopy={() => copy('p', data.password)} mono />
-        {data.loginUrl && <CopyRow label="Login URL" value={data.loginUrl} copied={copied === 'l'} onCopy={() => copy('l', data.loginUrl)} />}
+        <CopyRow label="Login URL" value={loginUrl} copied={copied === 'l'} onCopy={() => copy('l', loginUrl)} />
       </div>
-      <button className="btn-primary mt-4 w-full" onClick={() => copy('all', all)}>{copied === 'all' ? <><Check className="h-4 w-4" /> Copied all</> : <><Copy className="h-4 w-4" /> Copy all</>}</button>
+
+      <div className="mt-4">
+        <div className="mb-1 flex items-center justify-between">
+          <label className="label">Ready-to-send onboarding message</label>
+          <button className="btn-ghost !py-1 text-xs" onClick={() => copy('msg', onboardMsg)}>{copied === 'msg' ? <><Check className="h-3.5 w-3.5" /> Copied</> : <><Copy className="h-3.5 w-3.5" /> Copy message</>}</button>
+        </div>
+        <textarea readOnly value={onboardMsg} rows={11} className="input text-xs" />
+      </div>
+
+      <button className="btn-primary mt-4 w-full" onClick={() => copy('msg', onboardMsg)}>{copied === 'msg' ? <><Check className="h-4 w-4" /> Copied onboarding message</> : <><Copy className="h-4 w-4" /> Copy onboarding message</>}</button>
     </Modal>
   );
 }
