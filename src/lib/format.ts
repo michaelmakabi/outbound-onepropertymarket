@@ -58,8 +58,10 @@ export function humanizeDisposition(d: string | null): string {
 /** Stable color for a disposition by semantic meaning (hex, light theme). */
 export function dispositionColor(d: string): string {
   const k = (d || '').toLowerCase();
-  if (k.includes('appointment') || k.includes('booked') || k.includes('transfer') || (k.includes('interested') && !k.includes('not_interested')))
+  if (k.includes('spam')) return '#b91c1c'; // dark red
+  if (k.includes('appointment') || k.includes('booked') || k.includes('job_captured') || k.includes('captured') || k.includes('transfer') || k.includes('interested') && !k.includes('not_interested'))
     return '#16a34a'; // green
+  if (k.includes('scheduled')) return '#0d9488'; // teal
   if (k.includes('follow') || k.includes('call_back') || k.includes('callback') || k.includes('send_more'))
     return '#d97706'; // amber
   if (k.includes('voicemail')) return '#2563eb'; // blue
@@ -68,6 +70,29 @@ export function dispositionColor(d: string): string {
   if (k.includes('not_interested') || k.includes('do_not_call') || k.includes('declined') || k.includes('wrong') || k.includes('failed') || k.includes('hangup'))
     return '#dc2626'; // red
   return '#6366f1'; // indigo fallback
+}
+
+// ---- Business outcome taxonomy (must mirror the API's OUTCOME_ORDER) ----
+export type Outcome = 'booked' | 'scheduled' | 'interested' | 'callback' | 'not_interested' | 'no_contact' | 'wrong_spam' | 'talked';
+
+export const OUTCOME_ORDER: Outcome[] = ['booked', 'scheduled', 'interested', 'callback', 'not_interested', 'no_contact', 'wrong_spam', 'talked'];
+
+export const OUTCOME_META: Record<Outcome, { label: string; color: string }> = {
+  booked: { label: 'Booked', color: '#16a34a' },
+  scheduled: { label: 'Scheduled', color: '#0d9488' },
+  interested: { label: 'Interested', color: '#2563eb' },
+  callback: { label: 'Callback', color: '#d97706' },
+  not_interested: { label: 'Not Interested', color: '#dc2626' },
+  no_contact: { label: 'No Contact', color: '#94a3b8' },
+  wrong_spam: { label: 'Wrong / Spam', color: '#b91c1c' },
+  talked: { label: 'Talked', color: '#6366f1' },
+};
+
+export function outcomeLabel(o: string): string {
+  return OUTCOME_META[o as Outcome]?.label ?? humanizeDisposition(o);
+}
+export function outcomeColor(o: string): string {
+  return OUTCOME_META[o as Outcome]?.color ?? '#6366f1';
 }
 
 /** Category colors for product cost charts. */
