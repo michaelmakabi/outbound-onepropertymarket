@@ -15,7 +15,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'disposition', label: 'Disposition', required: true, sortKey: 'disposition' },
   { key: 'count', label: 'Count', sortKey: 'count', align: 'right' },
   { key: 'percentage', label: 'Share', sortKey: 'percentage', align: 'right' },
-  { key: 'costDollars', label: 'Spend', sortKey: 'costDollars', align: 'right' },
+  { key: 'costDollars', label: 'Total Cost', sortKey: 'costDollars', align: 'right' },
   { key: 'avgCostPerCallDollars', label: 'Avg / call', sortKey: 'avgCostPerCallDollars', align: 'right' },
 ];
 
@@ -46,9 +46,12 @@ function DispTable({ rows }: { rows: Row[] }) {
               <tr key={r.disposition} className="border-t border-line hover:bg-surface">
                 {t.isVisible('disposition') && (
                   <td className="px-3 py-2.5">
-                    <span className="inline-flex items-center gap-2 font-semibold text-ink">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: dispositionColor(r.disposition) }} />
-                      {humanizeDisposition(r.disposition)}
+                    <span className="inline-flex items-center gap-2">
+                      <span className="mt-0.5 h-2.5 w-2.5 rounded-full" style={{ background: dispositionColor(r.disposition) }} />
+                      <span className="flex flex-col leading-tight">
+                        <span className="font-semibold text-ink">{humanizeDisposition(r.disposition)}</span>
+                        <span className="font-mono text-[10px] text-slate-400">{r.disposition}</span>
+                      </span>
                     </span>
                   </td>
                 )}
@@ -86,7 +89,7 @@ export default function Dispositions() {
 
   return (
     <div>
-      <PageHeader title="Dispositions" description="Outcome breakdown across your outbound calls"
+      <PageHeader title="Disposition Analytics" description="Outcome distribution with cost attribution"
         actions={<WorkspaceSelect workspaces={workspaces} value={ws} onChange={setWs} />} />
 
       {loading || !d ? <LoadingBlock /> : (
@@ -94,11 +97,11 @@ export default function Dispositions() {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <KpiCard label="Total Calls" value={num(total)} icon={PhoneOff} accent="blue" />
             <KpiCard label="Disposition Types" value={num(rows.length)} icon={ListChecks} />
-            <KpiCard label="Positive Outcomes" value={num(positive)} sub={total > 0 ? pct((positive / total) * 100) : undefined} icon={CheckCircle2} accent="green" />
-            <KpiCard label="No Contact" value={num(noContact)} sub={total > 0 ? pct((noContact / total) * 100) : undefined} icon={PieChart} accent="amber" />
+            <KpiCard label="Positive Outcomes" value={num(positive)} sub="booked / transfer / interested" icon={CheckCircle2} accent="green" />
+            <KpiCard label="No Contact" value={num(noContact)} sub="no answer / voicemail / busy" icon={PieChart} accent="amber" />
           </div>
 
-          <SectionCard title="Disposition Distribution" description="Call count by outcome (top 12)">
+          <SectionCard title="Disposition Volume" description="Top outcomes by call count">
             {chartData.length === 0 ? <EmptyState text="No dispositions in this range." /> : (
               <ResponsiveContainer width="100%" height={Math.max(220, chartData.length * 34)}>
                 <BarChart data={chartData} layout="vertical" margin={{ left: 20, right: 24 }}>
@@ -113,7 +116,7 @@ export default function Dispositions() {
             )}
           </SectionCard>
 
-          <SectionCard title="All Dispositions" description="Search, sort any column, toggle fields">
+          <SectionCard title="Full Disposition Table" description="Search, sort any column, toggle fields">
             {rows.length === 0 ? <EmptyState text="No dispositions in this range." /> : <DispTable rows={rows} />}
           </SectionCard>
         </div>
