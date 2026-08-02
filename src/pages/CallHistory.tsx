@@ -3,22 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useFilters } from '../lib/filters';
 import {
-  PageHeader, SectionCard, LoadingBlock, EmptyState, WorkspaceSelect, MultiSelect, SavedViews,
+  PageHeader, SectionCard, LoadingBlock, EmptyState, WorkspaceSelect, MultiSelect, SavedViews, AudioPlayer,
   ColumnDef, ColumnToggleMenu, SortableHead, useColumnVisibility, SortState,
 } from '../components/dash';
 import { usd, secs, dateTime, humanizeDisposition, dispositionColor } from '../lib/format';
-import { Search, X, ChevronLeft, ChevronRight, Mic, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { Search, X, ChevronLeft, ChevronRight, PhoneIncoming, PhoneOutgoing, Download, Clock, FileText } from 'lucide-react';
 
 const PAGE_SIZE = 50;
 const PAGE_KEY = 'calls';
+const DURATIONS = [0, 30, 60, 120, 300];
 
 const COLUMNS: ColumnDef[] = [
-  { key: 'rec', label: 'Rec', required: true },
+  { key: 'rec', label: 'Recording', required: true },
   { key: 'when', label: 'When', sortKey: 'when' },
   { key: 'direction', label: 'Direction', sortKey: 'direction' },
   { key: 'contact', label: 'Contact', required: true },
   { key: 'agent', label: 'Agent', sortKey: 'agent' },
   { key: 'disposition', label: 'Disposition', sortKey: 'disposition' },
+  { key: 'summary', label: 'Summary / Transcript' },
   { key: 'duration', label: 'Duration', sortKey: 'duration', align: 'right' },
   { key: 'cost', label: 'Cost', sortKey: 'cost', align: 'right' },
   { key: 'sentiment', label: 'Sentiment' },
@@ -33,7 +35,7 @@ function sentimentBadge(s: string | null) {
   return <span className={`pill ${cls}`}>{s}</span>;
 }
 
-type ViewCfg = { ws: string; dispositions: string[]; directions: string[]; search: string; sort: SortState | null; hidden: string[] };
+type ViewCfg = { ws: string; dispositions: string[]; directions: string[]; minDuration: number; search: string; sort: SortState | null; hidden: string[] };
 
 export default function CallHistory() {
   const { startMs, endMs } = useFilters();
@@ -42,47 +44,96 @@ export default function CallHistory() {
   const [ws, setWs] = useState('');
   const [dispositions, setDispositions] = useState<string[]>([]);
   const [directions, setDirections] = useState<string[]>([]);
+  const [minDuration, setMinDuration] = useState(0);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortState | null>({ by: 'when', dir: 'desc' });
   const [page, setPage] = useState(1);
   const [data, setData] = useState<any>(null);
   const [dispOptions, setDispOptions] = useState<{ value: string; label: string; count: number }[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const { hidden, isVisible, toggle, setHidden } = useColumnVisibility(PAGE_KEY, COLUMNS);
 
   useEffect(() => { api.bootstrap().then((b) => setWorkspaces(b.workspaces)); }, []);
-
   useEffect(() => {
     api.dispositions({ start: startMs, end: endMs, workspace: ws || undefined })
       .then((d) => setDispOptions((d.dispositions || []).map((x: any) => ({ value: x.disposition, label: humanizeDisposition(x.disposition), count: x.count }))));
   }, [startMs, endMs, ws]);
+  useEffect(() => { setPage(1); }, [ws, dispositions, directions, minDuration, search, sort, startMs, endMs]);
 
-  useEffect(() => { setPage(1); }, [ws, dispositions, directions, search, sort, startMs, endMs]);
+  const query = (over: any = {}) => ({
+    start: startMs, end: endMs, workspace: ws || undefined,
+    dispositions: dispositions.length ? dispositions : undefined,
+    directions: directions.length ? directions : undefined,
+    minDuration: minDuration || undefined,
+    search: search || undefined,
+    sort: sort ? `${sort.by}_${sort.dir}` : undefined,
+    page, pageSize: PAGE_SIZE, ...over,
+  });
 
   useEffect(() => {
     setLoading(true);
-    api.calls({
-      start: startMs, end: endMs, workspace: ws || undefined,
-      dispositions: dispositions.length ? dispositions : undefined,
-      directions: directions.length ? directions : undefined,
-      search: search || undefined,
-      sort: sort ? `${sort.by}_${sort.dir}` : undefined,
-      page, pageSize: PAGE_SIZE,
-    }).then(setData).finally(() => setLoading(false));
-  }, [startMs, endMs, ws, dispositions, directions, search, sort, page]);
+    api.calls(query()).then(setData).finally(() => setLoading(false));
+  }, [startMs, endMs, ws, dispositions, directions, minDuration, search, sort, page]);
 
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const rows = data?.items ?? [];
-  const hasFilters = dispositions.length > 0 || directions.length > 0 || !!search;
+  const rows: any[] = data?.items ?? [];
+  const hasFilters = dispositions.length > 0 || directions.length > 0 || !!search || minDuration > 0;
 
-  const currentCfg: ViewCfg = useMemo(() => ({ ws, dispositions, directions, search, sort, hidden }), [ws, dispositions, directions, search, sort, hidden]);
+  const currentCfg: ViewCfg = useMemo(() => ({ ws, dispositions, directions, minDuration, search, sort, hidden }), [ws, dispositions, directions, minDuration, search, sort, hidden]);
   const applyView = (cfg: ViewCfg) => {
     setWs(cfg.ws ?? ''); setDispositions(cfg.dispositions ?? []); setDirections(cfg.directions ?? []);
-    setSearch(cfg.search ?? ''); setSearchInput(cfg.search ?? ''); setSort(cfg.sort ?? null); setHidden(cfg.hidden ?? []);
+    setMinDuration(cfg.minDuration ?? 0); setSearch(cfg.search ?? ''); setSearchInput(cfg.search ?? '');
+    setSort(cfg.sort ?? null); setHidden(cfg.hidden ?? []);
   };
+
+  const openCall = (id: string) => {
+    const ids = rows.map((r) => r.call_id);
+    nav(`/calls/${id}`, { state: { ids, total, offset: (page - 1) * PAGE_SIZE } });
+  };
+
+  const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.call_id));
+  const toggleAll = () => setSelected((s) => {
+    const n = new Set(s);
+    if (allOnPage) rows.forEach((r) => n.delete(r.call_id)); else rows.forEach((r) => n.add(r.call_id));
+    return n;
+  });
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const all = await api.calls(query({ page: 1, pageSize: 5000 }));
+      let items: any[] = all.items || [];
+      if (selected.size) items = items.filter((c) => selected.has(c.call_id));
+      const cols = ['When', 'Direction', 'Contact', 'Agent', 'Disposition', 'Duration(s)', 'Cost($)', 'Sentiment', 'Summary', 'CallID'];
+      const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const lines = [cols.join(',')];
+      for (const c of items) {
+        const contact = c.direction === 'inbound' ? c.from_number : c.to_number;
+        lines.push([
+          c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '',
+          c.agent_name || '', c.disposition || '', c.duration_seconds || 0,
+          (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id,
+        ].map(esc).join(','));
+      }
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `call-history-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+      URL.revokeObjectURL(url);
+    } finally { setExporting(false); }
+  };
+
+  const Chip = ({ label, onClear }: { label: string; onClear: () => void }) => (
+    <button onClick={onClear} className="inline-flex items-center gap-1 rounded-lg border border-brand/30 bg-brand-light px-2.5 py-1.5 text-xs font-semibold text-brand">
+      {label} <X className="h-3 w-3" />
+    </button>
+  );
 
   return (
     <div>
@@ -99,27 +150,45 @@ export default function CallHistory() {
         </div>}
       >
         <div className="flex flex-wrap items-center gap-3">
-          <MultiSelect options={DIRECTION_OPTIONS} value={directions} onChange={setDirections} placeholder="All call types" width={170} />
-          <MultiSelect options={dispOptions} value={dispositions} onChange={setDispositions} placeholder="All dispositions" width={210} />
+          <MultiSelect options={DIRECTION_OPTIONS} value={directions} onChange={setDirections} placeholder="All call types" width={160} />
+          <MultiSelect options={dispOptions} value={dispositions} onChange={setDispositions} placeholder="All dispositions" width={200} />
+          <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-2 py-1.5 text-sm">
+            <Clock className="h-3.5 w-3.5 text-slate-400" />
+            <select className="bg-transparent text-sm outline-none" value={minDuration} onChange={(e) => setMinDuration(Number(e.target.value))}>
+              {DURATIONS.map((d) => <option key={d} value={d}>{d === 0 ? 'Any duration' : `> ${d < 60 ? `${d}s` : `${d / 60}m`}`}</option>)}
+            </select>
+          </div>
           <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); setSearch(searchInput.trim()); }}>
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search phone or agent…" className="input w-[240px] pl-8" />
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search phone, agent, summary…" className="input w-[240px] pl-8" />
             </div>
             <button type="submit" className="btn-ghost !py-1.5">Search</button>
           </form>
           {hasFilters && (
-            <button type="button" className="btn-ghost !py-1.5" onClick={() => { setDispositions([]); setDirections([]); setSearch(''); setSearchInput(''); }}>
+            <button type="button" className="btn-ghost !py-1.5" onClick={() => { setDispositions([]); setDirections([]); setMinDuration(0); setSearch(''); setSearchInput(''); }}>
               <X className="h-3.5 w-3.5" /> Clear filters
             </button>
           )}
         </div>
+
+        {hasFilters && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {directions.map((d) => <Chip key={d} label={d === 'inbound' ? 'Inbound' : 'Outbound'} onClear={() => setDirections(directions.filter((x) => x !== d))} />)}
+            {dispositions.map((d) => <Chip key={d} label={humanizeDisposition(d)} onClear={() => setDispositions(dispositions.filter((x) => x !== d))} />)}
+            {minDuration > 0 && <Chip label={`Duration > ${minDuration < 60 ? `${minDuration}s` : `${minDuration / 60}m`}`} onClear={() => setMinDuration(0)} />}
+            {search && <Chip label={`“${search}”`} onClear={() => { setSearch(''); setSearchInput(''); }} />}
+          </div>
+        )}
       </SectionCard>
 
       <SectionCard
         title="Calls"
-        description={sort ? `Sorted by ${sort.by} (${sort.dir})` : 'Unsorted'}
+        description={`${sort ? `Sorted by ${sort.by} (${sort.dir})` : 'Unsorted'}${selected.size ? ` · ${selected.size} selected` : ''}`}
         action={<div className="flex items-center gap-2 text-xs text-slate-500">
+          <button className="btn-ghost !py-1.5" disabled={exporting || total === 0} onClick={exportCsv}>
+            <Download className="h-3.5 w-3.5" /> {exporting ? 'Exporting…' : selected.size ? `Export ${selected.size}` : 'Export'}
+          </button>
           <button className="btn-ghost !p-1.5" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}><ChevronLeft className="h-4 w-4" /></button>
           <span className="tabular-nums">Page {page} / {pageCount}</span>
           <button className="btn-ghost !p-1.5" disabled={page >= pageCount || loading} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-4 w-4" /></button>
@@ -129,17 +198,23 @@ export default function CallHistory() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
-                <tr>{COLUMNS.filter((c) => isVisible(c.key)).map((c) => (
-                  <SortableHead key={c.key} col={c} sort={sort} onSort={setSort}>{c.key === 'rec' ? '' : c.label}</SortableHead>
-                ))}</tr>
+                <tr>
+                  <th className="px-3 py-2.5"><input type="checkbox" checked={allOnPage} onChange={toggleAll} className="h-3.5 w-3.5 accent-[#1f6feb]" /></th>
+                  {COLUMNS.filter((c) => isVisible(c.key)).map((c) => (
+                    <SortableHead key={c.key} col={c} sort={sort} onSort={setSort}>{c.label}</SortableHead>
+                  ))}
+                </tr>
               </thead>
               <tbody>
                 {rows.map((c: any) => {
                   const inbound = c.direction === 'inbound';
                   const contact = inbound ? c.from_number : c.to_number;
                   return (
-                    <tr key={c.call_id} className="cursor-pointer border-t border-line hover:bg-surface" onClick={() => nav(`/calls/${c.call_id}`)}>
-                      {isVisible('rec') && <td className="px-3 py-2.5"><Mic className={`h-3.5 w-3.5 ${c.recording_url ? 'text-brand' : 'text-slate-300'}`} /></td>}
+                    <tr key={c.call_id} className="cursor-pointer border-t border-line hover:bg-surface" onClick={() => openCall(c.call_id)}>
+                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={selected.has(c.call_id)} onChange={() => toggleSel(c.call_id)} className="h-3.5 w-3.5 accent-[#1f6feb]" />
+                      </td>
+                      {isVisible('rec') && <td className="px-3 py-2.5"><AudioPlayer src={c.recording_url} compact /></td>}
                       {isVisible('when') && <td className="whitespace-nowrap px-3 py-2.5 text-xs">{dateTime(c.start_timestamp)}</td>}
                       {isVisible('direction') && (
                         <td className="px-3 py-2.5">
@@ -149,16 +224,26 @@ export default function CallHistory() {
                           </span>
                         </td>
                       )}
-                      {isVisible('contact') && <td className="px-3 py-2.5 font-mono text-xs">{contact || '—'}</td>}
-                      {isVisible('agent') && <td className="px-3 py-2.5 text-xs">{c.agent_name || '—'}</td>}
+                      {isVisible('contact') && <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs">{contact || '—'}</td>}
+                      {isVisible('agent') && <td className="max-w-[220px] truncate px-3 py-2.5 text-xs">{c.agent_name || '—'}</td>}
                       {isVisible('disposition') && (
-                        <td className="px-3 py-2.5">
+                        <td className="whitespace-nowrap px-3 py-2.5">
                           {c.disposition ? (
                             <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(c.disposition) }}>
                               <span className="h-2 w-2 rounded-full" style={{ background: dispositionColor(c.disposition) }} />
                               {humanizeDisposition(c.disposition)}
                             </span>
                           ) : <span className="text-xs text-slate-400">—</span>}
+                        </td>
+                      )}
+                      {isVisible('summary') && (
+                        <td className="max-w-[280px] px-3 py-2.5">
+                          {c.call_summary ? (
+                            <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                              <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                              <span className="truncate">{c.call_summary}</span>
+                            </span>
+                          ) : <span className="text-xs text-slate-300">—</span>}
                         </td>
                       )}
                       {isVisible('duration') && <td className="px-3 py-2.5 text-right font-mono text-xs">{secs(Number(c.duration_seconds || 0))}</td>}
