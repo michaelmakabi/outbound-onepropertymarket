@@ -4,14 +4,16 @@ import { useAuth } from '../lib/auth';
 import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
-  Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Radio, Menu, X, PanelLeftClose, PanelLeft, UserCog,
+  Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
 } from 'lucide-react';
+import { LOGO_MARK } from '../lib/logo';
 
 const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/workspaces', label: 'Workspaces', icon: Building2 },
   { to: '/dispositions', label: 'Dispositions', icon: PieChart },
   { to: '/calls', label: 'Call History', icon: PhoneCall },
+  { to: '/contacts', label: 'Contacts', icon: Contact },
   { to: '/compare', label: 'Compare', icon: GitCompare },
   { to: '/agents', label: 'Agents & Models', icon: Bot },
   { to: '/suggestions', label: 'AI Suggestions', icon: Sparkles },
@@ -58,10 +60,10 @@ export default function Layout({ children }: { children: ReactNode }) {
   const sidebarInner = (
     <>
       <div className={`mb-6 flex items-center gap-2.5 px-2 ${collapsed ? 'justify-center' : ''}`}>
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand"><Radio className="h-5 w-5 text-white" /></div>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1"><img src={LOGO_MARK} alt="1PropertyMarket" className="h-full w-full object-contain" /></div>
         {!collapsed && (
           <div className="min-w-0">
-            <div className="truncate text-sm font-extrabold leading-tight text-white">One Property Market</div>
+            <div className="truncate text-sm font-extrabold leading-tight text-white">1PropertyMarket</div>
             <div className="text-[11px] font-medium text-slate-400">Outbound</div>
           </div>
         )}
