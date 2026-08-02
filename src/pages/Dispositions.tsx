@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 import { useFilters } from '../lib/filters';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, WorkspaceSelect,
-  ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
+  ColumnDef, ColumnToggleMenu, SortableHead, useClientTable, OutcomeTiles,
 } from '../components/dash';
 import { usd, num, pct, humanizeDisposition, dispositionColor, TOOLTIP_STYLE } from '../lib/format';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -101,6 +101,16 @@ export default function Dispositions() {
             <KpiCard label="No Contact" value={num(noContact)} sub="no answer / voicemail / busy" icon={PieChart} accent="amber" />
           </div>
 
+          {d.outcomes && d.outcomes.length > 0 && (
+            <div>
+              <div className="mb-2 flex items-baseline justify-between">
+                <h3 className="text-sm font-bold text-ink">Business Outcomes</h3>
+                <span className="text-xs text-slate-500">Bookings · scheduled · interested · not interested · …</span>
+              </div>
+              <OutcomeTiles outcomes={d.outcomes} total={total} />
+            </div>
+          )}
+
           <SectionCard title="Disposition Volume" description="Top outcomes by call count">
             {chartData.length === 0 ? <EmptyState text="No dispositions in this range." /> : (
               <ResponsiveContainer width="100%" height={Math.max(220, chartData.length * 34)}>
@@ -116,7 +126,7 @@ export default function Dispositions() {
             )}
           </SectionCard>
 
-          <SectionCard title="Full Disposition Table" description="Search, sort any column, toggle fields">
+          <SectionCard title="All Dispositions" description="Search, sort any column, toggle fields">
             {rows.length === 0 ? <EmptyState text="No dispositions in this range." /> : <DispTable rows={rows} />}
           </SectionCard>
         </div>
