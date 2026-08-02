@@ -109,7 +109,7 @@ export default function CallDetail() {
                 {products.map((p: any, i: number) => (
                   <div key={i} className="flex items-center justify-between text-sm">
                     <span className="flex items-center gap-1.5 text-slate-700"><Zap className="h-3.5 w-3.5 text-slate-400" /> {humanizeProduct(p.product)}</span>
-                    <span className="font-mono text-slate-600">{usd(Number(p.cost || 0), { precise: true })}</span>
+                    <span className="font-mono text-slate-600">{usd(Number(p.cost || 0) / 100, { precise: true })}</span>
                   </div>
                 ))}
               </div>
