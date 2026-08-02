@@ -1,4 +1,4 @@
-// API client for the One Property Market — Outbound data function (Supabase edge function).
+// API client for the 1PropertyMarket — Outbound data function (Supabase edge function).
 // Override at build time with VITE_API_BASE if you ever move the backend.
 const API_BASE =
   (import.meta as any).env?.VITE_API_BASE ||
@@ -44,9 +44,13 @@ export const api = {
   agents: (p: any) => call('agents', { params: p }),
   calls: (p: any) => call('calls', { params: p }),
   call: (id: string) => call('call', { params: { id } }),
+  contacts: (p: any) => call('contacts', { params: p }),
+  contact: (number: string) => call('contact', { params: { number } }),
   usage: () => call('usage'),
   updateProfile: (b: any) => call('profile.update', { method: 'PATCH', body: b }),
   buildPrompt: (b: any) => call('ai.buildPrompt', { method: 'POST', body: b }),
+  aiSuggestions: (b: any) => call('ai.suggestions', { method: 'POST', body: b }),
+  aiReport: (b: any) => call('ai.report', { method: 'POST', body: b }),
   admin: {
     users: () => call('admin.users'),
     userEvents: () => call('admin.userEvents'),
