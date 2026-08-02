@@ -45,16 +45,35 @@ export const api = {
   calls: (p: any) => call('calls', { params: p }),
   call: (id: string) => call('call', { params: { id } }),
   usage: () => call('usage'),
+  updateProfile: (b: any) => call('profile.update', { method: 'PATCH', body: b }),
+  buildPrompt: (b: any) => call('ai.buildPrompt', { method: 'POST', body: b }),
   admin: {
     users: () => call('admin.users'),
+    userEvents: () => call('admin.userEvents'),
     allWorkspaces: () => call('admin.allWorkspaces'),
     workspaceAgents: (workspace: string) => call('admin.workspaceAgents', { params: { workspace } }),
     getAccess: (userId: number) => call('admin.getAccess', { params: { userId } }),
     createUser: (b: any) => call('admin.createUser', { method: 'POST', body: b }),
     updateUser: (b: any) => call('admin.updateUser', { method: 'PATCH', body: b }),
+    resetPassword: (b: any) => call('admin.resetPassword', { method: 'POST', body: b }),
+    resendInvite: (b: any) => call('admin.resendInvite', { method: 'POST', body: b }),
     setAccess: (b: any) => call('admin.setAccess', { method: 'POST', body: b }),
   },
 };
+
+// Fetch a call recording via the backend proxy (bypasses CORS) as a Blob.
+export async function fetchRecordingBlob(callId: string): Promise<Blob> {
+  const base = (import.meta as any).env?.VITE_API_BASE || 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
+  const url = new URL(base);
+  url.searchParams.set('action', 'recording');
+  url.searchParams.set('id', callId);
+  const headers: Record<string, string> = {};
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error(`Recording fetch failed (${res.status})`);
+  return res.blob();
+}
 
 // ---- formatting helpers ----
 export const fmt = {
