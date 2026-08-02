@@ -3,14 +3,13 @@ import { useParams, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useFilters } from '../lib/filters';
 import { PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, StatusDot } from '../components/dash';
-import { usd, num, ratePct, secs, humanizeDisposition, humanizeProduct, dispositionColor, CAT_COLORS, TOOLTIP_STYLE } from '../lib/format';
+import { usd, num, ratePct, secs, pct, humanizeDisposition, humanizeProduct, dispositionColor, CAT_COLORS, TOOLTIP_STYLE } from '../lib/format';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
-} from 'recharts';
-import { ArrowLeft, PhoneCall, DollarSign, CalendarCheck, TrendingUp, Coins, Timer, Clock, Gauge } from 'lucide-react';
+  ArrowLeft, PhoneCall, DollarSign, CalendarCheck, TrendingUp, Coins, Timer, Clock, Gauge, Bot, Hash, Activity,
+} from 'lucide-react';
 
-function Bars({ rows, labelKey, valueKey, fmtVal, color }: any) {
+function Bars({ rows, labelKey, valueKey, fmtVal }: any) {
   const max = Math.max(1, ...rows.map((r: any) => r[valueKey]));
   if (!rows.length) return <EmptyState text="No data." />;
   return (
@@ -19,11 +18,57 @@ function Bars({ rows, labelKey, valueKey, fmtVal, color }: any) {
         <div key={i} className="flex items-center gap-3">
           <div className="w-44 truncate text-sm text-ink">{humanizeDisposition(String(r[labelKey]))}</div>
           <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface">
-            <div className="h-full rounded-full" style={{ width: `${(r[valueKey] / max) * 100}%`, background: color ? color(r[labelKey]) : '#1f6feb' }} />
+            <div className="h-full rounded-full bg-brand" style={{ width: `${(r[valueKey] / max) * 100}%` }} />
           </div>
           <div className="w-20 text-right font-mono text-sm text-slate-500">{fmtVal(r[valueKey])}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function DispoCostList({ rows }: { rows: any[] }) {
+  if (!rows.length) return <EmptyState text="No dispositions." />;
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  return (
+    <div className="max-h-[320px] space-y-2.5 overflow-y-auto pr-1">
+      {rows.map((r) => (
+        <div key={r.disposition}>
+          <div className="mb-1 flex items-center justify-between text-sm">
+            <span className="inline-flex items-center gap-2 font-medium text-ink">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: dispositionColor(r.disposition) }} />
+              {humanizeDisposition(r.disposition)}
+            </span>
+            <span className="font-mono text-xs text-slate-500">{num(r.count)} · {pct(r.percentage)} · {usd(r.costDollars)}</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface">
+            <div className="h-full rounded-full" style={{ width: `${(r.count / max) * 100}%`, background: dispositionColor(r.disposition) }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProductTable({ rows }: { rows: any[] }) {
+  if (!rows.length) return <EmptyState text="No cost data." />;
+  return (
+    <div className="max-h-[320px] overflow-y-auto">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr><th className="px-3 py-2 font-semibold">Product</th><th className="px-3 py-2 font-semibold">Category</th><th className="px-3 py-2 text-right font-semibold">Cost</th><th className="px-3 py-2 text-right font-semibold">%</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <tr key={p.product} className="border-t border-line">
+              <td className="max-w-[220px] truncate px-3 py-2 font-mono text-xs">{humanizeProduct(p.product)}</td>
+              <td className="px-3 py-2"><span className="pill" style={{ background: `${CAT_COLORS[p.category] || '#94a3b8'}22`, color: CAT_COLORS[p.category] || '#64748b' }}>{p.category}</span></td>
+              <td className="px-3 py-2 text-right font-mono">{usd(p.costDollars)}</td>
+              <td className="px-3 py-2 text-right font-mono text-slate-500">{pct(p.percentage)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -70,21 +115,25 @@ export default function WorkspaceDetail() {
       <Link to="/workspaces" className="mb-3 inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-brand"><ArrowLeft className="h-4 w-4" /> Workspaces</Link>
       <PageHeader
         title={d?.workspace?.display_name || slug || ''}
-        description={d ? `${d.agentCount} agents · outbound analytics` : 'Loading…'}
+        description={d ? 'Workspace deep dive' : 'Loading…'}
         actions={d?.workspace && <StatusDot status={d.workspace.status} />}
       />
 
       {loading || !k ? <LoadingBlock /> : (
         <div className="flex flex-col gap-5">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KpiCard label="Spend" value={usd(k.totalCostDollars)} icon={DollarSign} accent="green" />
             <KpiCard label="Calls" value={num(k.totalCalls)} sub={`${num(k.connectedCalls)} connected`} icon={PhoneCall} accent="blue" />
-            <KpiCard label="Spend" value={usd(k.totalCostDollars)} sub={`${usd(k.costPerCallDollars, { precise: true })}/call`} icon={DollarSign} accent="green" />
             <KpiCard label="Bookings" value={num(k.totalBookings)} sub={`${ratePct(k.bookingRate)} rate`} icon={CalendarCheck} accent="amber" />
             <KpiCard label="Success Rate" value={ratePct(k.successRate)} icon={TrendingUp} />
-            <KpiCard label="Cost / Min" value={usd(k.costPerMinuteDollars, { precise: true })} icon={Timer} />
-            <KpiCard label="Cost / Booking" value={k.totalBookings > 0 ? usd(k.costPerBookingDollars) : '—'} icon={Coins} accent="green" />
+            <KpiCard label="Cost / Call" value={usd(k.costPerCallDollars, { precise: true })} icon={Coins} />
+            <KpiCard label="Cost / Minute" value={usd(k.costPerMinuteDollars, { precise: true })} icon={Timer} />
+            <KpiCard label="Cost / Booking" value={k.totalBookings > 0 ? usd(k.costPerBookingDollars) : '—'} icon={CalendarCheck} accent="green" />
             <KpiCard label="Avg Duration" value={secs(k.avgCallDurationSeconds)} icon={Gauge} />
+            <KpiCard label="Live Agents" value={num(d.liveAgents ?? d.agentCount ?? 0)} icon={Bot} accent="blue" />
+            <KpiCard label="Phone Numbers" value={num(d.phoneNumbers ?? 0)} icon={Hash} />
             <KpiCard label="Talk Time" value={`${num(k.totalDurationMinutes)}m`} icon={Clock} />
+            <KpiCard label="Active Agents (in range)" value={num(d.activeAgents ?? (d.agents || []).length)} icon={Activity} accent="amber" />
           </div>
 
           <SectionCard title="Spend & Volume Trend" description="Daily cost across this workspace">
@@ -103,27 +152,13 @@ export default function WorkspaceDetail() {
           </SectionCard>
 
           <div className="grid gap-5 lg:grid-cols-2">
-            <SectionCard title="Disposition Mix" description="Outcome distribution">
-              {d.dispositions.length === 0 ? <EmptyState text="No dispositions." /> : (
-                <ResponsiveContainer width="100%" height={260}>
-                  <PieChart>
-                    <Pie data={d.dispositions.slice(0, 8)} dataKey="count" nameKey="disposition" cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={2}>
-                      {d.dispositions.slice(0, 8).map((x: any) => <Cell key={x.disposition} fill={dispositionColor(x.disposition)} />)}
-                    </Pie>
-                    <Legend formatter={(v) => <span style={{ fontSize: 11, color: '#64748b' }}>{humanizeDisposition(String(v))}</span>} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number, _n, p: any) => [`${num(v)} calls`, humanizeDisposition(p.payload.disposition)]} />
-                  </PieChart>
-                </ResponsiveContainer>
-              )}
-            </SectionCard>
-            <SectionCard title="Sentiment" description="Caller sentiment breakdown"><Bars rows={d.sentiment} labelKey="sentiment" valueKey="count" fmtVal={num} /></SectionCard>
+            <SectionCard title="Dispositions" description="Outcome breakdown with cost attribution"><DispoCostList rows={d.dispositions} /></SectionCard>
+            <SectionCard title="Cost by Product" description="Itemized spend (LLM / TTS / Telephony / etc.)"><ProductTable rows={d.costByProduct} /></SectionCard>
           </div>
 
           <div className="grid gap-5 lg:grid-cols-2">
+            <SectionCard title="Sentiment" description="Caller sentiment breakdown"><Bars rows={d.sentiment} labelKey="sentiment" valueKey="count" fmtVal={num} /></SectionCard>
             <SectionCard title="Agents by Volume" description="Top agents in this workspace"><Bars rows={d.agents} labelKey="agentName" valueKey="calls" fmtVal={num} /></SectionCard>
-            <SectionCard title="Spend by Product" description="Cost by underlying product">
-              <Bars rows={d.costByProduct} labelKey="product" valueKey="costDollars" fmtVal={usd} color={(name: string) => CAT_COLORS[d.costByProduct.find((p: any) => p.product === name)?.category] || '#1f6feb'} />
-            </SectionCard>
           </div>
 
           <div className="grid gap-5 lg:grid-cols-2">
