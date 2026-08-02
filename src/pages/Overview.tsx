@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { useFilters } from '../lib/filters';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, RefreshButton, StatusDot,
-  ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
+  ColumnDef, ColumnToggleMenu, SortableHead, useClientTable, OutcomeTiles,
 } from '../components/dash';
 import { usd, num, ratePct, secs, humanizeDisposition, dispositionColor, CAT_COLORS, TOOLTIP_STYLE } from '../lib/format';
 import {
@@ -106,6 +106,16 @@ export default function Overview() {
             <KpiCard label="Cost / Booking" value={g.totalBookings > 0 ? usd(g.costPerBookingDollars) : '—'} icon={CalendarCheck} accent="green" />
             <KpiCard label="Talk Time" value={`${num(g.totalDurationMinutes)}m`} sub="across all calls" icon={Clock} />
           </div>
+
+          {data.outcomes && data.outcomes.length > 0 && (
+            <div>
+              <div className="mb-2 flex items-baseline justify-between">
+                <h3 className="text-sm font-bold text-ink">Business Outcomes</h3>
+                <span className="text-xs text-slate-500">GHL disposition taxonomy · {num(g.totalCalls)} calls</span>
+              </div>
+              <OutcomeTiles outcomes={data.outcomes} total={g.totalCalls} />
+            </div>
+          )}
 
           <SectionCard title="Spend & Volume Trend" description="Daily total cost and call volume">
             {data.timeSeries.length === 0 ? <EmptyState text="No time-series data in this range." /> : (
