@@ -6,8 +6,10 @@ import {
   PageHeader, SectionCard, LoadingBlock, EmptyState, WorkspaceSelect, MultiSelect, SavedViews, AudioPlayer,
   ColumnDef, ColumnToggleMenu, SortableHead, useColumnVisibility, SortState,
 } from '../components/dash';
+import AiPromptModal from '../components/AiPromptModal';
+import { bulkDownload, downloadCallMp3 } from '../lib/download';
 import { usd, secs, dateTime, humanizeDisposition, dispositionColor } from '../lib/format';
-import { Search, X, ChevronLeft, ChevronRight, PhoneIncoming, PhoneOutgoing, Download, Clock, FileText } from 'lucide-react';
+import { Search, X, ChevronLeft, ChevronRight, PhoneIncoming, PhoneOutgoing, Download, Clock, FileText, Wand2, Loader2, ArrowDownToLine } from 'lucide-react';
 
 const PAGE_SIZE = 50;
 const PAGE_KEY = 'calls';
@@ -54,6 +56,10 @@ export default function CallHistory() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showAi, setShowAi] = useState(false);
+  const [dlMenu, setDlMenu] = useState(false);
+  const [dl, setDl] = useState<{ busy: boolean; done: number; total: number }>({ busy: false, done: 0, total: 0 });
+  const [rowDl, setRowDl] = useState<string | null>(null);
 
   const { hidden, isVisible, toggle, setHidden } = useColumnVisibility(PAGE_KEY, COLUMNS);
 
@@ -83,6 +89,7 @@ export default function CallHistory() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rows: any[] = data?.items ?? [];
   const hasFilters = dispositions.length > 0 || directions.length > 0 || !!search || minDuration > 0;
+  const selectedCalls = () => Array.from(selected).map((id) => rows.find((r) => r.call_id === id) || { call_id: id });
 
   const currentCfg: ViewCfg = useMemo(() => ({ ws, dispositions, directions, minDuration, search, sort, hidden }), [ws, dispositions, directions, minDuration, search, sort, hidden]);
   const applyView = (cfg: ViewCfg) => {
@@ -91,18 +98,19 @@ export default function CallHistory() {
     setSort(cfg.sort ?? null); setHidden(cfg.hidden ?? []);
   };
 
-  const openCall = (id: string) => {
-    const ids = rows.map((r) => r.call_id);
-    nav(`/calls/${id}`, { state: { ids, total, offset: (page - 1) * PAGE_SIZE } });
-  };
-
+  const openCall = (id: string) => nav(`/calls/${id}`, { state: { ids: rows.map((r) => r.call_id), total, offset: (page - 1) * PAGE_SIZE } });
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.call_id));
-  const toggleAll = () => setSelected((s) => {
-    const n = new Set(s);
-    if (allOnPage) rows.forEach((r) => n.delete(r.call_id)); else rows.forEach((r) => n.add(r.call_id));
-    return n;
-  });
+  const toggleAll = () => setSelected((s) => { const n = new Set(s); if (allOnPage) rows.forEach((r) => n.delete(r.call_id)); else rows.forEach((r) => n.add(r.call_id)); return n; });
+
+  const runBulk = async (audio: boolean, transcripts: boolean) => {
+    setDlMenu(false);
+    const calls = selectedCalls();
+    setDl({ busy: true, done: 0, total: calls.length });
+    try {
+      await bulkDownload(calls, { audio, transcripts, onProgress: (done, t) => setDl({ busy: true, done, total: t }) });
+    } finally { setDl({ busy: false, done: 0, total: 0 }); }
+  };
 
   const exportCsv = async () => {
     setExporting(true);
@@ -115,24 +123,23 @@ export default function CallHistory() {
       const lines = [cols.join(',')];
       for (const c of items) {
         const contact = c.direction === 'inbound' ? c.from_number : c.to_number;
-        lines.push([
-          c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '',
-          c.agent_name || '', c.disposition || '', c.duration_seconds || 0,
-          (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id,
-        ].map(esc).join(','));
+        lines.push([c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '', c.agent_name || '', c.disposition || '', c.duration_seconds || 0, (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id].map(esc).join(','));
       }
       const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `call-history-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+      const a = document.createElement('a'); a.href = url; a.download = `call-history-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
       URL.revokeObjectURL(url);
     } finally { setExporting(false); }
   };
 
+  const rowDownload = async (c: any, e: any) => {
+    e.stopPropagation();
+    setRowDl(c.call_id);
+    try { await downloadCallMp3(c); } catch (err) { alert('Download failed: ' + String((err as any)?.message || err)); } finally { setRowDl(null); }
+  };
+
   const Chip = ({ label, onClear }: { label: string; onClear: () => void }) => (
-    <button onClick={onClear} className="inline-flex items-center gap-1 rounded-lg border border-brand/30 bg-brand-light px-2.5 py-1.5 text-xs font-semibold text-brand">
-      {label} <X className="h-3 w-3" />
-    </button>
+    <button onClick={onClear} className="inline-flex items-center gap-1 rounded-lg border border-brand/30 bg-brand-light px-2.5 py-1.5 text-xs font-semibold text-brand">{label} <X className="h-3 w-3" /></button>
   );
 
   return (
@@ -140,15 +147,11 @@ export default function CallHistory() {
       <PageHeader title="Call History" description="Every call across your workspaces — click a row for the recording & transcript"
         actions={<WorkspaceSelect workspaces={workspaces} value={ws} onChange={setWs} />} />
 
-      <SectionCard
-        title="Filters"
-        description={`${total.toLocaleString()} call${total === 1 ? '' : 's'} match the current filters`}
-        className="mb-4"
+      <SectionCard title="Filters" description={`${total.toLocaleString()} call${total === 1 ? '' : 's'} match the current filters`} className="mb-4"
         action={<div className="flex items-center gap-2">
           <SavedViews<ViewCfg> pageKey={PAGE_KEY} current={currentCfg} onApply={applyView} />
           <ColumnToggleMenu columns={COLUMNS} isVisible={isVisible} onToggle={toggle} />
-        </div>}
-      >
+        </div>}>
         <div className="flex flex-wrap items-center gap-3">
           <MultiSelect options={DIRECTION_OPTIONS} value={directions} onChange={setDirections} placeholder="All call types" width={160} />
           <MultiSelect options={dispOptions} value={dispositions} onChange={setDispositions} placeholder="All dispositions" width={200} />
@@ -165,13 +168,8 @@ export default function CallHistory() {
             </div>
             <button type="submit" className="btn-ghost !py-1.5">Search</button>
           </form>
-          {hasFilters && (
-            <button type="button" className="btn-ghost !py-1.5" onClick={() => { setDispositions([]); setDirections([]); setMinDuration(0); setSearch(''); setSearchInput(''); }}>
-              <X className="h-3.5 w-3.5" /> Clear filters
-            </button>
-          )}
+          {hasFilters && <button type="button" className="btn-ghost !py-1.5" onClick={() => { setDispositions([]); setDirections([]); setMinDuration(0); setSearch(''); setSearchInput(''); }}><X className="h-3.5 w-3.5" /> Clear filters</button>}
         </div>
-
         {hasFilters && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {directions.map((d) => <Chip key={d} label={d === 'inbound' ? 'Inbound' : 'Outbound'} onClear={() => setDirections(directions.filter((x) => x !== d))} />)}
@@ -182,27 +180,41 @@ export default function CallHistory() {
         )}
       </SectionCard>
 
-      <SectionCard
-        title="Calls"
-        description={`${sort ? `Sorted by ${sort.by} (${sort.dir})` : 'Unsorted'}${selected.size ? ` · ${selected.size} selected` : ''}`}
+      {selected.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-brand/30 bg-brand-light/50 px-4 py-2.5">
+          <span className="text-sm font-semibold text-brand">{selected.size} selected</span>
+          <span className="mx-1 h-4 w-px bg-brand/20" />
+          <button className="btn-primary !py-1.5" onClick={() => setShowAi(true)}><Wand2 className="h-3.5 w-3.5" /> Build AI Prompt</button>
+          <div className="relative">
+            <button className="btn-ghost !py-1.5" disabled={dl.busy} onClick={() => setDlMenu((o) => !o)}>
+              {dl.busy ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> {dl.done}/{dl.total}…</> : <><ArrowDownToLine className="h-3.5 w-3.5" /> Download ▾</>}
+            </button>
+            {dlMenu && !dl.busy && (
+              <div className="absolute z-30 mt-1 w-56 rounded-lg border border-line bg-white p-1 shadow-lg">
+                <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface" onClick={() => runBulk(true, false)}>🎵 Audio only (MP3 zip)</button>
+                <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface" onClick={() => runBulk(false, true)}>📄 Transcripts only (zip)</button>
+                <button className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface" onClick={() => runBulk(true, true)}>📦 Audio + transcripts</button>
+              </div>
+            )}
+          </div>
+          <button className="btn-ghost !py-1.5" onClick={() => setSelected(new Set())}>Clear</button>
+        </div>
+      )}
+
+      <SectionCard title="Calls" description={`${sort ? `Sorted by ${sort.by} (${sort.dir})` : 'Unsorted'}`}
         action={<div className="flex items-center gap-2 text-xs text-slate-500">
-          <button className="btn-ghost !py-1.5" disabled={exporting || total === 0} onClick={exportCsv}>
-            <Download className="h-3.5 w-3.5" /> {exporting ? 'Exporting…' : selected.size ? `Export ${selected.size}` : 'Export'}
-          </button>
+          <button className="btn-ghost !py-1.5" disabled={exporting || total === 0} onClick={exportCsv}><Download className="h-3.5 w-3.5" /> {exporting ? 'Exporting…' : 'Export CSV'}</button>
           <button className="btn-ghost !p-1.5" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))}><ChevronLeft className="h-4 w-4" /></button>
           <span className="tabular-nums">Page {page} / {pageCount}</span>
           <button className="btn-ghost !p-1.5" disabled={page >= pageCount || loading} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-4 w-4" /></button>
-        </div>}
-      >
+        </div>}>
         {loading ? <LoadingBlock label="Loading calls…" /> : rows.length === 0 ? <EmptyState text="No calls match the current filters." /> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-3 py-2.5"><input type="checkbox" checked={allOnPage} onChange={toggleAll} className="h-3.5 w-3.5 accent-[#1f6feb]" /></th>
-                  {COLUMNS.filter((c) => isVisible(c.key)).map((c) => (
-                    <SortableHead key={c.key} col={c} sort={sort} onSort={setSort}>{c.label}</SortableHead>
-                  ))}
+                  {COLUMNS.filter((c) => isVisible(c.key)).map((c) => <SortableHead key={c.key} col={c} sort={sort} onSort={setSort}>{c.label}</SortableHead>)}
                 </tr>
               </thead>
               <tbody>
@@ -211,41 +223,25 @@ export default function CallHistory() {
                   const contact = inbound ? c.from_number : c.to_number;
                   return (
                     <tr key={c.call_id} className="cursor-pointer border-t border-line hover:bg-surface" onClick={() => openCall(c.call_id)}>
-                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" checked={selected.has(c.call_id)} onChange={() => toggleSel(c.call_id)} className="h-3.5 w-3.5 accent-[#1f6feb]" />
-                      </td>
-                      {isVisible('rec') && <td className="px-3 py-2.5"><AudioPlayer src={c.recording_url} compact /></td>}
-                      {isVisible('when') && <td className="whitespace-nowrap px-3 py-2.5 text-xs">{dateTime(c.start_timestamp)}</td>}
-                      {isVisible('direction') && (
+                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selected.has(c.call_id)} onChange={() => toggleSel(c.call_id)} className="h-3.5 w-3.5 accent-[#1f6feb]" /></td>
+                      {isVisible('rec') && (
                         <td className="px-3 py-2.5">
-                          <span className="inline-flex items-center gap-1.5 text-xs">
-                            {inbound ? <PhoneIncoming className="h-3.5 w-3.5 text-emerald-600" /> : <PhoneOutgoing className="h-3.5 w-3.5 text-brand" />}
-                            {inbound ? 'Inbound' : 'Outbound'}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <AudioPlayer src={c.recording_url} compact />
+                            {c.recording_url && (
+                              <button title="Download MP3" onClick={(e) => rowDownload(c, e)} className="shrink-0 rounded p-1 text-slate-400 hover:text-brand">
+                                {rowDl === c.call_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowDownToLine className="h-3.5 w-3.5" />}
+                              </button>
+                            )}
+                          </div>
                         </td>
                       )}
+                      {isVisible('when') && <td className="whitespace-nowrap px-3 py-2.5 text-xs">{dateTime(c.start_timestamp)}</td>}
+                      {isVisible('direction') && <td className="px-3 py-2.5"><span className="inline-flex items-center gap-1.5 text-xs">{inbound ? <PhoneIncoming className="h-3.5 w-3.5 text-emerald-600" /> : <PhoneOutgoing className="h-3.5 w-3.5 text-brand" />}{inbound ? 'Inbound' : 'Outbound'}</span></td>}
                       {isVisible('contact') && <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs">{contact || '—'}</td>}
                       {isVisible('agent') && <td className="max-w-[220px] truncate px-3 py-2.5 text-xs">{c.agent_name || '—'}</td>}
-                      {isVisible('disposition') && (
-                        <td className="whitespace-nowrap px-3 py-2.5">
-                          {c.disposition ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(c.disposition) }}>
-                              <span className="h-2 w-2 rounded-full" style={{ background: dispositionColor(c.disposition) }} />
-                              {humanizeDisposition(c.disposition)}
-                            </span>
-                          ) : <span className="text-xs text-slate-400">—</span>}
-                        </td>
-                      )}
-                      {isVisible('summary') && (
-                        <td className="max-w-[280px] px-3 py-2.5">
-                          {c.call_summary ? (
-                            <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                              <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                              <span className="truncate">{c.call_summary}</span>
-                            </span>
-                          ) : <span className="text-xs text-slate-300">—</span>}
-                        </td>
-                      )}
+                      {isVisible('disposition') && <td className="whitespace-nowrap px-3 py-2.5">{c.disposition ? <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(c.disposition) }}><span className="h-2 w-2 rounded-full" style={{ background: dispositionColor(c.disposition) }} />{humanizeDisposition(c.disposition)}</span> : <span className="text-xs text-slate-400">—</span>}</td>}
+                      {isVisible('summary') && <td className="max-w-[280px] px-3 py-2.5">{c.call_summary ? <span className="flex items-center gap-1.5 text-xs text-slate-600"><FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{c.call_summary}</span></span> : <span className="text-xs text-slate-300">—</span>}</td>}
                       {isVisible('duration') && <td className="px-3 py-2.5 text-right font-mono text-xs">{secs(Number(c.duration_seconds || 0))}</td>}
                       {isVisible('cost') && <td className="px-3 py-2.5 text-right font-mono text-xs">{usd(Number(c.combined_cost_cents || 0) / 100, { precise: true })}</td>}
                       {isVisible('sentiment') && <td className="px-3 py-2.5">{sentimentBadge(c.user_sentiment)}</td>}
@@ -257,6 +253,8 @@ export default function CallHistory() {
           </div>
         )}
       </SectionCard>
+
+      {showAi && <AiPromptModal callIds={Array.from(selected)} onClose={() => setShowAi(false)} />}
     </div>
   );
 }
