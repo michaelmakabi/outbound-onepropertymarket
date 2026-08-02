@@ -1,40 +1,58 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmt } from '../lib/api';
-import { PageHead, Spinner, StatusPill, EmptyState } from '../components/ui';
-import { Building2, ChevronRight } from 'lucide-react';
+import { api } from '../lib/api';
+import { useFilters } from '../lib/filters';
+import { PageHeader, LoadingBlock, EmptyState, StatusDot, RefreshButton } from '../components/dash';
+import { usd, num, ratePct } from '../lib/format';
+import { ArrowUpRight } from 'lucide-react';
 
 export default function Workspaces() {
+  const { startMs, endMs } = useFilters();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    api.overview({}).then((d) => setRows(d.perWorkspace)).finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <Spinner />;
-  if (!rows.length) return <EmptyState text="No workspaces available for your account." />;
+  const load = () => {
+    setLoading(true);
+    return api.overview({ start: startMs, end: endMs }).then((d) => setRows(d.perWorkspace)).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, [startMs, endMs]);
 
   return (
     <div>
-      <PageHead title="Workspaces" subtitle="Every Retell-powered outbound workspace you can access" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {rows.map((w) => (
-          <Link key={w.slug} to={`/workspaces/${w.slug}`} className="card group p-5 transition hover:shadow-md">
-            <div className="flex items-start justify-between">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-light text-brand"><Building2 className="h-5 w-5" /></div>
-              <StatusPill status={w.status} />
-            </div>
-            <div className="mt-3 text-base font-bold text-ink">{w.display_name}</div>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <div><div className="text-lg font-extrabold text-ink">{fmt.int(w.kpis.totalCalls)}</div><div className="text-[11px] text-slate-400">Calls</div></div>
-              <div><div className="text-lg font-extrabold text-ink">{fmt.money(w.kpis.totalCostDollars)}</div><div className="text-[11px] text-slate-400">Spend</div></div>
-              <div><div className="text-lg font-extrabold text-ink">{fmt.int(w.kpis.totalBookings)}</div><div className="text-[11px] text-slate-400">Bookings</div></div>
-            </div>
-            <div className="mt-3 flex items-center justify-end text-xs font-semibold text-brand opacity-0 transition group-hover:opacity-100">Open <ChevronRight className="h-4 w-4" /></div>
-          </Link>
-        ))}
-      </div>
+      <PageHeader title="Workspaces" description="All connected Retell workspaces"
+        actions={<RefreshButton loading={refreshing} onClick={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />} />
+
+      {loading ? <LoadingBlock /> : !rows.length ? <EmptyState text="No workspaces available for your account." /> : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {rows.map((w) => (
+            <Link key={w.slug} to={`/workspaces/${w.slug}`} className="card group p-5 transition hover:border-brand/40 hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div className="text-base font-bold text-ink">{w.display_name}</div>
+                <ArrowUpRight className="h-4 w-4 text-slate-300 transition group-hover:text-brand" />
+              </div>
+              <div className="mt-1"><StatusDot status={w.status} /></div>
+              <div className="mt-4 grid grid-cols-2 gap-y-3">
+                <Stat label="Spend" value={usd(w.kpis.totalCostDollars)} />
+                <Stat label="Calls" value={num(w.kpis.totalCalls)} />
+                <Stat label="Bookings" value={num(w.kpis.totalBookings)} />
+                <Stat label="Success" value={ratePct(w.kpis.successRate)} />
+                <Stat label="Cost/Call" value={w.kpis.totalCalls > 0 ? usd(w.kpis.costPerCallDollars, { precise: true }) : '—'} />
+                <Stat label="Cost/Booking" value={w.kpis.totalBookings > 0 ? usd(w.kpis.costPerBookingDollars) : '—'} />
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="font-mono text-sm font-bold text-ink">{value}</div>
     </div>
   );
 }
