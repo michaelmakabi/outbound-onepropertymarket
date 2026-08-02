@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { api, tokenStore } from './api';
 
-type User = { id: number; name: string; username: string; role: 'user' | 'admin' | 'super_admin' } | null;
+type User = { id: number; name: string; username: string; email?: string; role: 'user' | 'admin' | 'super_admin' } | null;
 
 type AuthCtx = {
   user: User;
