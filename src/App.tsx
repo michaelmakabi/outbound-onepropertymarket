@@ -13,7 +13,11 @@ import Compare from './pages/Compare';
 import Agents from './pages/Agents';
 import UsersAdmin from './pages/UsersAdmin';
 import UsageAnalytics from './pages/UsageAnalytics';
-import AIPlaceholder from './pages/AIPlaceholder';
+import Contacts from './pages/Contacts';
+import ContactDetail from './pages/ContactDetail';
+import Suggestions from './pages/Suggestions';
+import PromptStudio from './pages/PromptStudio';
+import Reports from './pages/Reports';
 
 function Protected({ children, admin }: { children: JSX.Element; admin?: boolean }) {
   const { user, loading, isAdmin } = useAuth();
@@ -34,11 +38,13 @@ export default function App() {
       <Route path="/dispositions" element={<Protected><Dispositions /></Protected>} />
       <Route path="/calls" element={<Protected><CallHistory /></Protected>} />
       <Route path="/calls/:callId" element={<Protected><CallDetail /></Protected>} />
+      <Route path="/contacts" element={<Protected><Contacts /></Protected>} />
+      <Route path="/contacts/:number" element={<Protected><ContactDetail /></Protected>} />
       <Route path="/compare" element={<Protected><Compare /></Protected>} />
       <Route path="/agents" element={<Protected><Agents /></Protected>} />
-      <Route path="/suggestions" element={<Protected><AIPlaceholder configKey="suggestions" /></Protected>} />
-      <Route path="/prompt-studio" element={<Protected><AIPlaceholder configKey="prompt-studio" /></Protected>} />
-      <Route path="/reports" element={<Protected><AIPlaceholder configKey="reports" /></Protected>} />
+      <Route path="/suggestions" element={<Protected><Suggestions /></Protected>} />
+      <Route path="/prompt-studio" element={<Protected><PromptStudio /></Protected>} />
+      <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/usage" element={<Protected admin><UsageAnalytics /></Protected>} />
       <Route path="/users" element={<Protected admin><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
