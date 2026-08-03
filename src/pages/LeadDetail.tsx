@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { opm } from '../lib/api';
 import { LoadingBlock, EmptyState } from '../components/dash';
-import { ArrowLeft, Star, BadgeCheck, Phone, Smartphone, Sparkles } from 'lucide-react';
+import { ArrowLeft, Star, BadgeCheck, Phone, Smartphone, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
 
 function fmtNum(n: string) {
   const d = (n || '').replace(/\D/g, '').replace(/^1/, '');
@@ -19,14 +19,36 @@ const PARCEL_LABELS: Record<string, string> = {
 export default function LeadDetail() {
   const { id = '' } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'all' | 'notes' | 'calls'>('all');
+  // Ordered id list for prev/next. Prefer the filtered order passed from the Leads/Pipelines
+  // page via router state; fall back to fetching the full default-ordered list on direct load.
+  const [ids, setIds] = useState<string[]>((location.state as any)?.ids || []);
 
   const load = () => { setLoading(true); opm.lead(id).then(setData).finally(() => setLoading(false)); };
   useEffect(load, [id]);
+  useEffect(() => {
+    if (ids.length) return;
+    opm.leads({}).then((d) => setIds((d.leads || []).map((l: any) => l.lead_id))).catch(() => {});
+  }, []);
+
+  const idx = ids.indexOf(id);
+  const prevId = idx > 0 ? ids[idx - 1] : null;
+  const nextId = idx >= 0 && idx < ids.length - 1 ? ids[idx + 1] : null;
+  const goto = (target: string | null) => { if (target) nav(`/leads/${encodeURIComponent(target)}`, { state: { ids } }); };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+      if (e.key === 'ArrowLeft') goto(prevId);
+      if (e.key === 'ArrowRight') goto(nextId);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [prevId, nextId, ids]);
 
   const lead = data?.lead;
   const contacts: any[] = data?.contacts || [];
@@ -55,7 +77,14 @@ export default function LeadDetail() {
 
   return (
     <div>
-      <button onClick={() => nav('/leads')} className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-brand"><ArrowLeft className="h-4 w-4" /> All leads</button>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <button onClick={() => nav('/leads', { state: { ids } })} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-brand"><ArrowLeft className="h-4 w-4" /> All leads</button>
+        <div className="flex items-center gap-1.5">
+          {idx >= 0 && ids.length > 0 && <span className="mr-1 text-xs text-slate-400">{idx + 1} of {ids.length}</span>}
+          <button onClick={() => goto(prevId)} disabled={!prevId} title="Previous lead (←)" className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-sm font-semibold text-slate-600 enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40"><ChevronLeft className="h-4 w-4" /> Prev</button>
+          <button onClick={() => goto(nextId)} disabled={!nextId} title="Next lead (→)" className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-sm font-semibold text-slate-600 enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40">Next <ChevronRight className="h-4 w-4" /></button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr_300px]">
         {/* LEFT */}
