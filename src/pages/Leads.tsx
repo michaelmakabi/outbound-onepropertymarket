@@ -81,7 +81,7 @@ export default function Leads() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.lead_id} className="cursor-pointer border-t border-line hover:bg-surface" onClick={() => nav(`/leads/${encodeURIComponent(r.lead_id)}`)}>
+                  <tr key={r.lead_id} className="cursor-pointer border-t border-line hover:bg-surface" onClick={() => nav(`/leads/${encodeURIComponent(r.lead_id)}`, { state: { ids: rows.map((x) => x.lead_id) } })}>
                     <td className="px-3 py-2.5">
                       <div className="font-semibold text-ink">{r.name}</div>
                       {r.property_ref && <div className="text-xs text-slate-500">{r.property_ref}</div>}
