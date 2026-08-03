@@ -167,7 +167,7 @@ function RevealModal({ data, onClose }: { data: any; onClose: () => void }) {
   const onboardMsg =
 `Hi ${data.name || 'there'},
 
-You've been given access to the One Property Market — Outbound dashboard.
+You've been given access to the 1PropertyMarket — Outbound dashboard.
 
 Sign in here: ${loginUrl}
 Username (your email): ${data.username || ''}
@@ -176,7 +176,7 @@ Temporary password: ${data.password}
 After you sign in, you can change your password anytime under "My account" in the sidebar. Please keep these details private.
 
 Thanks,
-One Property Market`;
+1PropertyMarket`;
   return (
     <Modal title={data.title} onClose={onClose} wide>
       <p className="mb-3 text-xs text-slate-500">No email is connected yet, so share these credentials directly. The user becomes “Active” once they sign in.</p>
