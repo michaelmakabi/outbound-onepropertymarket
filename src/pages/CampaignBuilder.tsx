@@ -55,7 +55,7 @@ export default function CampaignBuilder() {
       </div>
 
       {step === 0 && <UploadStep campaign={campaign} onDone={load} />}
-      {step === 1 && <VerifyStep campaign={campaign} onChange={setCampaign} onNext={() => setStep(2)} />}
+      {step === 1 && <VerifyStep campaign={campaign} onNext={() => setStep(2)} />}
       {step === 2 && <SetupStep campaign={campaign} pool={pool} agents={agents} workspaces={workspaces} onSaved={(c) => { setCampaign(c); setStep(3); }} />}
       {step === 3 && <LaunchStep campaign={campaign} />}
     </div>
@@ -99,7 +99,6 @@ function CsvUpload({ slug, onDone }: { slug: string; onDone: () => void }) {
     return rows.map((r) => {
       const lead: any = { customFields: {} };
       for (const f of CANONICAL_FIELDS) { const i = idx[f.key]; if (i != null && i >= 0) lead[f.key] = (r[i] || '').trim(); }
-      // extra unmapped columns → custom fields (context for the AI)
       const mappedHeaders = new Set(Object.values(map));
       headers.forEach((h, i) => { if (!mappedHeaders.has(h) && (r[i] || '').trim()) lead.customFields[h] = r[i].trim(); });
       if (lead.city || lead.state || lead.zip) lead.address = [lead.address, [lead.city, lead.state, lead.zip].filter(Boolean).join(', ')].filter(Boolean).join(', ');
@@ -207,33 +206,29 @@ function SingleAdd({ slug, onDone }: { slug: string; onDone: () => void }) {
   );
 }
 
-/* ---------------- Step 2: Verify ---------------- */
-function VerifyStep({ campaign, onChange, onNext }: { campaign: any; onChange: (c: any) => void; onNext: () => void }) {
+/* ---------------- Step 2: Verify (Twilio Lookup — Line Type Intelligence) ---------------- */
+function VerifyStep({ campaign, onNext }: { campaign: any; onNext: () => void }) {
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
-  const [triggerTag, setTriggerTag] = useState(campaign.validation_tag || 'verify: run linetype');
-  const [savingTag, setSavingTag] = useState(false);
+  const [needsTwilio, setNeedsTwilio] = useState(false);
   const [msg, setMsg] = useState('');
-  const dirty = triggerTag.trim() !== (campaign.validation_tag || '');
 
-  const load = () => { setLoading(true); dispatch.verifyStatus(campaign.slug).then(setStatus).finally(() => setLoading(false)); };
+  const load = () => { setLoading(true); dispatch.verifyStatus(campaign.slug).then((s) => { setStatus(s); setNeedsTwilio(s.twilioConfigured === false); }).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, [campaign.slug]);
 
-  const saveTag = async () => {
-    setSavingTag(true); setMsg('');
-    try { const r = await dispatch.saveCampaign({ slug: campaign.slug, name: campaign.name, validation_tag: triggerTag.trim() }); onChange(r.campaign); setMsg('Trigger tag saved to this campaign.'); }
-    catch (e: any) { setMsg(String(e?.message || e)); } finally { setSavingTag(false); }
-  };
-
   const run = async () => {
-    setRunning(true); setMsg('');
+    setRunning(true); setMsg(''); setNeedsTwilio(false);
     try {
-      if (dirty) { const r = await dispatch.saveCampaign({ slug: campaign.slug, name: campaign.name, validation_tag: triggerTag.trim() }); onChange(r.campaign); }
-      const r = await dispatch.verifyRun(campaign.slug, triggerTag.trim() || undefined);
-      setMsg(`Tagged ${r.triggerTagged} leads with "${r.triggerTag || '(none)'}" for GHL validation · stamped ${r.backfill?.labeled ?? 0} from existing signals.`); load();
-    }
-    catch (e: any) { setMsg(String(e?.message || e)); } finally { setRunning(false); }
+      const r = await dispatch.verifyRun(campaign.slug, 200);
+      const t = r.tally || {};
+      setMsg(`Checked ${r.checked} numbers → ${t.mobile || 0} mobile · ${t.landline || 0} landline · ${t.voip || 0} VoIP · ${t.invalid || 0} invalid · ${t.unknown || 0} unknown${r.remaining ? ` · ${r.remaining} still to verify` : ''}.`);
+      load();
+    } catch (e: any) {
+      const m = String(e?.message || e);
+      if (/twilio/i.test(m)) setNeedsTwilio(true);
+      setMsg(m);
+    } finally { setRunning(false); }
   };
 
   const b = status?.buckets || {};
@@ -243,10 +238,17 @@ function VerifyStep({ campaign, onChange, onNext }: { campaign: any; onChange: (
     <div className="flex flex-col gap-5">
       <div className="card flex items-start gap-3 border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
         <ShieldCheck className="h-5 w-5 shrink-0" />
-        <div><b>The gate:</b> no lead is dialed until its number is verified. Mobiles get text-first-then-call; landline/VoIP are call-only; invalid numbers are suppressed automatically by the dialer. Run verification, then advance once every lead has a resolved line type.</div>
+        <div><b>The gate:</b> no lead is dialed until its number is verified. We check each number with <b>Twilio Line Type Intelligence</b> and write the result to the Line Type field the dialer reads. Mobiles get text-first-then-call; landline/VoIP are call-only; invalid/voicemail numbers are suppressed automatically. Advance once every lead has a resolved line type.</div>
       </div>
 
-      <SectionCard title="Line-type breakdown" description="Live from GoHighLevel"
+      {needsTwilio && (
+        <div className="card border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <div className="mb-1 flex items-center gap-2 font-bold"><AlertTriangle className="h-4 w-4" /> Twilio not connected yet</div>
+          Add your Twilio credentials as Edge Function secrets on the Supabase project (<code className="font-mono">TWILIO_ACCOUNT_SID</code> and <code className="font-mono">TWILIO_AUTH_TOKEN</code>), then run verification. Find them in the Twilio Console dashboard.
+        </div>
+      )}
+
+      <SectionCard title="Line-type breakdown" description="Live — written by Twilio verification into GoHighLevel"
         action={<button className="btn-ghost" onClick={load}><RefreshCw className="h-3.5 w-3.5" /> Refresh</button>}>
         {loading ? <LoadingBlock /> : !status || status.total === 0 ? <EmptyState text="No leads in this campaign yet — add leads in step 1." /> : (
           <>
@@ -272,22 +274,16 @@ function VerifyStep({ campaign, onChange, onNext }: { campaign: any; onChange: (
         )}
       </SectionCard>
 
-      <SectionCard title="Run verification" description="Stamps line-type signals into the Line Type field, and tags unverified leads to trigger this campaign's GoHighLevel Number Validation workflow ($0.005/record).">
-        <label className="label mb-1 block">GHL validation trigger tag <span className="font-normal text-slate-400">— saved to this campaign</span></label>
-        <div className="mb-2 flex gap-2">
-          <input className="input flex-1" value={triggerTag} onChange={(e) => setTriggerTag(e.target.value)} placeholder="verify: run linetype" />
-          <button className="btn-ghost" disabled={savingTag || !dirty} onClick={saveTag}>{savingTag ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save tag'}</button>
-        </div>
-        <p className="mb-3 text-xs text-slate-500">
-          This is the durable handoff: the tag your GoHighLevel Number Validation workflow listens for. It's stored per campaign, so each campaign (in any workspace) can point at its own workflow. Leave blank to only stamp existing landline/wrong-number signals. Validation runs inside GoHighLevel; results flow back into the Line Type field and appear above.
-          {campaign.validation_tag && <span className="mt-1 block">Currently saved: <code className="font-mono text-slate-600">{campaign.validation_tag}</code>{dirty && <span className="text-amber-600"> · unsaved change</span>}</span>}
-        </p>
+      <SectionCard title="Verify with Twilio" description="Looks up each unverified number's line type and writes it back to the campaign. Runs in batches — click again if any remain.">
+        <p className="mb-3 text-xs text-slate-500">Uses Twilio Lookup v2 (Line Type Intelligence), billed by Twilio per number checked. Invalid, voicemail and pager numbers are marked suppressed so the dialer never calls them.</p>
         {msg && <div className="mb-3 rounded-lg bg-surface px-3 py-2 text-sm text-slate-700">{msg}</div>}
-        <button className="btn-primary" disabled={running} onClick={run}>{running ? <><Loader2 className="h-4 w-4 animate-spin" /> Running…</> : <><ShieldCheck className="h-4 w-4" /> Run verification</>}</button>
+        <button className="btn-primary" disabled={running || (status && status.unverified === 0)} onClick={run}>
+          {running ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying…</> : <><ShieldCheck className="h-4 w-4" /> {status && status.unverified > 0 ? `Verify ${num(status.unverified)} numbers` : 'All verified'}</>}
+        </button>
       </SectionCard>
 
       <div className="flex items-center justify-between">
-        <span className={`text-sm font-semibold ${gateReady ? 'text-emerald-600' : 'text-amber-600'}`}>{gateReady ? 'All leads resolved — you can continue.' : 'Verify all leads (or suppress invalids) before launching.'}</span>
+        <span className={`text-sm font-semibold ${gateReady ? 'text-emerald-600' : 'text-amber-600'}`}>{gateReady ? 'All leads resolved — you can continue.' : 'Verify all leads before launching.'}</span>
         <button className="btn-primary" disabled={!gateReady} onClick={onNext}>Continue to setup →</button>
       </div>
     </div>
