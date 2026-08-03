@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { KpiCard, SectionCard, LoadingBlock, AudioPlayer } from '../components/dash';
 import { usd, secs, dateTime, humanizeDisposition, humanizeProduct, dispositionColor } from '../lib/format';
 import { downloadCallMp3, saveBlob, transcriptText } from '../lib/download';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Clock, DollarSign, Smile, CheckCircle2, Zap, ArrowDownToLine, FileText, Loader2 } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Clock, DollarSign, Smile, CheckCircle2, Zap, ArrowDownToLine, FileText, Loader2, Repeat } from 'lucide-react';
 
 export default function CallDetail() {
   const { callId } = useParams();
@@ -18,8 +18,17 @@ export default function CallDetail() {
   const [c, setC] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [dlAudio, setDlAudio] = useState(false);
+  const [thread, setThread] = useState<any[]>([]);
 
-  useEffect(() => { setLoading(true); api.call(callId!).then((d) => setC(d.call)).finally(() => setLoading(false)); }, [callId]);
+  useEffect(() => { setLoading(true); setThread([]); api.call(callId!).then((d) => setC(d.call)).finally(() => setLoading(false)); }, [callId]);
+
+  // Load sibling calls for this contact number (repeat-call thread).
+  useEffect(() => {
+    if (!c) return;
+    const n = c.direction === 'inbound' ? c.from_number : c.to_number;
+    if (!n) return;
+    api.contact(String(n)).then((r) => setThread(Array.isArray(r.calls) ? r.calls : [])).catch(() => setThread([]));
+  }, [c]);
 
   const goTo = (i: number) => { if (i >= 0 && i < ids.length) nav(`/calls/${ids[i]}`, { state: st }); };
 
@@ -123,6 +132,29 @@ export default function CallDetail() {
                     <span className="font-mono text-slate-600">{usd(Number(p.cost || 0) / 100, { precise: true })}</span>
                   </div>
                 ))}
+              </div>
+            </SectionCard>
+          )}
+
+          {thread.length > 1 && (
+            <SectionCard title="Contact history" description={`${thread.length} calls to ${contact}`}
+              action={contact ? <Link to={`/contacts/${encodeURIComponent(String(contact))}`} className="text-xs font-semibold text-brand hover:underline">View profile →</Link> : undefined}>
+              <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700">
+                <Repeat className="h-3.5 w-3.5" /> This number was called {thread.length} times
+              </div>
+              <div className="space-y-1">
+                {thread.map((t: any) => {
+                  const active = t.call_id === c.call_id;
+                  return (
+                    <Link key={t.call_id} to={`/calls/${t.call_id}`} className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-sm ${active ? 'bg-brand-light font-semibold' : 'hover:bg-surface'}`}>
+                      <span className="flex items-center gap-2 truncate">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: dispositionColor(t.disposition) }} />
+                        <span className="truncate text-ink">{humanizeDisposition(t.disposition)}</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-400">{dateTime(t.start_timestamp)}</span>
+                    </Link>
+                  );
+                })}
               </div>
             </SectionCard>
           )}
