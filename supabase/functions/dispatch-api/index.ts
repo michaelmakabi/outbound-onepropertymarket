@@ -2,7 +2,7 @@
 // Deployed on the 1PropertyMarket project (sezigczgwezeecgobuqd), co-located with adrian-dialer,
 // dial_numbers/dial_counters, pick_dial_number, retell_agents. verify_jwt=false; custom auth.
 //
-// Secrets stay server-side: DIAL_SECRET (dialer), GHL_PIT (GoHighLevel PIT). Never sent to the browser.
+// Secrets stay server-side: DIAL_SECRET (dialer), GHL_PIT (GoHighLevel PIT), TWILIO_* (Lookup).
 // Auth: the browser presents the SAME bearer token it uses for the analytics API; we validate it by
 // calling that API's ?action=me and require an admin/super_admin. Leads live in GHL; campaign configs
 // live in dispatch_campaigns (this project, RLS-on, service-role only).
@@ -11,13 +11,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const GHLB = 'https://services.leadconnectorhq.com', GV = '2021-07-28';
 const LOC = Deno.env.get('GHL_LOCATION_ID') || '0EGiH3UWUq06uTO3U90A';
 const DIAL_BASE = 'https://sezigczgwezeecgobuqd.supabase.co/functions/v1/adrian-dialer';
-const LINETYPE_BASE = 'https://sezigczgwezeecgobuqd.supabase.co/functions/v1/linetype-backfill';
 const DIAL_SECRET = Deno.env.get('DIAL_SECRET') || 'bb-adrian-dial-9x27';
 const ADRIAN_AGENT = Deno.env.get('ADRIAN_AGENT_ID') || 'agent_ee77a9e3c659964acc19d0be54';
 const RETELL_KEY = Deno.env.get('RETELL_API_KEY') || 'key_ecb90512a65f3aea88c243d5816e';
 const ANALYTICS_API = Deno.env.get('ANALYTICS_API') || 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
 const AUTH_ME = ANALYTICS_API + '?action=me';
-const DEFAULT_VALIDATION_TAG = 'verify: run linetype';
+// Twilio Lookup v2 — Line Type Intelligence (number verification).
+const TW_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || Deno.env.get('TWILIO_SID') || '';
+const TW_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || Deno.env.get('TWILIO_TOKEN') || '';
 
 const LINE_TYPE_FIELD = 'uyXHlCAuHq2y7jRHMiwg';
 const ADDR_FIELDS = ['yUXrLod4dbSPWmnCbaSH', 'LHfGDHAAofUr7o85ci5a'];
@@ -95,6 +96,27 @@ async function searchByTag(tag: string, cap = 500): Promise<any[]> {
   return out.slice(0, cap);
 }
 
+// ---------------- Twilio Lookup: Line Type Intelligence ----------------
+async function twilioLineType(phone: string): Promise<{ valid: boolean; type: string | null; carrier: string | null }> {
+  const url = `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(phone)}?Fields=line_type_intelligence`;
+  const auth = btoa(`${TW_SID}:${TW_TOKEN}`);
+  const r = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+  if (r.status === 404) return { valid: false, type: null, carrier: null }; // not a real/dialable number
+  const j = await r.json().catch(() => ({} as any));
+  const lti = j.line_type_intelligence || {};
+  return { valid: j.valid !== false, type: lti.type || null, carrier: lti.carrier_name || null };
+}
+// Map a Twilio line type → the GHL "Line Type" field value the dialer reads (it suppresses invalid/wrong).
+function twilioToFieldValue(res: { valid: boolean; type: string | null }): string {
+  if (!res.valid) return 'Invalid/Wrong';
+  const t = String(res.type || '').toLowerCase();
+  if (t === 'mobile') return 'Mobile';
+  if (t === 'landline') return 'Landline';
+  if (t === 'fixedvoip' || t === 'nonfixedvoip') return 'VoIP';
+  if (t === 'voicemail' || t === 'pager') return 'Invalid/Wrong'; // not a person to reach
+  return 'Unknown'; // valid + callable (tollFree/premium/uan/personal/unknown)
+}
+
 // ---------------- dialer proxy ----------------
 async function dialer(body: any, mode?: string): Promise<any> {
   const u = new URL(DIAL_BASE); u.searchParams.set('key', DIAL_SECRET); if (mode) u.searchParams.set('mode', mode);
@@ -148,13 +170,12 @@ Deno.serve(async (req) => {
       const agents = [
         { id: ADRIAN_AGENT, name: 'Adrian — Off-Market Seller Acquisition', premade: true, description: 'Warm cold-call acquisition agent with deep discovery, rebuttals, price ladder, appraisal pivot and written-offer close. Published & live.' },
       ];
-      // pull the workspaces this admin can see from the analytics API (campaigns can be scoped per workspace)
       let workspaces: any[] = [];
       try {
         const wr = await fetch(ANALYTICS_API + '?action=bootstrap', { headers: { Authorization: req.headers.get('authorization') || '' } });
         if (wr.ok) { const wd = await wr.json(); workspaces = wd?.workspaces || []; }
       } catch { /* non-fatal */ }
-      return json({ user: { name: user.name, role: user.role, email: user.email }, pool, agents, campaigns: campaigns || [], workspaces, defaultValidationTag: DEFAULT_VALIDATION_TAG, ghlLocation: LOC });
+      return json({ user: { name: user.name, role: user.role, email: user.email }, pool, agents, campaigns: campaigns || [], workspaces, twilioConfigured: !!(TW_SID && TW_TOKEN), ghlLocation: LOC });
     }
 
     // ---- campaigns CRUD ----
@@ -169,7 +190,6 @@ Deno.serve(async (req) => {
         window_start: body.window_start || '09:00', window_end: body.window_end || '19:00', window_tz: body.window_tz || 'America/New_York',
         status: body.status || 'draft', updated_at: new Date().toISOString(),
       };
-      if (body.validation_tag !== undefined) row.validation_tag = String(body.validation_tag).trim() || DEFAULT_VALIDATION_TAG;
       if (body.workspace !== undefined) row.workspace = body.workspace || null;
       const { data, error } = await client.from('dispatch_campaigns').upsert(row, { onConflict: 'slug' }).select('*').maybeSingle();
       if (error) return json({ error: error.message }, 400);
@@ -210,7 +230,6 @@ Deno.serve(async (req) => {
         else { rejected++; if (errors.length < 5) errors.push(`${phone}: ${r.status} ${JSON.stringify(r.json).slice(0, 120)}`); }
         await new Promise((s) => setTimeout(s, 40));
       }
-      // refresh lead_count
       await client.from('dispatch_campaigns').update({ lead_count: (added + merged), updated_at: new Date().toISOString() }).eq('slug', slug);
       return json({ added, merged, rejected, errors });
     }
@@ -235,30 +254,35 @@ Deno.serve(async (req) => {
       for (const c of contacts) buckets[lineBucket(c).type]++;
       const total = contacts.length;
       const resolved = total - buckets.unverified;
-      return json({ total, resolved, unverified: buckets.unverified, buckets, pctResolved: total ? Math.round((resolved / total) * 100) : 0 });
+      return json({ total, resolved, unverified: buckets.unverified, buckets, pctResolved: total ? Math.round((resolved / total) * 100) : 0, twilioConfigured: !!(TW_SID && TW_TOKEN) });
     }
 
-    // ---- verify.run: stamp tag-signal line types via linetype-backfill; tag unverified leads with this
-    //      campaign's persisted GHL validation trigger tag (the durable handoff into GoHighLevel). ----
+    // ---- verify.run: verify each unverified number via Twilio Lookup (Line Type Intelligence) and
+    //      write the result into the GHL "Line Type" field the dialer reads. Resumable (batch by limit). ----
     if (action === 'verify.run') {
+      if (!TW_SID || !TW_TOKEN) return json({ needsTwilio: true, error: 'Twilio is not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN as secrets on this Supabase project.' }, 400);
       const slug = str('slug').toLowerCase();
-      const { data: camp } = await client.from('dispatch_campaigns').select('validation_tag').eq('slug', slug).maybeSingle();
-      // explicit body.triggerTag overrides for this run (incl. '' to skip); otherwise use the campaign's saved tag.
-      const triggerTag = (body.triggerTag !== undefined ? String(body.triggerTag) : (camp?.validation_tag || DEFAULT_VALIDATION_TAG)).trim();
-      let tagged = 0;
-      if (triggerTag) {
-        const contacts = await searchByTag(campaignTag(slug), 500);
-        for (const c of contacts) {
-          if (lineBucket(c).type !== 'unverified') continue;
-          await ghl(`/contacts/${c.id}/tags`, { method: 'POST', body: JSON.stringify({ tags: [triggerTag] }) });
-          tagged++; await new Promise((s) => setTimeout(s, 40));
-        }
+      const limit = Math.min(Number(body.limit) || 150, 400);
+      const contacts = await searchByTag(campaignTag(slug), 1000);
+      const pending = contacts.filter((c) => lineBucket(c).type === 'unverified');
+      const batch = pending.slice(0, limit);
+      const tally: Record<string, number> = { mobile: 0, landline: 0, voip: 0, invalid: 0, unknown: 0 };
+      let checked = 0, updated = 0, errors = 0;
+      for (const c of batch) {
+        const phone = String(c.phone || '').trim();
+        if (!phone) { errors++; continue; }
+        let res; try { res = await twilioLineType(phone); } catch { errors++; continue; }
+        checked++;
+        const val = twilioToFieldValue(res);
+        if (val === 'Mobile') tally.mobile++; else if (val === 'Landline') tally.landline++; else if (val === 'VoIP') tally.voip++; else if (val === 'Invalid/Wrong') tally.invalid++; else tally.unknown++;
+        await ghl(`/contacts/${c.id}`, { method: 'PUT', body: JSON.stringify({ customFields: [{ id: LINE_TYPE_FIELD, value: val }] }) });
+        await ghl(`/contacts/${c.id}/tags`, { method: 'DELETE', body: JSON.stringify({ tags: ['line type: unverified'] }) }).catch(() => {});
+        if (val === 'Invalid/Wrong') await ghl(`/contacts/${c.id}/tags`, { method: 'POST', body: JSON.stringify({ tags: ['do not text'] }) }).catch(() => {});
+        updated++;
+        await new Promise((s) => setTimeout(s, 60));
       }
-      // drain tag-derived signals into the Line Type field
-      const u = new URL(LINETYPE_BASE); u.searchParams.set('key', DIAL_SECRET);
-      const r = await fetch(u.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 400 }) });
-      const bf = await r.json().catch(() => ({}));
-      return json({ ok: true, triggerTag, triggerTagged: tagged, backfill: bf });
+      const remaining = Math.max(0, pending.length - updated);
+      return json({ ok: true, provider: 'twilio', checked, updated, tally, remaining, errors });
     }
 
     // ---- dialer passthroughs ----
