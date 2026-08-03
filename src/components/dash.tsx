@@ -1,11 +1,12 @@
-// Reusable dashboard toolkit for One Property Market — Outbound.
+// Reusable dashboard toolkit for 1PropertyMarket — Outbound.
 // Ported in spirit from retell-command-center's shadcn components, rebuilt in plain Tailwind.
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   Loader2, LucideIcon, SlidersHorizontal, ArrowUp, ArrowDown, ChevronsUpDown,
   Search, Check, X, RefreshCw, Bookmark, Plus, Play, Pause,
 } from 'lucide-react';
 import { useFilters, RangePreset } from '../lib/filters';
+import { OUTCOME_ORDER, outcomeLabel, outcomeColor, num as fnum, pct as fpct } from '../lib/format';
 
 const cx = (...c: (string | false | undefined | null)[]) => c.filter(Boolean).join(' ');
 
@@ -54,6 +55,30 @@ export function KpiCard({
         <span className={cx('text-2xl font-extrabold tracking-tight tabular-nums', color)}>{value}</span>
       )}
       {sub && <span className="text-xs text-slate-500">{sub}</span>}
+    </div>
+  );
+}
+
+/** Business-outcome tiles (Booked / Scheduled / Interested / … ) built from the API `outcomes` array. */
+export function OutcomeTiles({ outcomes, total }: { outcomes: { outcome: string; count: number; percentage: number; costDollars?: number }[]; total?: number }) {
+  if (!outcomes || outcomes.length === 0) return null;
+  const byKey = new Map(outcomes.map((o) => [o.outcome, o]));
+  const denom = total ?? outcomes.reduce((s, o) => s + o.count, 0);
+  const order = OUTCOME_ORDER.filter((o) => byKey.has(o));
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+      {order.map((key) => {
+        const o = byKey.get(key)!;
+        const color = outcomeColor(key);
+        const perc = denom > 0 ? (o.count / denom) * 100 : 0;
+        return (
+          <div key={key} className="card flex flex-col gap-1 p-3" style={{ borderTopColor: color, borderTopWidth: 3 }}>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{outcomeLabel(key)}</span>
+            <span className="text-xl font-extrabold tabular-nums text-ink">{fnum(o.count)}</span>
+            <span className="text-[11px] font-medium" style={{ color }}>{fpct(perc)}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
