@@ -16,9 +16,16 @@ const ADRIAN_AGENT = Deno.env.get('ADRIAN_AGENT_ID') || 'agent_ee77a9e3c659964ac
 const RETELL_KEY = Deno.env.get('RETELL_API_KEY') || 'key_ecb90512a65f3aea88c243d5816e';
 const ANALYTICS_API = Deno.env.get('ANALYTICS_API') || 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
 const AUTH_ME = ANALYTICS_API + '?action=me';
+
 // Twilio Lookup v2 — Line Type Intelligence (number verification).
+// Auth works two ways: (a) Account SID (AC…) + Auth Token, or (b) an API Key (SK…) + its Secret.
 const TW_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || Deno.env.get('TWILIO_SID') || '';
 const TW_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || Deno.env.get('TWILIO_TOKEN') || '';
+const TW_API_KEY = Deno.env.get('TWILIO_API_KEY') || Deno.env.get('TWILIO_API_KEY_SID') || (TW_SID.startsWith('SK') ? TW_SID : '');
+const TW_API_SECRET = Deno.env.get('TWILIO_API_SECRET') || Deno.env.get('TWILIO_API_KEY_SECRET') || Deno.env.get('TWILIO_ACCOUNT_CLIENT_SECRET') || '';
+// Basic-auth username:password — prefer an API key when we have one + secret; else Account SID + Auth Token.
+function twBasic(): string { return (TW_API_KEY && TW_API_SECRET) ? btoa(`${TW_API_KEY}:${TW_API_SECRET}`) : btoa(`${TW_SID}:${TW_TOKEN}`); }
+function twConfigured(): boolean { return !!((TW_API_KEY && TW_API_SECRET) || (TW_SID && TW_TOKEN)); }
 
 const LINE_TYPE_FIELD = 'uyXHlCAuHq2y7jRHMiwg';
 const ADDR_FIELDS = ['yUXrLod4dbSPWmnCbaSH', 'LHfGDHAAofUr7o85ci5a'];
@@ -99,10 +106,11 @@ async function searchByTag(tag: string, cap = 500): Promise<any[]> {
 // ---------------- Twilio Lookup: Line Type Intelligence ----------------
 async function twilioLineType(phone: string): Promise<{ valid: boolean; type: string | null; carrier: string | null }> {
   const url = `https://lookups.twilio.com/v2/PhoneNumbers/${encodeURIComponent(phone)}?Fields=line_type_intelligence`;
-  const auth = btoa(`${TW_SID}:${TW_TOKEN}`);
-  const r = await fetch(url, { headers: { Authorization: `Basic ${auth}` } });
+  const r = await fetch(url, { headers: { Authorization: `Basic ${twBasic()}` } });
   if (r.status === 404) return { valid: false, type: null, carrier: null }; // not a real/dialable number
+  if (r.status === 401 || r.status === 403) throw new Error(`auth_${r.status}`); // bad credentials
   const j = await r.json().catch(() => ({} as any));
+  if (!r.ok) throw new Error(`twilio_${r.status}:${String(j?.message || '').slice(0, 80)}`);
   const lti = j.line_type_intelligence || {};
   return { valid: j.valid !== false, type: lti.type || null, carrier: lti.carrier_name || null };
 }
@@ -175,7 +183,7 @@ Deno.serve(async (req) => {
         const wr = await fetch(ANALYTICS_API + '?action=bootstrap', { headers: { Authorization: req.headers.get('authorization') || '' } });
         if (wr.ok) { const wd = await wr.json(); workspaces = wd?.workspaces || []; }
       } catch { /* non-fatal */ }
-      return json({ user: { name: user.name, role: user.role, email: user.email }, pool, agents, campaigns: campaigns || [], workspaces, twilioConfigured: !!(TW_SID && TW_TOKEN), ghlLocation: LOC });
+      return json({ user: { name: user.name, role: user.role, email: user.email }, pool, agents, campaigns: campaigns || [], workspaces, twilioConfigured: twConfigured(), ghlLocation: LOC });
     }
 
     // ---- campaigns CRUD ----
@@ -254,24 +262,26 @@ Deno.serve(async (req) => {
       for (const c of contacts) buckets[lineBucket(c).type]++;
       const total = contacts.length;
       const resolved = total - buckets.unverified;
-      return json({ total, resolved, unverified: buckets.unverified, buckets, pctResolved: total ? Math.round((resolved / total) * 100) : 0, twilioConfigured: !!(TW_SID && TW_TOKEN) });
+      return json({ total, resolved, unverified: buckets.unverified, buckets, pctResolved: total ? Math.round((resolved / total) * 100) : 0, twilioConfigured: twConfigured() });
     }
 
     // ---- verify.run: verify each unverified number via Twilio Lookup (Line Type Intelligence) and
     //      write the result into the GHL "Line Type" field the dialer reads. Resumable (batch by limit). ----
     if (action === 'verify.run') {
-      if (!TW_SID || !TW_TOKEN) return json({ needsTwilio: true, error: 'Twilio is not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN as secrets on this Supabase project.' }, 400);
+      if (!twConfigured()) return json({ needsTwilio: true, error: 'Twilio is not configured. Add TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN (or a Twilio API Key SID + Secret) as secrets on this Supabase project.' }, 400);
       const slug = str('slug').toLowerCase();
       const limit = Math.min(Number(body.limit) || 150, 400);
       const contacts = await searchByTag(campaignTag(slug), 1000);
       const pending = contacts.filter((c) => lineBucket(c).type === 'unverified');
       const batch = pending.slice(0, limit);
       const tally: Record<string, number> = { mobile: 0, landline: 0, voip: 0, invalid: 0, unknown: 0 };
-      let checked = 0, updated = 0, errors = 0;
+      let checked = 0, updated = 0, errors = 0, authError = '';
       for (const c of batch) {
         const phone = String(c.phone || '').trim();
         if (!phone) { errors++; continue; }
-        let res; try { res = await twilioLineType(phone); } catch { errors++; continue; }
+        let res;
+        try { res = await twilioLineType(phone); }
+        catch (e) { const m = String((e as any)?.message || e); if (m.startsWith('auth_')) { authError = m; break; } errors++; continue; }
         checked++;
         const val = twilioToFieldValue(res);
         if (val === 'Mobile') tally.mobile++; else if (val === 'Landline') tally.landline++; else if (val === 'VoIP') tally.voip++; else if (val === 'Invalid/Wrong') tally.invalid++; else tally.unknown++;
@@ -281,6 +291,7 @@ Deno.serve(async (req) => {
         updated++;
         await new Promise((s) => setTimeout(s, 60));
       }
+      if (authError) return json({ authFailed: true, error: `Twilio authentication failed (${authError.replace('auth_', 'HTTP ')}). Check your Twilio secrets — use the Account SID (AC…) + Auth Token, or an API Key SID (SK…) + its Secret.` }, 400);
       const remaining = Math.max(0, pending.length - updated);
       return json({ ok: true, provider: 'twilio', checked, updated, tally, remaining, errors });
     }
