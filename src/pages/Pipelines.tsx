@@ -70,7 +70,7 @@ export default function Pipelines() {
                 <div className="flex items-center gap-1"><span className="rounded-full bg-white px-2 text-xs font-semibold text-slate-500">{s.leadCount}</span>
                   <Trash2 className="h-3.5 w-3.5 cursor-pointer text-slate-300 hover:text-red-500" onClick={() => delStage(s)} /></div>
               </div>
-              <StageLeads pipelineId={current.id} stageId={s.id} onOpen={(id) => nav(`/leads/${encodeURIComponent(id)}`)} />
+              <StageLeads pipelineId={current.id} stageId={s.id} onOpen={(id, ids) => nav(`/leads/${encodeURIComponent(id)}`, { state: { ids } })} />
             </div>
           ))}
           <button onClick={addStage} className="h-10 w-64 flex-none rounded-xl border border-dashed border-line text-sm font-semibold text-slate-500 hover:border-brand hover:text-brand"><Plus className="mr-1 inline h-4 w-4" /> Add stage</button>
@@ -80,16 +80,17 @@ export default function Pipelines() {
   );
 }
 
-function StageLeads({ pipelineId, stageId, onOpen }: { pipelineId: number; stageId: number; onOpen: (id: string) => void }) {
+function StageLeads({ pipelineId, stageId, onOpen }: { pipelineId: number; stageId: number; onOpen: (id: string, ids: string[]) => void }) {
   const [rows, setRows] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => { opm.leads({ pipeline_id: pipelineId, stage_id: stageId }).then((d) => setRows(d.leads || [])).finally(() => setLoaded(true)); }, [pipelineId, stageId]);
   if (!loaded) return <div className="p-3 text-xs text-slate-400">Loading…</div>;
   if (rows.length === 0) return <div className="p-3 text-xs text-slate-400">No leads</div>;
+  const ids = rows.map((r) => r.lead_id);
   return (
     <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto p-2">
       {rows.slice(0, 50).map((r) => (
-        <button key={r.lead_id} onClick={() => onOpen(r.lead_id)} className="rounded-lg border border-line bg-white p-2 text-left hover:border-brand/40">
+        <button key={r.lead_id} onClick={() => onOpen(r.lead_id, ids)} className="rounded-lg border border-line bg-white p-2 text-left hover:border-brand/40">
           <div className="text-sm font-semibold text-ink">{r.name}</div>
           {r.property_ref && <div className="truncate text-xs text-slate-500">{r.property_ref}</div>}
           <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400"><span>{r.phoneCount} #</span><span className="text-emerald-600">{r.verifiedCount} ✓</span>{r.deal_price ? <span>${Number(r.deal_price).toLocaleString()}</span> : null}</div>
