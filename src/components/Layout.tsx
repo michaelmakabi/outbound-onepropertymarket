@@ -5,7 +5,7 @@ import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  UserSquare2, Columns3,
+  UserSquare2, Columns3, PhoneOutgoing,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -24,6 +24,7 @@ const NAV = [
   { to: '/reports', label: 'Reports', icon: FileBarChart },
 ];
 const ADMIN_NAV = [
+  { to: '/campaigns', label: 'Dispatch AI', icon: PhoneOutgoing },
   { to: '/usage', label: 'Usage Analytics', icon: Activity },
   { to: '/users', label: 'Users & Access', icon: Users },
 ];
