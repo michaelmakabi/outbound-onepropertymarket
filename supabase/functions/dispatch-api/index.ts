@@ -266,22 +266,39 @@ Deno.serve(async (req) => {
     }
 
     // ---- verify.run: verify each unverified number via Twilio Lookup (Line Type Intelligence) and
-    //      write the result into the GHL "Line Type" field the dialer reads. Resumable (batch by limit). ----
+    //      write the result into the GHL "Line Type" field the dialer reads. Resumable (batch by limit).
+    //      Lookup v2 has no bulk endpoint, so throughput = concurrency: we fan the Twilio lookups out
+    //      in a bounded pool (fast, cheap — only line_type_intelligence, no paid caller_name), then write
+    //      results back to GHL through a gentler pool so we stay inside GHL's rate limit. ----
     if (action === 'verify.run') {
       if (!twConfigured()) return json({ needsTwilio: true, error: 'Twilio is not configured. Add TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN (or a Twilio API Key SID + Secret) as secrets on this Supabase project.' }, 400);
       const slug = str('slug').toLowerCase();
-      const limit = Math.min(Number(body.limit) || 150, 400);
-      const contacts = await searchByTag(campaignTag(slug), 1000);
-      const pending = contacts.filter((c) => lineBucket(c).type === 'unverified');
+      const limit = Math.min(Number(body.limit) || 150, 500);
+      const contacts = await searchByTag(campaignTag(slug), 2000);
+      const pending = contacts.filter((c) => lineBucket(c).type === 'unverified' && String(c.phone || '').trim());
       const batch = pending.slice(0, limit);
       const tally: Record<string, number> = { mobile: 0, landline: 0, voip: 0, invalid: 0, unknown: 0 };
       let checked = 0, updated = 0, errors = 0, authError = '';
-      for (const c of batch) {
-        const phone = String(c.phone || '').trim();
-        if (!phone) { errors++; continue; }
-        let res;
-        try { res = await twilioLineType(phone); }
-        catch (e) { const m = String((e as any)?.message || e); if (m.startsWith('auth_')) { authError = m; break; } errors++; continue; }
+
+      // small bounded-concurrency runner
+      async function pool<T>(items: T[], size: number, fn: (item: T, i: number) => Promise<void>) {
+        let i = 0;
+        const work = async () => { while (i < items.length && !authError) { const idx = i++; await fn(items[idx], idx); } };
+        await Promise.all(Array.from({ length: Math.min(size, items.length) }, work));
+      }
+
+      // phase 1 — Twilio lookups, fanned out (network-bound, so higher concurrency)
+      const looked: Array<{ valid: boolean; type: string | null; carrier: string | null } | null> = new Array(batch.length).fill(null);
+      await pool(batch, 20, async (c, idx) => {
+        try { looked[idx] = await twilioLineType(String(c.phone).trim()); }
+        catch (e) { const m = String((e as any)?.message || e); if (m.startsWith('auth_')) { authError = m; return; } errors++; }
+      });
+      if (authError) return json({ authFailed: true, error: `Twilio authentication failed (${authError.replace('auth_', 'HTTP ')}). Check your Twilio secrets — use the Account SID (AC…) + Auth Token, or an API Key SID (SK…) + its Secret.` }, 400);
+
+      // phase 2 — write verdicts into GHL (throttled pool to respect GHL's ~100 req / 10s limit)
+      await pool(batch, 5, async (c, idx) => {
+        const res = looked[idx];
+        if (!res) return; // lookup errored — leave unverified so it retries next run
         checked++;
         const val = twilioToFieldValue(res);
         if (val === 'Mobile') tally.mobile++; else if (val === 'Landline') tally.landline++; else if (val === 'VoIP') tally.voip++; else if (val === 'Invalid/Wrong') tally.invalid++; else tally.unknown++;
@@ -289,9 +306,8 @@ Deno.serve(async (req) => {
         await ghl(`/contacts/${c.id}/tags`, { method: 'DELETE', body: JSON.stringify({ tags: ['line type: unverified'] }) }).catch(() => {});
         if (val === 'Invalid/Wrong') await ghl(`/contacts/${c.id}/tags`, { method: 'POST', body: JSON.stringify({ tags: ['do not text'] }) }).catch(() => {});
         updated++;
-        await new Promise((s) => setTimeout(s, 60));
-      }
-      if (authError) return json({ authFailed: true, error: `Twilio authentication failed (${authError.replace('auth_', 'HTTP ')}). Check your Twilio secrets — use the Account SID (AC…) + Auth Token, or an API Key SID (SK…) + its Secret.` }, 400);
+      });
+
       const remaining = Math.max(0, pending.length - updated);
       return json({ ok: true, provider: 'twilio', checked, updated, tally, remaining, errors });
     }
