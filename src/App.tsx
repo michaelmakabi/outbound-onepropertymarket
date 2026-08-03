@@ -18,8 +18,9 @@ import ContactDetail from './pages/ContactDetail';
 import Suggestions from './pages/Suggestions';
 import PromptStudio from './pages/PromptStudio';
 import Reports from './pages/Reports';
-import Campaigns from './pages/Campaigns';
-import CampaignBuilder from './pages/CampaignBuilder';
+import Leads from './pages/Leads';
+import LeadDetail from './pages/LeadDetail';
+import Pipelines from './pages/Pipelines';
 
 function Protected({ children, admin }: { children: JSX.Element; admin?: boolean }) {
   const { user, loading, isAdmin } = useAuth();
@@ -42,13 +43,14 @@ export default function App() {
       <Route path="/calls/:callId" element={<Protected><CallDetail /></Protected>} />
       <Route path="/contacts" element={<Protected><Contacts /></Protected>} />
       <Route path="/contacts/:number" element={<Protected><ContactDetail /></Protected>} />
+      <Route path="/leads" element={<Protected><Leads /></Protected>} />
+      <Route path="/leads/:id" element={<Protected><LeadDetail /></Protected>} />
+      <Route path="/pipelines" element={<Protected><Pipelines /></Protected>} />
       <Route path="/compare" element={<Protected><Compare /></Protected>} />
       <Route path="/agents" element={<Protected><Agents /></Protected>} />
       <Route path="/suggestions" element={<Protected><Suggestions /></Protected>} />
       <Route path="/prompt-studio" element={<Protected><PromptStudio /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
-      <Route path="/campaigns" element={<Protected admin><Campaigns /></Protected>} />
-      <Route path="/campaigns/:slug" element={<Protected admin><CampaignBuilder /></Protected>} />
       <Route path="/usage" element={<Protected admin><UsageAnalytics /></Protected>} />
       <Route path="/users" element={<Protected admin><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
