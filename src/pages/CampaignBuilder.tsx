@@ -21,6 +21,7 @@ export default function CampaignBuilder() {
   const [campaign, setCampaign] = useState<any>(null);
   const [pool, setPool] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
@@ -29,7 +30,7 @@ export default function CampaignBuilder() {
     setLoading(true);
     try {
       const [c, b] = await Promise.all([dispatch.getCampaign(slug), dispatch.bootstrap()]);
-      setCampaign(c.campaign); setPool(b.pool); setAgents(b.agents);
+      setCampaign(c.campaign); setPool(b.pool); setAgents(b.agents); setWorkspaces(b.workspaces || []);
     } catch (e: any) { setError(String(e?.message || e)); } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [slug]);
@@ -54,8 +55,8 @@ export default function CampaignBuilder() {
       </div>
 
       {step === 0 && <UploadStep campaign={campaign} onDone={load} />}
-      {step === 1 && <VerifyStep campaign={campaign} onNext={() => setStep(2)} />}
-      {step === 2 && <SetupStep campaign={campaign} pool={pool} agents={agents} onSaved={(c) => { setCampaign(c); setStep(3); }} />}
+      {step === 1 && <VerifyStep campaign={campaign} onChange={setCampaign} onNext={() => setStep(2)} />}
+      {step === 2 && <SetupStep campaign={campaign} pool={pool} agents={agents} workspaces={workspaces} onSaved={(c) => { setCampaign(c); setStep(3); }} />}
       {step === 3 && <LaunchStep campaign={campaign} />}
     </div>
   );
@@ -98,6 +99,7 @@ function CsvUpload({ slug, onDone }: { slug: string; onDone: () => void }) {
     return rows.map((r) => {
       const lead: any = { customFields: {} };
       for (const f of CANONICAL_FIELDS) { const i = idx[f.key]; if (i != null && i >= 0) lead[f.key] = (r[i] || '').trim(); }
+      // extra unmapped columns → custom fields (context for the AI)
       const mappedHeaders = new Set(Object.values(map));
       headers.forEach((h, i) => { if (!mappedHeaders.has(h) && (r[i] || '').trim()) lead.customFields[h] = r[i].trim(); });
       if (lead.city || lead.state || lead.zip) lead.address = [lead.address, [lead.city, lead.state, lead.zip].filter(Boolean).join(', ')].filter(Boolean).join(', ');
@@ -206,19 +208,31 @@ function SingleAdd({ slug, onDone }: { slug: string; onDone: () => void }) {
 }
 
 /* ---------------- Step 2: Verify ---------------- */
-function VerifyStep({ campaign, onNext }: { campaign: any; onNext: () => void }) {
+function VerifyStep({ campaign, onChange, onNext }: { campaign: any; onChange: (c: any) => void; onNext: () => void }) {
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
-  const [triggerTag, setTriggerTag] = useState('verify: run linetype');
+  const [triggerTag, setTriggerTag] = useState(campaign.validation_tag || 'verify: run linetype');
+  const [savingTag, setSavingTag] = useState(false);
   const [msg, setMsg] = useState('');
+  const dirty = triggerTag.trim() !== (campaign.validation_tag || '');
 
   const load = () => { setLoading(true); dispatch.verifyStatus(campaign.slug).then(setStatus).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, [campaign.slug]);
 
+  const saveTag = async () => {
+    setSavingTag(true); setMsg('');
+    try { const r = await dispatch.saveCampaign({ slug: campaign.slug, name: campaign.name, validation_tag: triggerTag.trim() }); onChange(r.campaign); setMsg('Trigger tag saved to this campaign.'); }
+    catch (e: any) { setMsg(String(e?.message || e)); } finally { setSavingTag(false); }
+  };
+
   const run = async () => {
     setRunning(true); setMsg('');
-    try { const r = await dispatch.verifyRun(campaign.slug, triggerTag.trim() || undefined); setMsg(`Tagged ${r.triggerTagged} for validation · stamped ${r.backfill?.labeled ?? 0} from signals.`); load(); }
+    try {
+      if (dirty) { const r = await dispatch.saveCampaign({ slug: campaign.slug, name: campaign.name, validation_tag: triggerTag.trim() }); onChange(r.campaign); }
+      const r = await dispatch.verifyRun(campaign.slug, triggerTag.trim() || undefined);
+      setMsg(`Tagged ${r.triggerTagged} leads with "${r.triggerTag || '(none)'}" for GHL validation · stamped ${r.backfill?.labeled ?? 0} from existing signals.`); load();
+    }
     catch (e: any) { setMsg(String(e?.message || e)); } finally { setRunning(false); }
   };
 
@@ -258,10 +272,16 @@ function VerifyStep({ campaign, onNext }: { campaign: any; onNext: () => void })
         )}
       </SectionCard>
 
-      <SectionCard title="Run verification" description="Stamps line-type signals into the Line Type field, and (optionally) tags unverified leads to trigger your GoHighLevel Number Validation workflow ($0.005/record).">
-        <label className="label mb-1 block">GHL validation trigger tag (added to unverified leads)</label>
-        <input className="input mb-3" value={triggerTag} onChange={(e) => setTriggerTag(e.target.value)} placeholder="verify: run linetype" />
-        <p className="mb-3 text-xs text-slate-500">Set this to the tag your GHL Number Validation workflow listens for. Leave blank to only stamp existing landline/wrong-number signals. Validation itself runs inside GoHighLevel; results flow back into the field and appear above.</p>
+      <SectionCard title="Run verification" description="Stamps line-type signals into the Line Type field, and tags unverified leads to trigger this campaign's GoHighLevel Number Validation workflow ($0.005/record).">
+        <label className="label mb-1 block">GHL validation trigger tag <span className="font-normal text-slate-400">— saved to this campaign</span></label>
+        <div className="mb-2 flex gap-2">
+          <input className="input flex-1" value={triggerTag} onChange={(e) => setTriggerTag(e.target.value)} placeholder="verify: run linetype" />
+          <button className="btn-ghost" disabled={savingTag || !dirty} onClick={saveTag}>{savingTag ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save tag'}</button>
+        </div>
+        <p className="mb-3 text-xs text-slate-500">
+          This is the durable handoff: the tag your GoHighLevel Number Validation workflow listens for. It's stored per campaign, so each campaign (in any workspace) can point at its own workflow. Leave blank to only stamp existing landline/wrong-number signals. Validation runs inside GoHighLevel; results flow back into the Line Type field and appear above.
+          {campaign.validation_tag && <span className="mt-1 block">Currently saved: <code className="font-mono text-slate-600">{campaign.validation_tag}</code>{dirty && <span className="text-amber-600"> · unsaved change</span>}</span>}
+        </p>
         {msg && <div className="mb-3 rounded-lg bg-surface px-3 py-2 text-sm text-slate-700">{msg}</div>}
         <button className="btn-primary" disabled={running} onClick={run}>{running ? <><Loader2 className="h-4 w-4 animate-spin" /> Running…</> : <><ShieldCheck className="h-4 w-4" /> Run verification</>}</button>
       </SectionCard>
@@ -275,8 +295,9 @@ function VerifyStep({ campaign, onNext }: { campaign: any; onNext: () => void })
 }
 
 /* ---------------- Step 3: Setup ---------------- */
-function SetupStep({ campaign, pool, agents, onSaved }: { campaign: any; pool: any[]; agents: any[]; onSaved: (c: any) => void }) {
+function SetupStep({ campaign, pool, agents, workspaces, onSaved }: { campaign: any; pool: any[]; agents: any[]; workspaces: any[]; onSaved: (c: any) => void }) {
   const [agentId, setAgentId] = useState(campaign.agent_id);
+  const [workspace, setWorkspace] = useState(campaign.workspace || '');
   const [numbers, setNumbers] = useState<string[]>(campaign.numbers?.length ? campaign.numbers : pool.map((p) => p.number));
   const [cap, setCap] = useState(campaign.daily_cap);
   const [batch, setBatch] = useState(campaign.drip_batch);
@@ -298,7 +319,7 @@ function SetupStep({ campaign, pool, agents, onSaved }: { campaign: any; pool: a
     try {
       const r = await dispatch.saveCampaign({
         slug: campaign.slug, name: campaign.name, agent_id: agentId, agent_name: selAgent?.name,
-        numbers, daily_cap: Number(cap), drip_batch: Number(batch), drip_minutes: Number(minutes),
+        workspace: workspace || null, numbers, daily_cap: Number(cap), drip_batch: Number(batch), drip_minutes: Number(minutes),
         window_start: wStart, window_end: wEnd, window_tz: tz, status: 'ready',
       });
       onSaved(r.campaign);
@@ -309,6 +330,13 @@ function SetupStep({ campaign, pool, agents, onSaved }: { campaign: any; pool: a
 
   return (
     <div className="flex flex-col gap-5">
+      <SectionCard title="Workspace" description="Scope this campaign to a workspace (label + organization). Optional — leave global if it spans all.">
+        <select className="input w-auto min-w-[240px]" value={workspace} onChange={(e) => setWorkspace(e.target.value)}>
+          <option value="">Global (no specific workspace)</option>
+          {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
+        </select>
+      </SectionCard>
+
       <SectionCard title="1 · Pick the AI agent" description="Pre-made Dispatch AI models — or build your own">
         <div className="grid gap-3 sm:grid-cols-2">
           {allAgents.map((a) => (
