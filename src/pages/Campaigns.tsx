@@ -18,6 +18,7 @@ export default function Campaigns() {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newWs, setNewWs] = useState('');
   const [busy, setBusy] = useState(false);
 
   const load = () => { setLoading(true); dispatch.bootstrap().then(setData).catch((e) => setError(String(e?.message || e))).finally(() => setLoading(false)); };
@@ -27,7 +28,7 @@ export default function Campaigns() {
     if (!newName.trim()) return;
     setBusy(true);
     try {
-      const r = await dispatch.saveCampaign({ name: newName.trim() });
+      const r = await dispatch.saveCampaign({ name: newName.trim(), workspace: newWs || null });
       nav(`/campaigns/${r.campaign.slug}`);
     } catch (e: any) { setError(String(e?.message || e)); } finally { setBusy(false); }
   };
@@ -83,12 +84,13 @@ export default function Campaigns() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
-                    <tr><th className="px-3 py-2">Campaign</th><th className="px-3 py-2">Agent</th><th className="px-3 py-2 text-right">Leads</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr>
+                    <tr><th className="px-3 py-2">Campaign</th><th className="px-3 py-2">Workspace</th><th className="px-3 py-2">Agent</th><th className="px-3 py-2 text-right">Leads</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr>
                   </thead>
                   <tbody>
                     {(data.campaigns).map((c: any) => (
                       <tr key={c.slug} className="cursor-pointer border-t border-line hover:bg-surface" onClick={() => nav(`/campaigns/${c.slug}`)}>
                         <td className="px-3 py-2.5"><span className="font-semibold text-ink">{c.name}</span><div className="text-[11px] text-slate-400">{c.slug}</div></td>
+                        <td className="px-3 py-2.5 text-slate-600">{c.workspace ? (data.workspaces || []).find((w: any) => w.slug === c.workspace)?.display_name || c.workspace : <span className="text-slate-400">Global</span>}</td>
                         <td className="px-3 py-2.5 text-slate-600">{c.agent_name}</td>
                         <td className="px-3 py-2.5 text-right font-mono">{num(c.lead_count)}</td>
                         <td className="px-3 py-2.5"><span className={`pill ${STATUS_PILL[c.status] || 'bg-slate-100 text-slate-600'}`}>{c.status}</span></td>
@@ -108,7 +110,12 @@ export default function Campaigns() {
           <div className="card w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 text-lg font-bold text-ink">New campaign</h3>
             <label className="label mb-1 block">Campaign name</label>
-            <input autoFocus className="input mb-4" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Miami Off-Market — March" onKeyDown={(e) => e.key === 'Enter' && create()} />
+            <input autoFocus className="input mb-3" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Miami Off-Market — March" onKeyDown={(e) => e.key === 'Enter' && create()} />
+            <label className="label mb-1 block">Workspace <span className="font-normal text-slate-400">(optional)</span></label>
+            <select className="input mb-4" value={newWs} onChange={(e) => setNewWs(e.target.value)}>
+              <option value="">Global (no specific workspace)</option>
+              {(data?.workspaces || []).map((w: any) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
+            </select>
             <button className="btn-primary w-full" disabled={busy || !newName.trim()} onClick={create}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create & open builder'}</button>
           </div>
         </div>
