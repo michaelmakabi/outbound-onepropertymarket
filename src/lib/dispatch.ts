@@ -34,7 +34,7 @@ export const dispatch = {
   createLeads: (slug: string, leads: any[]) => call('leads.create', { method: 'POST', body: { slug, leads } }),
   listLeads: (slug: string) => call('leads.list', { params: { slug } }),
   verifyStatus: (slug: string) => call('verify.status', { params: { slug } }),
-  verifyRun: (slug: string, triggerTag?: string) => call('verify.run', { method: 'POST', body: { slug, triggerTag } }),
+  verifyRun: (slug: string, limit = 200) => call('verify.run', { method: 'POST', body: { slug, limit } }),
   preview: (contactId: string) => call('dial.preview', { method: 'POST', body: { contact_id: contactId } }),
   testDial: (b: { phone: string; name?: string; address?: string }) => call('dial.test', { method: 'POST', body: b }),
   launch: (slug: string) => call('launch', { method: 'POST', body: { slug, confirm: true } }),
