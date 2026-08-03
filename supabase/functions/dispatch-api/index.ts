@@ -15,7 +15,9 @@ const LINETYPE_BASE = 'https://sezigczgwezeecgobuqd.supabase.co/functions/v1/lin
 const DIAL_SECRET = Deno.env.get('DIAL_SECRET') || 'bb-adrian-dial-9x27';
 const ADRIAN_AGENT = Deno.env.get('ADRIAN_AGENT_ID') || 'agent_ee77a9e3c659964acc19d0be54';
 const RETELL_KEY = Deno.env.get('RETELL_API_KEY') || 'key_ecb90512a65f3aea88c243d5816e';
-const AUTH_ME = (Deno.env.get('ANALYTICS_API') || 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api') + '?action=me';
+const ANALYTICS_API = Deno.env.get('ANALYTICS_API') || 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
+const AUTH_ME = ANALYTICS_API + '?action=me';
+const DEFAULT_VALIDATION_TAG = 'verify: run linetype';
 
 const LINE_TYPE_FIELD = 'uyXHlCAuHq2y7jRHMiwg';
 const ADDR_FIELDS = ['yUXrLod4dbSPWmnCbaSH', 'LHfGDHAAofUr7o85ci5a'];
@@ -139,14 +141,20 @@ Deno.serve(async (req) => {
   const str = (k: string) => url.searchParams.get(k) || (body as any)[k] || '';
 
   try {
-    // ---- bootstrap: pool + agents + field map + campaigns ----
+    // ---- bootstrap: pool + agents + field map + campaigns + the admin's visible workspaces ----
     if (action === 'bootstrap') {
       const { data: campaigns } = await client.from('dispatch_campaigns').select('*').order('created_at', { ascending: false });
       const pool = await numberPool('pitman');
       const agents = [
         { id: ADRIAN_AGENT, name: 'Adrian — Off-Market Seller Acquisition', premade: true, description: 'Warm cold-call acquisition agent with deep discovery, rebuttals, price ladder, appraisal pivot and written-offer close. Published & live.' },
       ];
-      return json({ user: { name: user.name, role: user.role, email: user.email }, pool, agents, campaigns: campaigns || [], ghlLocation: LOC });
+      // pull the workspaces this admin can see from the analytics API (campaigns can be scoped per workspace)
+      let workspaces: any[] = [];
+      try {
+        const wr = await fetch(ANALYTICS_API + '?action=bootstrap', { headers: { Authorization: req.headers.get('authorization') || '' } });
+        if (wr.ok) { const wd = await wr.json(); workspaces = wd?.workspaces || []; }
+      } catch { /* non-fatal */ }
+      return json({ user: { name: user.name, role: user.role, email: user.email }, pool, agents, campaigns: campaigns || [], workspaces, defaultValidationTag: DEFAULT_VALIDATION_TAG, ghlLocation: LOC });
     }
 
     // ---- campaigns CRUD ----
@@ -161,6 +169,8 @@ Deno.serve(async (req) => {
         window_start: body.window_start || '09:00', window_end: body.window_end || '19:00', window_tz: body.window_tz || 'America/New_York',
         status: body.status || 'draft', updated_at: new Date().toISOString(),
       };
+      if (body.validation_tag !== undefined) row.validation_tag = String(body.validation_tag).trim() || DEFAULT_VALIDATION_TAG;
+      if (body.workspace !== undefined) row.workspace = body.workspace || null;
       const { data, error } = await client.from('dispatch_campaigns').upsert(row, { onConflict: 'slug' }).select('*').maybeSingle();
       if (error) return json({ error: error.message }, 400);
       return json({ campaign: data });
@@ -200,6 +210,7 @@ Deno.serve(async (req) => {
         else { rejected++; if (errors.length < 5) errors.push(`${phone}: ${r.status} ${JSON.stringify(r.json).slice(0, 120)}`); }
         await new Promise((s) => setTimeout(s, 40));
       }
+      // refresh lead_count
       await client.from('dispatch_campaigns').update({ lead_count: (added + merged), updated_at: new Date().toISOString() }).eq('slug', slug);
       return json({ added, merged, rejected, errors });
     }
@@ -227,12 +238,15 @@ Deno.serve(async (req) => {
       return json({ total, resolved, unverified: buckets.unverified, buckets, pctResolved: total ? Math.round((resolved / total) * 100) : 0 });
     }
 
-    // ---- verify.run: stamp tag-signal line types via linetype-backfill; optionally tag to trigger GHL validation workflow ----
+    // ---- verify.run: stamp tag-signal line types via linetype-backfill; tag unverified leads with this
+    //      campaign's persisted GHL validation trigger tag (the durable handoff into GoHighLevel). ----
     if (action === 'verify.run') {
-      const triggerTag = String(body.triggerTag || '').trim();
+      const slug = str('slug').toLowerCase();
+      const { data: camp } = await client.from('dispatch_campaigns').select('validation_tag').eq('slug', slug).maybeSingle();
+      // explicit body.triggerTag overrides for this run (incl. '' to skip); otherwise use the campaign's saved tag.
+      const triggerTag = (body.triggerTag !== undefined ? String(body.triggerTag) : (camp?.validation_tag || DEFAULT_VALIDATION_TAG)).trim();
       let tagged = 0;
       if (triggerTag) {
-        const slug = str('slug').toLowerCase();
         const contacts = await searchByTag(campaignTag(slug), 500);
         for (const c of contacts) {
           if (lineBucket(c).type !== 'unverified') continue;
@@ -240,10 +254,11 @@ Deno.serve(async (req) => {
           tagged++; await new Promise((s) => setTimeout(s, 40));
         }
       }
+      // drain tag-derived signals into the Line Type field
       const u = new URL(LINETYPE_BASE); u.searchParams.set('key', DIAL_SECRET);
       const r = await fetch(u.toString(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 400 }) });
       const bf = await r.json().catch(() => ({}));
-      return json({ ok: true, triggerTagged: tagged, backfill: bf });
+      return json({ ok: true, triggerTag, triggerTagged: tagged, backfill: bf });
     }
 
     // ---- dialer passthroughs ----
