@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, opm } from '../lib/api';
 import { useFilters } from '../lib/filters';
 import {
   PageHeader, SectionCard, LoadingBlock, EmptyState, WorkspaceSelect, MultiSelect, SavedViews, AudioPlayer,
@@ -89,6 +89,15 @@ export default function CallHistory() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rows: any[] = data?.items ?? [];
   const hasFilters = dispositions.length > 0 || directions.length > 0 || !!search || minDuration > 0;
+
+  // Enrich calls with the matched seller contact (name + property) from the OPM campaign data.
+  const [resolveMap, setResolveMap] = useState<Record<string, any>>({});
+  useEffect(() => {
+    const nums = rows.map((c: any) => (c.direction === 'inbound' ? c.from_number : c.to_number)).filter(Boolean);
+    if (!nums.length) { setResolveMap({}); return; }
+    opm.resolve(nums).then((d) => setResolveMap(d.map || {})).catch(() => setResolveMap({}));
+  }, [data]);
+  const resolveInfo = (num: string) => resolveMap[String(num || '').replace(/\D/g, '').slice(-10)];
   const selectedCalls = () => Array.from(selected).map((id) => rows.find((r) => r.call_id === id) || { call_id: id });
 
   const currentCfg: ViewCfg = useMemo(() => ({ ws, dispositions, directions, minDuration, search, sort, hidden }), [ws, dispositions, directions, minDuration, search, sort, hidden]);
@@ -118,12 +127,13 @@ export default function CallHistory() {
       const all = await api.calls(query({ page: 1, pageSize: 5000 }));
       let items: any[] = all.items || [];
       if (selected.size) items = items.filter((c) => selected.has(c.call_id));
-      const cols = ['When', 'Direction', 'Contact', 'Agent', 'Disposition', 'Duration(s)', 'Cost($)', 'Sentiment', 'Summary', 'CallID'];
+      const cols = ['When', 'Direction', 'Contact', 'Name', 'Property', 'Agent', 'Disposition', 'Duration(s)', 'Cost($)', 'Sentiment', 'Summary', 'CallID'];
       const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
       const lines = [cols.join(',')];
       for (const c of items) {
         const contact = c.direction === 'inbound' ? c.from_number : c.to_number;
-        lines.push([c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '', c.agent_name || '', c.disposition || '', c.duration_seconds || 0, (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id].map(esc).join(','));
+        const info = resolveInfo(contact) || {};
+        lines.push([c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '', info.name || '', info.property_ref || '', c.agent_name || '', c.disposition || '', c.duration_seconds || 0, (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id].map(esc).join(','));
       }
       const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
@@ -238,7 +248,13 @@ export default function CallHistory() {
                       )}
                       {isVisible('when') && <td className="whitespace-nowrap px-3 py-2.5 text-xs">{dateTime(c.start_timestamp)}</td>}
                       {isVisible('direction') && <td className="px-3 py-2.5"><span className="inline-flex items-center gap-1.5 text-xs">{inbound ? <PhoneIncoming className="h-3.5 w-3.5 text-emerald-600" /> : <PhoneOutgoing className="h-3.5 w-3.5 text-brand" />}{inbound ? 'Inbound' : 'Outbound'}</span></td>}
-                      {isVisible('contact') && <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs">{contact || '—'}</td>}
+                      {isVisible('contact') && (() => { const info = resolveInfo(contact); return (
+                        <td className="px-3 py-2.5">
+                          <div className="whitespace-nowrap font-mono text-xs text-ink">{contact || '—'}</div>
+                          {info?.name && <div className="text-xs font-semibold text-brand">{info.name}</div>}
+                          {info?.property_ref && <div className="max-w-[200px] truncate text-[10px] text-slate-400">{info.property_ref}</div>}
+                        </td>
+                      ); })()}
                       {isVisible('agent') && <td className="max-w-[220px] truncate px-3 py-2.5 text-xs">{c.agent_name || '—'}</td>}
                       {isVisible('disposition') && <td className="whitespace-nowrap px-3 py-2.5">{c.disposition ? <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(c.disposition) }}><span className="h-2 w-2 rounded-full" style={{ background: dispositionColor(c.disposition) }} />{humanizeDisposition(c.disposition)}</span> : <span className="text-xs text-slate-400">—</span>}</td>}
                       {isVisible('summary') && <td className="max-w-[280px] px-3 py-2.5">{c.call_summary ? <span className="flex items-center gap-1.5 text-xs text-slate-600"><FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{c.call_summary}</span></span> : <span className="text-xs text-slate-300">—</span>}</td>}
