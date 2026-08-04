@@ -12,12 +12,11 @@ import { LOGO_MARK } from '../lib/logo';
 const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/leads', label: 'Leads', icon: UserSquare2 },
-  { to: '/seller-contacts', label: 'Seller Contacts', icon: Contact },
+  { to: '/seller-contacts', label: 'Contacts', icon: Contact },
   { to: '/pipelines', label: 'Pipelines', icon: Columns3 },
   { to: '/workspaces', label: 'Workspaces', icon: Building2 },
   { to: '/dispositions', label: 'Dispositions', icon: PieChart },
   { to: '/calls', label: 'Call History', icon: PhoneCall },
-  { to: '/contacts', label: 'Contacts', icon: Contact },
   { to: '/compare', label: 'Compare', icon: GitCompare },
   { to: '/agents', label: 'Agents & Models', icon: Bot },
   { to: '/suggestions', label: 'AI Suggestions', icon: Sparkles },
