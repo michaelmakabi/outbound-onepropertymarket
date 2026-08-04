@@ -122,6 +122,35 @@ export const opm = {
   billingSetConfig: (b: any) => opmCall('billing_set_config', { method: 'POST', params: { workspace: '' }, body: b }),
 };
 
+// ---- Test AI (separate `test-call` edge function) — place live test calls ----
+const TESTAI_BASE =
+  (import.meta as any).env?.VITE_TESTAI_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/test-call') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/test-call');
+
+async function testaiCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(TESTAI_BASE);
+  url.searchParams.set('action', action);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+export const testai = {
+  workspaces: () => testaiCall('workspaces'),
+  agents: (workspace: string) => testaiCall('agents', { params: { workspace } }),
+  numbers: (workspace: string) => testaiCall('numbers', { params: { workspace } }),
+  call: (b: { workspace: string; agent_id: string; to_number: string; from_number?: string; dynamic_variables?: Record<string, string> }) =>
+    testaiCall('call', { method: 'POST', body: b }),
+};
+
 // ---- Billing operations (separate `billing-run` edge function; super-admin) ----
 const BILLING_BASE =
   (import.meta as any).env?.VITE_BILLING_BASE ||
@@ -143,33 +172,6 @@ export const billing = {
   ingestCalls: () => billingCall('ingest_calls'),
   createCustomer: (workspace_slug: string, email?: string) => billingCall('create_customer', { body: { workspace_slug, email } }),
   generateInvoice: (workspace_slug: string) => billingCall('generate_invoice', { body: { workspace_slug } }),
-};
-
-// ---- Super-admin operations (separate `admin-ops` edge function): webhooks + dialer routing ----
-const ADMINOPS_BASE =
-  (import.meta as any).env?.VITE_ADMINOPS_BASE ||
-  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/admin-ops') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/admin-ops');
-
-async function adminOpsCall(action: string, opts: { method?: string; body?: any } = {}) {
-  const url = new URL(ADMINOPS_BASE);
-  url.searchParams.set('action', action);
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const token = tokenStore.get();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const method = opts.method || 'POST';
-  const res = await fetch(url.toString(), { method, headers, body: method === 'GET' ? undefined : (opts.body ? JSON.stringify(opts.body) : '{}') });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
-  return data;
-}
-
-export const adminOps = {
-  webhooksList: () => adminOpsCall('webhooks_list', { method: 'GET' }),
-  webhooksSave: (b: any) => adminOpsCall('webhooks_save', { body: b }),
-  webhooksDelete: (id: number) => adminOpsCall('webhooks_delete', { body: { id } }),
-  webhooksTest: (id: number) => adminOpsCall('webhooks_test', { body: { id } }),
-  dialerList: () => adminOpsCall('dialer_list', { method: 'GET' }),
-  dialerSet: (b: any) => adminOpsCall('dialer_set', { body: b }),
 };
 
 // Fetch a call recording via the backend proxy (bypasses CORS) as a Blob.
