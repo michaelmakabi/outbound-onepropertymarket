@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { opm } from '../lib/api';
 import { LoadingBlock, EmptyState } from '../components/dash';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
-  Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag,
+  Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check,
 } from 'lucide-react';
 
 function fmtNum(n: string) {
@@ -13,7 +13,6 @@ function fmtNum(n: string) {
 }
 const money = (n: any) => (n ? `$${Number(n).toLocaleString('en-US')}` : '—');
 
-// Notes arrive as messy, often double-escaped GHL HTML (&lt;p&gt;, <hr>, mention spans).
 function cleanNote(raw: string): string {
   if (!raw) return '';
   let s = raw;
@@ -25,6 +24,12 @@ function cleanNote(raw: string): string {
   s = s.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').replace(/^[\s\n]+|[\s\n]+$/g, '');
   return s;
 }
+function noteTime(n: any): number {
+  if (n.ts) { const t = new Date(n.ts).getTime(); if (!isNaN(t)) return t; }
+  const m = String(n.note_date || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return new Date(+m[3], +m[1] - 1, +m[2]).getTime();
+  return (n.id || 0) * 1000;
+}
 const PARCEL_LABELS: Record<string, string> = {
   bbl: 'BBL', 'bldg sqft': 'Building SF', 'lot sqft': 'Lot SF', 'bldg front': 'Bldg Front', 'bldg depth': 'Bldg Depth',
   'lot front': 'Lot Front', 'lot depth': 'Lot Depth', neighborhood: 'Neighborhood', 'residential units': 'Res Units',
@@ -33,7 +38,7 @@ const PARCEL_LABELS: Record<string, string> = {
 };
 const SOURCE_STYLE: Record<string, string> = {
   call: 'bg-sky-100 text-sky-700', email: 'bg-violet-100 text-violet-700', text: 'bg-emerald-100 text-emerald-700',
-  ai: 'bg-fuchsia-100 text-fuchsia-700', manual: 'bg-slate-100 text-slate-600', import: 'bg-slate-100 text-slate-500',
+  ai: 'bg-fuchsia-100 text-fuchsia-700',
 };
 const COMPOSE_TABS = [
   { k: 'note', label: 'Note', icon: PenLine },
@@ -50,10 +55,10 @@ export default function LeadDetail() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<'all' | 'notes' | 'calls'>('all');
+  const [tab, setTab] = useState<'activity' | 'notes' | 'calls' | 'property'>('activity');
   const [ids, setIds] = useState<string[]>((location.state as any)?.ids || []);
+  const [toast, setToast] = useState('');
 
-  // composer
   const [mode, setMode] = useState<'note' | 'email' | 'text' | 'call'>('note');
   const [body, setBody] = useState('');
   const [subject, setSubject] = useState('');
@@ -69,8 +74,8 @@ export default function LeadDetail() {
   const goto = (t: string | null) => { if (t) nav(`/leads/${encodeURIComponent(t)}`, { state: { ids } }); };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return;
+      const t = (e.target as HTMLElement)?.tagName;
+      if (t === 'TEXTAREA' || t === 'INPUT' || t === 'SELECT') return;
       if (e.key === 'ArrowLeft') goto(prevId);
       if (e.key === 'ArrowRight') goto(nextId);
     };
@@ -80,10 +85,12 @@ export default function LeadDetail() {
 
   const lead = data?.lead;
   const contacts: any[] = data?.contacts || [];
-  const notes: any[] = data?.notes || [];
+  const rawNotes: any[] = data?.notes || [];
   const calls: any[] = data?.calls || [];
+  const notes = useMemo(() => [...rawNotes].sort((a, b) => noteTime(b) - noteTime(a)), [rawNotes]);
   const owners = contacts.filter((c) => c.contact_kind !== 'relative');
   const relatives = contacts.filter((c) => c.contact_kind === 'relative');
+  const parcel = lead?.parcel || {};
 
   async function patch(contact_id: string, b: any) {
     setData((d: any) => ({ ...d, contacts: d.contacts.map((c: any) => c.contact_id === contact_id ? { ...c, ...b } : (b.is_primary_number ? { ...c, is_primary_number: false } : c)) }));
@@ -98,25 +105,49 @@ export default function LeadDetail() {
     if (!text) return;
     setSaving(true);
     await opm.addNote({ lead_id: id, text, html: text.replace(/\n/g, '<br>'), source: srcMap[mode] }).catch(() => {});
-    setBody(''); setSubject(''); setCallOutcome(''); setSaving(false); load();
+    setBody(''); setSubject(''); setCallOutcome(''); setSaving(false); setTab('activity'); load();
   }
   async function aiNote() {
     if (!body.trim()) return;
     setSaving(true);
     await opm.addNote({ lead_id: id, text: `✨ ${body}`, html: `✨ ${body}`.replace(/\n/g, '<br>'), source: 'ai' }).catch(() => {});
-    setBody(''); setSaving(false); load();
+    setBody(''); setSaving(false); setTab('activity'); load();
+  }
+  function aiCallBrief() {
+    const primary = contacts.find((c) => c.is_primary_number) || contacts[0];
+    const addr = lead.addresses?.[0];
+    const brief = [
+      `SELLER: ${lead.name}`,
+      `PROPERTY: ${lead.property_ref || '—'}${addr ? `  |  ${addr.Street}, ${addr.City} ${addr.State} ${addr.Zip}` : ''}`,
+      `PIPELINE/STAGE: ${lead.pipeline_name || 'Pitman'} · ${lead.stage_name || lead.crm_stage || '—'}`,
+      `OUR VALUE: ${money(lead.deal_price)}`,
+      `PRIMARY #: ${primary ? fmtNum(primary.phone) : '—'} (${primary?.phone_channel || 'unknown'})`,
+      `PARCEL: ${Object.entries(parcel).filter(([k, v]) => v && k !== 'lat long' && k !== 'is related').map(([k, v]) => `${PARCEL_LABELS[k] || k} ${v}`).join(' · ')}`,
+      '',
+      'CALL HISTORY / NOTES (newest first):',
+      ...notes.slice(0, 12).map((n) => `• [${n.note_date || ''}] ${n.author || 'System'}: ${cleanNote(n.body_html || n.body_text || '').replace(/\n/g, ' ')}`),
+    ].join('\n');
+    try { navigator.clipboard.writeText(brief); } catch {}
+    setToast('AI call brief copied — this context is what the voice agent ingests on dial.');
+    setTimeout(() => setToast(''), 4000);
   }
 
-  if (loading) return <div className="mx-auto max-w-[1500px]"><LoadingBlock label="Loading lead…" /></div>;
+  if (loading) return <div className="mx-auto max-w-[1400px]"><LoadingBlock label="Loading lead…" /></div>;
   if (!lead) return <EmptyState text="Lead not found." />;
 
-  const parcel = lead.parcel || {};
-  const activity = tab === 'calls' ? [] : (tab === 'notes' ? notes.filter((n) => n.source !== 'call') : notes);
   const initials = (lead.name || '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('');
   const verifiedN = contacts.filter((c) => c.phone_verified).length;
+  const parcelEntries = Object.entries(parcel).filter(([k, v]) => k !== 'is related' && k !== 'lat long' && v !== '' && v != null);
+  const TABS = [
+    { k: 'activity', label: 'Activity', n: notes.length },
+    { k: 'notes', label: 'Notes', n: null },
+    { k: 'calls', label: 'Calls', n: calls.length },
+    { k: 'property', label: 'Property & Details', n: null },
+  ] as const;
+  const activityList = tab === 'notes' ? notes.filter((n) => n.source !== 'call') : notes;
 
   return (
-    <div className="mx-auto max-w-[1500px]">
+    <div className="mx-auto max-w-[1400px] text-sm">
       {/* top bar */}
       <div className="mb-4 flex items-center justify-between gap-3">
         <button onClick={() => nav('/leads', { state: { ids } })} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 transition hover:text-brand"><ArrowLeft className="h-4 w-4" /> All leads</button>
@@ -130,30 +161,33 @@ export default function LeadDetail() {
       {/* identity + deal strip */}
       <div className="mb-4 flex flex-col gap-4 rounded-2xl border border-line bg-white p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
-          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-brand/10 text-lg font-extrabold text-brand">{initials}</div>
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand/10 text-base font-extrabold text-brand">{initials}</div>
           <div className="min-w-0">
-            <div className="truncate text-lg font-extrabold leading-tight text-ink">{lead.name}</div>
+            <div className="truncate text-lg font-bold leading-tight text-ink">{lead.name}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-2">
               <span className="pill bg-brand/10 text-brand">{lead.stage_name || lead.crm_stage || '—'}</span>
               <span className="text-xs text-slate-400">{lead.pipeline_name || 'Pitman Seller Pipeline'}</span>
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat icon={DollarSign} label="Deal Value" value={money(lead.deal_price)} />
-          <Stat icon={GitBranch} label="Source" value={lead.lead_source || '—'} />
-          <Stat icon={User} label="Assigned" value={lead.assigned_to || '—'} />
-          <Stat icon={Phone} label="Numbers" value={`${contacts.length} · ${verifiedN} ✓`} />
+        <div className="flex items-center gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Stat icon={DollarSign} label="Our Value" value={money(lead.deal_price)} />
+            <Stat icon={GitBranch} label="Source" value={lead.lead_source || '—'} />
+            <Stat icon={User} label="Assigned" value={lead.assigned_to || '—'} />
+            <Stat icon={Phone} label="Numbers" value={`${contacts.length} · ${verifiedN}✓`} />
+          </div>
+          <button onClick={aiCallBrief} title="Copy the full context the AI voice agent ingests on dial" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white transition hover:brightness-125"><Bot className="h-4 w-4" /> AI Call</button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-        {/* LEFT column */}
+      {toast && <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700"><Check className="h-4 w-4" /> {toast}</div>}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+        {/* LEFT column — dialing essentials only */}
         <div className="space-y-4">
           <Card title="Phone Numbers" count={owners.length}>
-            <div className="space-y-2">
-              {owners.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} />)}
-            </div>
+            <div className="space-y-2">{owners.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} />)}</div>
             {lead.emails?.[0]?.email && <div className="mt-3 flex items-center gap-1.5 text-sm text-brand"><Mail className="h-3.5 w-3.5" /> {lead.emails[0].email}</div>}
             {lead.addresses?.[0] && <div className="mt-1 text-xs text-slate-500">{lead.addresses[0].Street}, {lead.addresses[0].City} {lead.addresses[0].State} {lead.addresses[0].Zip}</div>}
           </Card>
@@ -165,33 +199,16 @@ export default function LeadDetail() {
           )}
 
           <Card title="Details">
-            <dl className="space-y-0.5">
+            <dl>
               <Row k="Stage" v={<span className="pill bg-brand/10 text-brand">{lead.stage_name || lead.crm_stage || '—'}</span>} />
               <Row k="Pipeline" v={lead.pipeline_name || '—'} />
-              <Row k="Assigned to" v={lead.assigned_to || '—'} />
-              <Row k="Deal Price" v={money(lead.deal_price)} />
-              <Row k="Subject Property" v={lead.property_ref || '—'} />
+              <Row k="Assigned" v={lead.assigned_to || '—'} />
+              <Row k="Our Value" v={money(lead.deal_price)} />
+              <Row k="Property" v={lead.property_ref || '—'} />
+              <Row k="Source" v={lead.lead_source || '—'} />
             </dl>
-            {lead.tags?.length > 0 && (
-              <div className="mt-3">
-                <div className="mb-1.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Tag className="h-3 w-3" /> Tags</div>
-                <div className="flex flex-wrap gap-1">{lead.tags.slice(0, 16).map((t: string) => <span key={t} className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-slate-500">{t}</span>)}{lead.tags.length > 16 && <span className="text-[10px] text-slate-400">+{lead.tags.length - 16}</span>}</div>
-              </div>
-            )}
+            <button onClick={() => setTab('property')} className="mt-2 text-xs font-semibold text-brand hover:underline">View all property & parcel data →</button>
           </Card>
-
-          {Object.keys(parcel).length > 0 && (
-            <Card title="Property · Parcel">
-              <dl className="grid grid-cols-2 gap-x-4">
-                {Object.entries(parcel).filter(([k, v]) => k !== 'is related' && k !== 'lat long' && v !== '' && v != null).map(([k, v]) => (
-                  <div key={k} className="flex items-center justify-between gap-2 border-b border-dashed border-line py-1.5 text-xs">
-                    <span className="text-slate-400">{PARCEL_LABELS[k] || k}</span>
-                    <span className="text-right font-medium text-ink">{String(v)}</span>
-                  </div>
-                ))}
-              </dl>
-            </Card>
-          )}
         </div>
 
         {/* RIGHT column */}
@@ -206,7 +223,7 @@ export default function LeadDetail() {
               ))}
             </div>
             <div className="space-y-2 p-3">
-              {mode === 'email' && <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="input w-full" />}
+              {mode === 'email' && <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="input w-full text-sm" />}
               {mode === 'call' && (
                 <div className="flex flex-wrap gap-1.5">
                   {CALL_OUTCOMES.map((o) => <button key={o} onClick={() => setCallOutcome(o)} className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${callOutcome === o ? 'border-brand bg-brand text-white' : 'border-line text-slate-600 hover:border-brand'}`}>{o}</button>)}
@@ -214,9 +231,9 @@ export default function LeadDetail() {
               )}
               <textarea value={body} onChange={(e) => setBody(e.target.value)}
                 placeholder={mode === 'note' ? 'Add a note… (saved with your name + timestamp)' : mode === 'email' ? 'Email body — logged to the timeline' : mode === 'text' ? 'Text message — logged to the timeline' : 'Call notes (optional)'}
-                className="input min-h-[84px] w-full resize-y" />
+                className="input min-h-[80px] w-full resize-y text-sm" />
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-400">{mode === 'note' ? 'Saved as a note' : mode === 'call' ? 'Logs a call activity' : `Logs ${mode === 'email' ? 'an email' : 'a text'} touch`}</span>
+                <span className="text-xs text-slate-400">{mode === 'note' ? 'Saved as a note' : mode === 'call' ? 'Logs a call activity' : `Logs ${mode === 'email' ? 'an email' : 'a text'} touch`}</span>
                 <div className="flex gap-2">
                   {mode === 'note' && <button onClick={aiNote} disabled={saving || !body.trim()} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> AI Note</button>}
                   <button onClick={saveActivity} disabled={saving} className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{saving ? 'Saving…' : COMPOSE_TABS.find((t) => t.k === mode)!.label}</button>
@@ -225,35 +242,52 @@ export default function LeadDetail() {
             </div>
           </div>
 
-          {/* activity */}
+          {/* tabbed panel */}
           <div className="rounded-2xl border border-line bg-white">
-            <div className="flex items-center gap-4 border-b border-line px-4 py-2.5 text-sm font-semibold text-slate-500">
-              <button className={tab === 'all' ? 'text-ink' : 'hover:text-ink'} onClick={() => setTab('all')}>Activity <span className="text-slate-400">{notes.length}</span></button>
-              <button className={tab === 'notes' ? 'text-ink' : 'hover:text-ink'} onClick={() => setTab('notes')}>Notes</button>
-              <button className={tab === 'calls' ? 'text-ink' : 'hover:text-ink'} onClick={() => setTab('calls')}>Calls <span className="text-slate-400">{calls.length}</span></button>
+            <div className="flex items-center gap-1 border-b border-line px-2 pt-1">
+              {TABS.map((t) => (
+                <button key={t.k} onClick={() => setTab(t.k)} className={`rounded-t-lg px-3 py-2.5 text-sm font-semibold transition ${tab === t.k ? 'border-b-2 border-brand text-ink' : 'text-slate-500 hover:text-ink'}`}>
+                  {t.label}{t.n != null && <span className="ml-1 text-xs text-slate-400">{t.n}</span>}
+                </button>
+              ))}
             </div>
             <div className="p-4">
-              {tab === 'calls' ? (
+              {tab === 'property' ? (
+                parcelEntries.length === 0 ? <EmptyState text="No property data on this lead." /> : (
+                  <dl className="grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
+                    {parcelEntries.map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2 text-sm">
+                        <span className="text-slate-500">{PARCEL_LABELS[k] || k}</span>
+                        <span className="text-right font-medium text-ink">{String(v)}</span>
+                      </div>
+                    ))}
+                  </dl>
+                )
+              ) : tab === 'calls' ? (
                 calls.length === 0 ? <EmptyState text="No dialer calls matched to this lead's numbers yet." /> :
                 <ol className="space-y-3">{calls.map((c) => (
                   <li key={c.call_id} className="rounded-xl border border-line p-3">
                     <div className="flex items-center justify-between text-sm"><span className="font-semibold text-ink">{c.disposition || 'Call'}</span><span className="font-mono text-xs text-slate-400">{fmtNum(c.to_number || '')}</span></div>
-                    {c.call_summary && <div className="mt-1 text-xs text-slate-600">{c.call_summary}</div>}
+                    {c.call_summary && <div className="mt-1 text-sm text-slate-600">{c.call_summary}</div>}
                     {c.recording_url && <audio controls src={c.recording_url} className="mt-2 h-8 w-full" />}
                   </li>))}</ol>
               ) : (
-                activity.length === 0 ? <EmptyState text="No activity yet — add a note, log a call, or record an email/text above." /> :
-                <ol className="space-y-3">{activity.map((n) => (
-                  <li key={n.id} className="flex gap-3">
-                    <div className="grid h-7 w-7 flex-none place-items-center rounded-full bg-surface text-[10px] font-bold text-slate-500">{(n.author || 'SY').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
-                    <div className="min-w-0 flex-1 rounded-xl border border-line bg-surface/60 p-3">
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2"><span className="text-sm font-semibold text-ink">{n.author || 'System'}</span>{n.source && n.source !== 'import' && n.source !== 'manual' && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SOURCE_STYLE[n.source] || 'bg-slate-100 text-slate-500'}`}>{n.source}</span>}</div>
-                        <span className="shrink-0 text-xs text-slate-400">{n.note_date || ''}</span>
+                activityList.length === 0 ? <EmptyState text="No activity yet — add a note, log a call, or record an email/text above." /> :
+                <ol className="space-y-3">{activityList.map((n) => {
+                  const text = cleanNote(n.body_html || n.body_text || '');
+                  return (
+                    <li key={n.id} className="flex gap-3">
+                      <div className="grid h-7 w-7 flex-none place-items-center rounded-full bg-surface text-[10px] font-bold text-slate-500">{(n.author || 'SY').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
+                      <div className="min-w-0 flex-1 rounded-xl border border-line bg-surface/50 p-3">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2"><span className="text-sm font-semibold text-ink">{n.author || 'System'}</span>{n.source && SOURCE_STYLE[n.source] && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SOURCE_STYLE[n.source]}`}>{n.source}</span>}</div>
+                          <span className="shrink-0 text-xs text-slate-400">{n.note_date || ''}</span>
+                        </div>
+                        <div className="whitespace-pre-line text-sm leading-relaxed text-slate-700">{text || <span className="text-slate-400">—</span>}</div>
                       </div>
-                      <div className="whitespace-pre-line text-sm leading-relaxed text-slate-700">{cleanNote(n.body_html || n.body_text || '')}</div>
-                    </div>
-                  </li>))}</ol>
+                    </li>
+                  );
+                })}</ol>
               )}
             </div>
           </div>
@@ -284,7 +318,7 @@ function Card({ title, count, children }: { title: string; count?: number; child
 }
 
 function Row({ k, v }: { k: string; v: any }) {
-  return <div className="flex items-start justify-between gap-3 border-b border-dashed border-line py-1.5 text-sm last:border-0"><span className="shrink-0 text-slate-500">{k}</span><span className="text-right font-medium text-ink">{v}</span></div>;
+  return <div className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2 text-sm last:border-0"><span className="shrink-0 text-slate-500">{k}</span><span className="truncate text-right font-medium text-ink">{v}</span></div>;
 }
 
 function PhoneRow({ c, onPatch, showRel }: { c: any; onPatch: (id: string, b: any) => void; showRel?: boolean }) {
