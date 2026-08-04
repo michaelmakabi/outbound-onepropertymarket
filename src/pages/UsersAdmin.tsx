@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
-import { UserPlus, ShieldCheck, X, Check, Pencil, KeyRound, Send, Copy, Clock } from 'lucide-react';
+import { UserPlus, ShieldCheck, X, Check, Pencil, KeyRound, Send, Copy, Clock, Eye } from 'lucide-react';
 
 type Ws = { slug: string; display_name: string; status: string };
 type AccessRow = { workspace: string; agent_mode: 'all' | 'only' | 'except'; agent_ids: string[] };
@@ -16,7 +16,7 @@ function StatusBadge({ u }: { u: any }) {
 }
 
 export default function UsersAdmin() {
-  const { user: me } = useAuth();
+  const { user: me, startImpersonation } = useAuth();
   const isSuper = me?.role === 'super_admin';
   const [users, setUsers] = useState<any[]>([]);
   const [workspaces, setWorkspaces] = useState<Ws[]>([]);
@@ -46,6 +46,10 @@ export default function UsersAdmin() {
     const r = await api.admin.resendInvite({ id: u.id });
     setReveal({ title: `Invite for ${u.name}`, name: u.name, username: r.username, password: r.password, loginUrl: r.loginUrl });
     refresh();
+  };
+  const impersonate = async (u: any) => {
+    if (!confirm(`View the dashboard as ${u.name}? You'll act with exactly their access until you return to your own account.`)) return;
+    try { await startImpersonation(u.id); } catch (e: any) { alert(e?.message || 'Could not start impersonation.'); }
   };
 
   if (loading) return <Spinner />;
@@ -78,6 +82,7 @@ export default function UsersAdmin() {
                 <td className="px-3 py-2.5">
                   <div className="flex items-center justify-end gap-1">
                     {u.role === 'user' && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setAccessUser(u)} title="Scope access"><ShieldCheck className="h-3.5 w-3.5" /> Scope</button>}
+                    {isSuper && u.id !== me?.id && u.role !== 'super_admin' && !u.disabled && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => impersonate(u)} title="View as this user"><Eye className="h-3.5 w-3.5" /></button>}
                     {canEdit(u) && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => setEditUser(u)} title="Edit"><Pencil className="h-3.5 w-3.5" /></button>}
                     {canEdit(u) && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => resetPw(u)} title="Reset password"><KeyRound className="h-3.5 w-3.5" /></button>}
                     {canEdit(u) && !u.claimed_at && <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => resend(u)} title="Resend invite"><Send className="h-3.5 w-3.5" /></button>}
