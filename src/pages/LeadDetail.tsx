@@ -4,8 +4,18 @@ import { opm } from '../lib/api';
 import { LoadingBlock, EmptyState } from '../components/dash';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
-  Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check,
+  Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check, X, Loader2,
 } from 'lucide-react';
+
+const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) · OUTBOUND' };
+const DIAL_NUMBERS = [
+  { v: '+17184070959', label: 'Adrian NYC 1 · (718) 407-0959' },
+  { v: '+13475727425', label: 'Adrian NYC 2 · (347) 572-7425' },
+  { v: '+19295127448', label: 'Adrian NYC 3 · (929) 512-7448' },
+  { v: '+17862446185', label: 'Adrian Miami 3 · (786) 244-6185' },
+  { v: '+17868827159', label: 'Adrian Miami 4 · (786) 882-7159' },
+  { v: '+19544668132', label: 'Adrian · (954) 466-8132' },
+];
 
 function fmtNum(n: string) {
   const d = (n || '').replace(/\D/g, '').replace(/^1/, '');
@@ -63,6 +73,11 @@ export default function LeadDetail() {
   const [body, setBody] = useState('');
   const [subject, setSubject] = useState('');
   const [callOutcome, setCallOutcome] = useState('');
+  // AI call launcher
+  const [callOpen, setCallOpen] = useState(false);
+  const [callFrom, setCallFrom] = useState(DIAL_NUMBERS[0].v);
+  const [callTo, setCallTo] = useState('');
+  const [calling, setCalling] = useState(false);
 
   const load = () => { setLoading(true); opm.lead(id).then(setData).finally(() => setLoading(false)); };
   useEffect(load, [id]);
@@ -87,6 +102,7 @@ export default function LeadDetail() {
   const contacts: any[] = data?.contacts || [];
   const rawNotes: any[] = data?.notes || [];
   const calls: any[] = data?.calls || [];
+  // newest first
   const notes = useMemo(() => [...rawNotes].sort((a, b) => noteTime(b) - noteTime(a)), [rawNotes]);
   const owners = contacts.filter((c) => c.contact_kind !== 'relative');
   const relatives = contacts.filter((c) => c.contact_kind === 'relative');
@@ -130,6 +146,25 @@ export default function LeadDetail() {
     try { navigator.clipboard.writeText(brief); } catch {}
     setToast('AI call brief copied — this context is what the voice agent ingests on dial.');
     setTimeout(() => setToast(''), 4000);
+  }
+  function openCallModal() {
+    const primary = contacts.find((c) => c.is_primary_number) || contacts[0];
+    setCallTo(primary ? primary.phone : '');
+    setCallOpen(true);
+  }
+  async function launchCall() {
+    if (!callTo || !callFrom) return;
+    setCalling(true);
+    try {
+      const r = await opm.placeCall({ lead_id: id, to_number: callTo, from_number: callFrom, agent_id: DIAL_AGENT.id, workspace: '1propertymarket' });
+      setCallOpen(false);
+      setToast(r.call_id ? `AI call launched to ${fmtNum(callTo)} — Adrian is dialing now.` : 'Call request sent.');
+      setTimeout(() => setToast(''), 5000);
+      load();
+    } catch (e: any) {
+      setToast('Call failed: ' + (e?.message || 'error'));
+      setTimeout(() => setToast(''), 6000);
+    } finally { setCalling(false); }
   }
 
   if (loading) return <div className="mx-auto max-w-[1400px]"><LoadingBlock label="Loading lead…" /></div>;
@@ -177,7 +212,7 @@ export default function LeadDetail() {
             <Stat icon={User} label="Assigned" value={lead.assigned_to || '—'} />
             <Stat icon={Phone} label="Numbers" value={`${contacts.length} · ${verifiedN}✓`} />
           </div>
-          <button onClick={aiCallBrief} title="Copy the full context the AI voice agent ingests on dial" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white transition hover:brightness-125"><Bot className="h-4 w-4" /> AI Call</button>
+          <button onClick={openCallModal} title="Launch a live AI voice call to this lead" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white transition hover:brightness-125"><Bot className="h-4 w-4" /> AI Call</button>
         </div>
       </div>
 
@@ -293,6 +328,43 @@ export default function LeadDetail() {
           </div>
         </div>
       </div>
+
+      {callOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setCallOpen(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-base font-bold text-ink"><Bot className="h-5 w-5 text-brand" /> Launch AI Call</div>
+              <button onClick={() => setCallOpen(false)} className="rounded p-1 text-slate-400 hover:text-ink"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="space-y-3 text-sm">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">AI Voice Agent</label>
+                <div className="rounded-lg border border-line bg-surface px-3 py-2 font-medium text-ink">{DIAL_AGENT.name}</div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Call this number</label>
+                <select value={callTo} onChange={(e) => setCallTo(e.target.value)} className="input w-full">
+                  {contacts.map((c) => <option key={c.contact_id} value={c.phone}>{fmtNum(c.phone)} · {c.contact_kind === 'relative' ? (c.related_name || 'relative') : 'owner'}{c.phone_verified ? ' ✓' : ''}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">From (caller ID)</label>
+                <select value={callFrom} onChange={(e) => setCallFrom(e.target.value)} className="input w-full">
+                  {DIAL_NUMBERS.map((n) => <option key={n.v} value={n.v}>{n.label}</option>)}
+                </select>
+              </div>
+              <div className="rounded-lg bg-surface p-2.5 text-xs text-slate-500">Adrian receives this seller's property, parcel data, our value, and the full note history (newest first) as live context on the call. The call is logged to the timeline.</div>
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <button onClick={aiCallBrief} className="text-xs font-semibold text-slate-500 hover:text-brand">Copy context brief</button>
+              <div className="flex gap-2">
+                <button onClick={() => setCallOpen(false)} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-surface">Cancel</button>
+                <button onClick={launchCall} disabled={calling || !callTo} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{calling ? <><Loader2 className="h-4 w-4 animate-spin" /> Dialing…</> : <><PhoneCall className="h-4 w-4" /> Launch Call</>}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
