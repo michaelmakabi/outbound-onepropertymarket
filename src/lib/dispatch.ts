@@ -110,7 +110,9 @@ export function skipTraceStats(leads: SkipLead[]) {
 // ---- xlsx download (SheetJS lazy-loaded from CDN, no bundled dependency) ----
 export async function downloadSheet(filename: string, rows: any[], sheetName = 'Sheet1') {
   if (!rows.length) { alert('Nothing to export yet.'); return; }
-  const XLSX: any = await import(/* @vite-ignore */ 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+  // non-literal specifier so the TS compiler doesn't try to resolve the remote module at build time
+  const cdn = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
+  const XLSX: any = await import(/* @vite-ignore */ cdn);
   const ws = XLSX.utils.json_to_sheet(rows);
   // auto-size columns to content for a clean, readable sheet
   const cols = Object.keys(rows[0]);
