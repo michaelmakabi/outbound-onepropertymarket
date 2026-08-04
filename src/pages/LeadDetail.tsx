@@ -9,6 +9,23 @@ function fmtNum(n: string) {
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : n;
 }
 const money = (n: any) => (n ? `$${Number(n).toLocaleString('en-US')}` : '—');
+
+// Notes arrive as messy, often double-escaped GHL HTML (&lt;p&gt;, <hr>, mention spans).
+// Decode, turn @mentions into plain text, drop junk tags -> clean readable text.
+function cleanNote(raw: string): string {
+  if (!raw) return '';
+  let s = raw;
+  try {
+    const ta = document.createElement('textarea');
+    ta.innerHTML = s; s = ta.value; ta.innerHTML = s; s = ta.value; // decode up to 2x
+  } catch {}
+  s = s.replace(/<span[^>]*data-user-id=[^>]*>(.*?)<\/span>/gi, '@$1');
+  s = s.replace(/<hr\s*\/?>/gi, '\n');
+  s = s.replace(/<\/p>/gi, '\n').replace(/<p[^>]*>/gi, '').replace(/<br\s*\/?>/gi, '\n');
+  s = s.replace(/<[^>]+>/g, '');
+  s = s.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').replace(/^[\s\n]+|[\s\n]+$/g, '');
+  return s;
+}
 const PARCEL_LABELS: Record<string, string> = {
   bbl: 'BBL', 'bldg sqft': 'Building SF', 'lot sqft': 'Lot SF', 'bldg front': 'Bldg Front', 'bldg depth': 'Bldg Depth',
   'lot front': 'Lot Front', 'lot depth': 'Lot Depth', neighborhood: 'Neighborhood', 'residential units': 'Res Units',
@@ -160,7 +177,7 @@ export default function LeadDetail() {
                   <div className="grid h-7 w-7 flex-none place-items-center rounded-full bg-surface text-[10px] font-bold text-slate-500">{(n.author || 'SY').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
                   <div className="flex-1 rounded-xl border border-line bg-surface p-2.5">
                     <div className="flex justify-between"><span className="text-sm font-semibold text-ink">{n.author || 'System'}</span><span className="text-xs text-slate-400">{n.note_date || ''}{n.source && n.source !== 'import' ? ` · ${n.source}` : ''}</span></div>
-                    <div className="mt-1 text-sm leading-relaxed text-slate-700" dangerouslySetInnerHTML={{ __html: n.body_html || n.body_text || '' }} />
+                    <div className="mt-1 whitespace-pre-line text-sm leading-relaxed text-slate-700">{cleanNote(n.body_html || n.body_text || '')}</div>
                   </div>
                 </li>))}</ol>
             )}
