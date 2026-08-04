@@ -32,15 +32,93 @@ export const dispatch = {
   getCampaign: (slug: string) => call('campaign.get', { params: { slug } }),
   deleteCampaign: (slug: string) => call('campaign.delete', { method: 'DELETE', body: { slug } }),
   createLeads: (slug: string, leads: any[]) => call('leads.create', { method: 'POST', body: { slug, leads } }),
+  // skip-trace aware ingest: each lead = { ownerName, address, email, numbers:[{phone,label}], fields, raw }
+  ingestLeads: (slug: string, leads: any[]) => call('leads.ingest', { method: 'POST', body: { slug, leads } }),
+  resolveLead: (slug: string, phone: string) => call('lead.resolve', { method: 'POST', body: { slug, phone } }),
   listLeads: (slug: string) => call('leads.list', { params: { slug } }),
   verifyStatus: (slug: string) => call('verify.status', { params: { slug } }),
   verifyRun: (slug: string, limit = 200) => call('verify.run', { method: 'POST', body: { slug, limit } }),
+  exportByLead: (slug: string) => call('export.byLead', { params: { slug } }),
+  exportByNumber: (slug: string) => call('export.byNumber', { params: { slug } }),
   preview: (contactId: string) => call('dial.preview', { method: 'POST', body: { contact_id: contactId } }),
   testDial: (b: { phone: string; name?: string; address?: string }) => call('dial.test', { method: 'POST', body: b }),
   launch: (slug: string) => call('launch', { method: 'POST', body: { slug, confirm: true } }),
   monitor: (slug: string) => call('monitor', { params: { slug } }),
   createAgent: (b: any) => call('agent.create', { method: 'POST', body: b }),
 };
+
+// ---- skip-trace explosion --------------------------------------------------
+// Real skip-trace lists put many phone numbers on one row (owner, relatives, tenants…),
+// plus a mess of other columns. explodeSkipTrace turns each row into ONE property lead
+// carrying N labelled numbers, preserving every other column as fields + the raw row.
+const PHONE_COL_RE = /(phone|mobile|cell|tel|wireless|landline|voip|contact\s*number|ph\s*\d)/i;
+const PHONE_META_RE = /(type|dnc|status|carrier|score|date|litig|verified|valid)/i;
+
+function cleanLabel(header: string): string {
+  const h = header.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // drop bare "phone"/"number" noise but keep provenance like "Relative 2", "Owner", "Wireless 1"
+  const stripped = h.replace(/\b(phone|number|no\.?)\b/gi, '').replace(/\s+/g, ' ').trim();
+  const label = (stripped || h).replace(/\b\w/g, (m) => m.toUpperCase());
+  return label || 'Contact';
+}
+
+function splitNumbers(value: string): string[] {
+  return String(value || '')
+    .split(/[;,/|\n]+/)
+    .map((s) => s.trim())
+    .filter((s) => (s.replace(/\D/g, '').length >= 7));
+}
+
+export interface SkipLead {
+  ownerName: string; address: string; email: string;
+  numbers: { phone: string; label: string }[];
+  fields: Record<string, string>; raw: Record<string, string>;
+}
+
+export function explodeSkipTrace(headers: string[], rows: string[][], map: Record<string, string>): SkipLead[] {
+  const ownerH = map.firstName || headers.find((h) => /owner|first\s*name|\bname\b/i.test(h)) || '';
+  const addrH = map.address || '';
+  const emailH = map.email || '';
+  const phoneCols = headers.filter((h) => PHONE_COL_RE.test(h) && !PHONE_META_RE.test(h));
+  const coreSet = new Set([ownerH, addrH, emailH, map.city, map.state, map.zip].filter(Boolean));
+  const out: SkipLead[] = [];
+  for (const r of rows) {
+    const obj: Record<string, string> = {};
+    headers.forEach((h, i) => { obj[h] = (r[i] ?? '').trim(); });
+    const numbers: { phone: string; label: string }[] = [];
+    for (const h of phoneCols) {
+      const parts = splitNumbers(obj[h]);
+      parts.forEach((p, idx) => numbers.push({ phone: p, label: cleanLabel(h) + (parts.length > 1 ? ` #${idx + 1}` : '') }));
+    }
+    if (!numbers.length) continue;
+    const fields: Record<string, string> = {};
+    for (const h of headers) {
+      if (coreSet.has(h) || phoneCols.includes(h)) continue;
+      if (obj[h]) fields[h] = obj[h];
+    }
+    out.push({ ownerName: ownerH ? obj[ownerH] : '', address: addrH ? obj[addrH] : '', email: emailH ? obj[emailH] : '', numbers, fields, raw: obj });
+  }
+  return out;
+}
+
+export function skipTraceStats(leads: SkipLead[]) {
+  let numbers = 0; const byLabel: Record<string, number> = {};
+  for (const l of leads) for (const n of l.numbers) { numbers++; byLabel[n.label] = (byLabel[n.label] || 0) + 1; }
+  return { leads: leads.length, numbers, avg: leads.length ? (numbers / leads.length) : 0, byLabel };
+}
+
+// ---- xlsx download (SheetJS lazy-loaded from CDN, no bundled dependency) ----
+export async function downloadSheet(filename: string, rows: any[], sheetName = 'Sheet1') {
+  if (!rows.length) { alert('Nothing to export yet.'); return; }
+  const XLSX: any = await import(/* @vite-ignore */ 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+  const ws = XLSX.utils.json_to_sheet(rows);
+  // auto-size columns to content for a clean, readable sheet
+  const cols = Object.keys(rows[0]);
+  ws['!cols'] = cols.map((c) => ({ wch: Math.min(48, Math.max(c.length + 2, ...rows.slice(0, 200).map((r) => String(r[c] ?? '').length + 2))) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  XLSX.writeFile(wb, filename);
+}
 
 // ---- tiny robust CSV parser (handles quotes, commas, newlines in quotes) ----
 export function parseCsv(text: string): { headers: string[]; rows: string[][] } {
