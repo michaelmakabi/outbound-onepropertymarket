@@ -4,8 +4,9 @@
 //
 // Secrets stay server-side: DIAL_SECRET (dialer), GHL_PIT (GoHighLevel PIT), TWILIO_* (Lookup).
 // Auth: the browser presents the SAME bearer token it uses for the analytics API; we validate it by
-// calling that API's ?action=me and require an admin/super_admin. Leads live in GHL; campaign configs
-// live in dispatch_campaigns (this project, RLS-on, service-role only).
+// calling that API's ?action=me and require an admin/super_admin. Server-to-server callers (e.g.
+// adrian-postcall auto-resolve) present x-internal-key === DIAL_SECRET for a whitelisted action set.
+// Leads live in GHL; campaign configs + master property records live in this project (RLS-on).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const GHLB = 'https://services.leadconnectorhq.com', GV = '2021-07-28';
@@ -38,7 +39,7 @@ const NO_CALL_TAGS = ['wrong number', 'wrong number buyer', 'do not call', 'inva
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-internal-key',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -175,9 +176,18 @@ Deno.serve(async (req) => {
   const action = url.searchParams.get('action') || '';
   const client = sb();
 
-  const gate = await requireAdmin(req);
-  if (!gate.ok) return gate.res;
-  const user = gate.user;
+  // Auth: admin bearer for the UI. Server-to-server callers (e.g. adrian-postcall firing an
+  // auto-resolve) present x-internal-key === DIAL_SECRET and may only use a whitelisted action set.
+  const INTERNAL_ACTIONS = new Set(['lead.resolve']);
+  const isInternal = (req.headers.get('x-internal-key') || '') === DIAL_SECRET && INTERNAL_ACTIONS.has(action);
+  let user: any;
+  if (isInternal) {
+    user = { name: 'system', role: 'system', email: 'adrian-postcall' };
+  } else {
+    const gate = await requireAdmin(req);
+    if (!gate.ok) return gate.res;
+    user = gate.user;
+  }
 
   const body: any = (req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE') ? await req.json().catch(() => ({})) : {};
   const str = (k: string) => url.searchParams.get(k) || (body as any)[k] || '';
@@ -277,10 +287,9 @@ Deno.serve(async (req) => {
       return json({ total, resolved, unverified: buckets.unverified, buckets, pctResolved: total ? Math.round((resolved / total) * 100) : 0, twilioConfigured: twConfigured() });
     }
 
-    // ---- verify.run: Twilio Lookup (Line Type Intelligence), concurrent. Mirrors each verdict +
-    //      timestamp back onto the master lead record. Lookup v2 has no bulk endpoint, so throughput
-    //      = concurrency: fan lookups out (only line_type_intelligence, no paid caller_name), then
-    //      write to GHL through a gentler pool to respect GHL's rate limit. ----
+    // ---- verify.run: Twilio Lookup line-type, concurrent, mirrors verdicts to the master record.
+    //      Lookup v2 has no bulk endpoint, so throughput = concurrency: fan lookups out (only
+    //      line_type_intelligence, no paid caller_name), then write to GHL through a gentler pool. ----
     if (action === 'verify.run') {
       if (!twConfigured()) return json({ needsTwilio: true, error: 'Twilio is not configured. Add TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN (or a Twilio API Key SID + Secret) as secrets on this Supabase project.' }, 400);
       const slug = str('slug').toLowerCase();
@@ -297,7 +306,6 @@ Deno.serve(async (req) => {
         await Promise.all(Array.from({ length: Math.min(size, items.length) }, work));
       }
 
-      // phase 1 — Twilio lookups, fanned out (network-bound)
       const looked: Array<{ valid: boolean; type: string | null; carrier: string | null } | null> = new Array(batch.length).fill(null);
       await pool(batch, 20, async (c, idx) => {
         try { looked[idx] = await twilioLineType(String(c.phone).trim()); }
@@ -305,7 +313,6 @@ Deno.serve(async (req) => {
       });
       if (authError) return json({ authFailed: true, error: `Twilio authentication failed (${authError.replace('auth_', 'HTTP ')}). Check your Twilio secrets — use the Account SID (AC…) + Auth Token, or an API Key SID (SK…) + its Secret.` }, 400);
 
-      // phase 2 — write verdicts into GHL + mirror onto the master record (throttled)
       await pool(batch, 5, async (c, idx) => {
         const res = looked[idx];
         if (!res) return; // lookup errored — leave unverified so it retries next run
@@ -331,9 +338,8 @@ Deno.serve(async (req) => {
       return json({ ok: true, provider: 'twilio', checked, updated, tally, remaining, errors });
     }
 
-    // ---- leads.ingest: skip-trace aware. Each lead = one property (master record) carrying N phone
-    //      numbers; we store the master in dispatch_lead_records AND explode every number into its own
-    //      GHL contact tagged lead:<key> so Adrian dials each independently and results correlate back. ----
+    // ---- leads.ingest: skip-trace aware. One property = one master record + N dialable numbers,
+    //      each exploded into its own GHL contact tagged lead:<key> so results correlate back. ----
     if (action === 'leads.ingest') {
       const slug = String(body.slug || '').toLowerCase();
       if (!slug) return json({ error: 'campaign slug required' }, 400);
@@ -348,7 +354,6 @@ Deno.serve(async (req) => {
         const cleanNums = (Array.isArray(L.numbers) ? L.numbers : [])
           .map((n: any) => ({ phone: String(n.phone || '').trim(), label: n.label || 'Contact' }))
           .filter((n: any) => /^\+?\d[\d\s().-]{6,}$/.test(n.phone));
-        // de-dupe numbers within the same lead by last-10 digits
         const seen = new Set<string>();
         const uniq = cleanNums.filter((n: any) => { const d = digits10(n.phone); if (seen.has(d)) return false; seen.add(d); return true; });
         if (!uniq.length) { rejected++; continue; }
@@ -379,23 +384,27 @@ Deno.serve(async (req) => {
       return json({ ok: true, leads: leadCount, numbers: numCount, added, merged, rejected, errors });
     }
 
-    // ---- lead.resolve: mark one number as the confirmed right person for its property, and retire
-    //      the sibling numbers (stop dialing family/tenants once we've reached the owner). ----
+    // ---- lead.resolve: confirm one number as the right person for its property, retire the siblings.
+    //      slug optional (auto-resolve from a call matches the number across every campaign). Internal
+    //      callers (adrian-postcall, x-internal-key) allowed. Skips already-resolved leads. ----
     if (action === 'lead.resolve') {
       const slug = String(body.slug || '').toLowerCase();
       const phone = String(body.phone || '').trim();
-      if (!slug || !phone) return json({ error: 'slug and phone required' }, 400);
+      const source = String(body.source || (isInternal ? 'auto' : 'manual'));
+      if (!phone) return json({ error: 'phone required' }, 400);
       const d10 = digits10(phone);
-      const { data: recs } = await client.from('dispatch_lead_records').select('*').eq('campaign_slug', slug);
-      const targets = (recs || []).filter((r: any) => (r.numbers || []).some((n: any) => digits10(n.phone) === d10));
-      if (!targets.length) return json({ error: 'no lead found for that number' }, 404);
+      let q = client.from('dispatch_lead_records').select('*');
+      if (slug) q = q.eq('campaign_slug', slug);
+      const { data: recs } = await q;
+      const targets = (recs || []).filter((r: any) => (r.numbers || []).some((n: any) => digits10(n.phone) === d10) && r.status !== 'resolved');
+      if (!targets.length) return json({ ok: true, leads: 0, confirmed: 0, retired: 0, note: 'no unresolved lead for that number' });
       let confirmed = 0, retired = 0;
       for (const r of targets) {
         const nums = (r.numbers || []).map((n: any) => digits10(n.phone) === d10 ? { ...n, status: 'confirmed' } : { ...n, status: 'retired' });
         await client.from('dispatch_lead_records').update({ numbers: nums, confirmed_phone: phone, status: 'resolved', updated_at: new Date().toISOString() }).eq('id', r.id);
         for (const n of nums) {
           const cid = n.ghl_contact_id; if (!cid) continue;
-          if (n.status === 'confirmed') { await ghl(`/contacts/${cid}/tags`, { method: 'POST', body: JSON.stringify({ tags: ['owner: confirmed'] }) }).catch(() => {}); confirmed++; }
+          if (n.status === 'confirmed') { await ghl(`/contacts/${cid}/tags`, { method: 'POST', body: JSON.stringify({ tags: ['owner: confirmed', `owner: confirmed via ${source}`] }) }).catch(() => {}); confirmed++; }
           else {
             await ghl(`/contacts/${cid}/tags`, { method: 'POST', body: JSON.stringify({ tags: ['lead: not owner', 'do not text'] }) }).catch(() => {});
             await ghl(`/contacts/${cid}/tags`, { method: 'DELETE', body: JSON.stringify({ tags: [QUEUE_TAG] }) }).catch(() => {});
@@ -406,9 +415,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, leads: targets.length, confirmed, retired });
     }
 
-    // ---- exports: two shapes of the same campaign data ----
-    //      export.byLead   → one row per property, every number spread across phone_1..phone_N columns.
-    //      export.byNumber → one row per number, all property context concatenated onto it.
+    // ---- exports: byLead (one row per property) or byNumber (one row per number) ----
     if (action === 'export.byLead' || action === 'export.byNumber') {
       const slug = str('slug').toLowerCase();
       const { data: recs } = await client.from('dispatch_lead_records').select('*').eq('campaign_slug', slug).order('created_at', { ascending: true });
