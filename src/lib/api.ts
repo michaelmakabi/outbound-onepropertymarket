@@ -174,6 +174,32 @@ export const billing = {
   generateInvoice: (workspace_slug: string) => billingCall('generate_invoice', { body: { workspace_slug } }),
 };
 
+// ---- Super-admin ops (separate `admin-ops` edge function): webhooks + dialer routing ----
+const ADMINOPS_BASE =
+  (import.meta as any).env?.VITE_ADMINOPS_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/admin-ops') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/admin-ops');
+
+async function adminOpsCall(action: string, opts: { method?: string; body?: any } = {}) {
+  const url = new URL(ADMINOPS_BASE);
+  url.searchParams.set('action', action);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+export const adminOps = {
+  webhooksList: () => adminOpsCall('webhooks_list'),
+  webhooksSave: (b: any) => adminOpsCall('webhooks_save', { method: 'POST', body: b }),
+  webhooksDelete: (id: number) => adminOpsCall('webhooks_delete', { method: 'POST', body: { id } }),
+  webhooksTest: (id: number) => adminOpsCall('webhooks_test', { method: 'POST', body: { id } }),
+  dialerList: () => adminOpsCall('dialer_list'),
+  dialerSet: (b: any) => adminOpsCall('dialer_set', { method: 'POST', body: b }),
+};
+
 // Fetch a call recording via the backend proxy (bypasses CORS) as a Blob.
 export async function fetchRecordingBlob(callId: string): Promise<Blob> {
   const base = (import.meta as any).env?.VITE_API_BASE || 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
