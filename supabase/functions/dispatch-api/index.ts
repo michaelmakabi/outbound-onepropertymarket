@@ -88,6 +88,18 @@ function leadStatusOf(ct: any): string {
   return 'idle';
 }
 function campaignTag(slug: string) { return `campaign: ${slug}`.toLowerCase(); }
+// --- skip-trace correlation helpers ---
+// Every dialable number is its own GHL contact, tagged lead:<key> so all numbers on one
+// property route back to a single master record in dispatch_lead_records.
+function leadTag(key: string) { return `lead: ${key}`.toLowerCase(); }
+function relTag(label: string) { return `rel: ${String(label || 'contact').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`; }
+function normLeadKey(address: string, owner: string) {
+  const a = String(address || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 60);
+  const o = String(owner || '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 20);
+  return a ? (o ? `${a}-${o}` : a) : o;
+}
+function leadKeyOf(ct: any): string { const t = tagsOf(ct).find((x) => x.startsWith('lead: ')); return t ? t.slice(6).trim() : ''; }
+function digits10(p: string) { return String(p || '').replace(/\D/g, '').slice(-10); }
 
 async function searchByTag(tag: string, cap = 500): Promise<any[]> {
   const out: any[] = []; let page = 1;
@@ -213,7 +225,7 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
-    // ---- leads.create: upsert one or many GHL contacts, tag campaign + unverified ----
+    // ---- leads.create: simple one-contact-per-row path (kept for back-compat) ----
     if (action === 'leads.create') {
       const slug = String(body.slug || '').toLowerCase();
       if (!slug) return json({ error: 'campaign slug required' }, 400);
@@ -265,11 +277,10 @@ Deno.serve(async (req) => {
       return json({ total, resolved, unverified: buckets.unverified, buckets, pctResolved: total ? Math.round((resolved / total) * 100) : 0, twilioConfigured: twConfigured() });
     }
 
-    // ---- verify.run: verify each unverified number via Twilio Lookup (Line Type Intelligence) and
-    //      write the result into the GHL "Line Type" field the dialer reads. Resumable (batch by limit).
-    //      Lookup v2 has no bulk endpoint, so throughput = concurrency: we fan the Twilio lookups out
-    //      in a bounded pool (fast, cheap — only line_type_intelligence, no paid caller_name), then write
-    //      results back to GHL through a gentler pool so we stay inside GHL's rate limit. ----
+    // ---- verify.run: Twilio Lookup (Line Type Intelligence), concurrent. Mirrors each verdict +
+    //      timestamp back onto the master lead record. Lookup v2 has no bulk endpoint, so throughput
+    //      = concurrency: fan lookups out (only line_type_intelligence, no paid caller_name), then
+    //      write to GHL through a gentler pool to respect GHL's rate limit. ----
     if (action === 'verify.run') {
       if (!twConfigured()) return json({ needsTwilio: true, error: 'Twilio is not configured. Add TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN (or a Twilio API Key SID + Secret) as secrets on this Supabase project.' }, 400);
       const slug = str('slug').toLowerCase();
@@ -280,14 +291,13 @@ Deno.serve(async (req) => {
       const tally: Record<string, number> = { mobile: 0, landline: 0, voip: 0, invalid: 0, unknown: 0 };
       let checked = 0, updated = 0, errors = 0, authError = '';
 
-      // small bounded-concurrency runner
       async function pool<T>(items: T[], size: number, fn: (item: T, i: number) => Promise<void>) {
         let i = 0;
         const work = async () => { while (i < items.length && !authError) { const idx = i++; await fn(items[idx], idx); } };
         await Promise.all(Array.from({ length: Math.min(size, items.length) }, work));
       }
 
-      // phase 1 — Twilio lookups, fanned out (network-bound, so higher concurrency)
+      // phase 1 — Twilio lookups, fanned out (network-bound)
       const looked: Array<{ valid: boolean; type: string | null; carrier: string | null } | null> = new Array(batch.length).fill(null);
       await pool(batch, 20, async (c, idx) => {
         try { looked[idx] = await twilioLineType(String(c.phone).trim()); }
@@ -295,7 +305,7 @@ Deno.serve(async (req) => {
       });
       if (authError) return json({ authFailed: true, error: `Twilio authentication failed (${authError.replace('auth_', 'HTTP ')}). Check your Twilio secrets — use the Account SID (AC…) + Auth Token, or an API Key SID (SK…) + its Secret.` }, 400);
 
-      // phase 2 — write verdicts into GHL (throttled pool to respect GHL's ~100 req / 10s limit)
+      // phase 2 — write verdicts into GHL + mirror onto the master record (throttled)
       await pool(batch, 5, async (c, idx) => {
         const res = looked[idx];
         if (!res) return; // lookup errored — leave unverified so it retries next run
@@ -305,11 +315,140 @@ Deno.serve(async (req) => {
         await ghl(`/contacts/${c.id}`, { method: 'PUT', body: JSON.stringify({ customFields: [{ id: LINE_TYPE_FIELD, value: val }] }) });
         await ghl(`/contacts/${c.id}/tags`, { method: 'DELETE', body: JSON.stringify({ tags: ['line type: unverified'] }) }).catch(() => {});
         if (val === 'Invalid/Wrong') await ghl(`/contacts/${c.id}/tags`, { method: 'POST', body: JSON.stringify({ tags: ['do not text'] }) }).catch(() => {});
+        const lk = leadKeyOf(c);
+        if (lk) {
+          const { data: rec } = await client.from('dispatch_lead_records').select('id, numbers').eq('campaign_slug', slug).eq('lead_key', lk).maybeSingle();
+          if (rec) {
+            const d10 = digits10(c.phone);
+            const nums = (rec.numbers || []).map((n: any) => digits10(n.phone) === d10 ? { ...n, line_type: val, verified_at: new Date().toISOString() } : n);
+            await client.from('dispatch_lead_records').update({ numbers: nums, updated_at: new Date().toISOString() }).eq('id', rec.id);
+          }
+        }
         updated++;
       });
 
       const remaining = Math.max(0, pending.length - updated);
       return json({ ok: true, provider: 'twilio', checked, updated, tally, remaining, errors });
+    }
+
+    // ---- leads.ingest: skip-trace aware. Each lead = one property (master record) carrying N phone
+    //      numbers; we store the master in dispatch_lead_records AND explode every number into its own
+    //      GHL contact tagged lead:<key> so Adrian dials each independently and results correlate back. ----
+    if (action === 'leads.ingest') {
+      const slug = String(body.slug || '').toLowerCase();
+      if (!slug) return json({ error: 'campaign slug required' }, 400);
+      const leads: any[] = Array.isArray(body.leads) ? body.leads : [];
+      if (!leads.length) return json({ error: 'no leads' }, 400);
+      let leadCount = 0, numCount = 0, added = 0, merged = 0, rejected = 0; const errors: string[] = [];
+      for (let li = 0; li < Math.min(leads.length, 1000); li++) {
+        const L = leads[li];
+        const owner = L.ownerName || L.firstName || L.name || '';
+        const address = L.address || '';
+        const key = normLeadKey(address, owner) || `row${li}-${digits10((L.numbers?.[0]?.phone) || '') || li}`;
+        const cleanNums = (Array.isArray(L.numbers) ? L.numbers : [])
+          .map((n: any) => ({ phone: String(n.phone || '').trim(), label: n.label || 'Contact' }))
+          .filter((n: any) => /^\+?\d[\d\s().-]{6,}$/.test(n.phone));
+        // de-dupe numbers within the same lead by last-10 digits
+        const seen = new Set<string>();
+        const uniq = cleanNums.filter((n: any) => { const d = digits10(n.phone); if (seen.has(d)) return false; seen.add(d); return true; });
+        if (!uniq.length) { rejected++; continue; }
+        const numbersJson = uniq.map((n: any) => ({ phone: n.phone, label: n.label, line_type: null, verified_at: null, ghl_contact_id: null, status: 'active' }));
+        await client.from('dispatch_lead_records').upsert({
+          campaign_slug: slug, lead_key: key, owner_name: owner || null, address: address || null, email: L.email || null,
+          raw: L.raw || {}, fields: L.fields || {}, numbers: numbersJson, notes: L.notes || null, updated_at: new Date().toISOString(),
+        }, { onConflict: 'campaign_slug,lead_key' });
+        leadCount++;
+        const outNums = [...numbersJson];
+        for (let i = 0; i < uniq.length; i++) {
+          const n = uniq[i];
+          const custom: any[] = [];
+          if (address) custom.push({ id: ADDR_FIELDS[1], value: String(address) });
+          const payload: any = {
+            locationId: LOC, firstName: owner || undefined, email: i === 0 ? (L.email || undefined) : undefined, phone: n.phone,
+            tags: [campaignTag(slug), leadTag(key), relTag(n.label), 'line type: unverified'],
+            customFields: custom.length ? custom : undefined,
+          };
+          const r = await ghl('/contacts/upsert', { method: 'POST', body: JSON.stringify(payload) });
+          if (r.ok) { const cid = r.json?.contact?.id || r.json?.id || null; outNums[i] = { ...outNums[i], ghl_contact_id: cid }; numCount++; if (r.json?.new === false || r.json?.contact?.dateUpdated) merged++; else added++; }
+          else { rejected++; if (errors.length < 5) errors.push(`${n.phone}: ${r.status}`); }
+          await new Promise((s) => setTimeout(s, 40));
+        }
+        await client.from('dispatch_lead_records').update({ numbers: outNums, updated_at: new Date().toISOString() }).eq('campaign_slug', slug).eq('lead_key', key);
+      }
+      await client.from('dispatch_campaigns').update({ lead_count: numCount, updated_at: new Date().toISOString() }).eq('slug', slug);
+      return json({ ok: true, leads: leadCount, numbers: numCount, added, merged, rejected, errors });
+    }
+
+    // ---- lead.resolve: mark one number as the confirmed right person for its property, and retire
+    //      the sibling numbers (stop dialing family/tenants once we've reached the owner). ----
+    if (action === 'lead.resolve') {
+      const slug = String(body.slug || '').toLowerCase();
+      const phone = String(body.phone || '').trim();
+      if (!slug || !phone) return json({ error: 'slug and phone required' }, 400);
+      const d10 = digits10(phone);
+      const { data: recs } = await client.from('dispatch_lead_records').select('*').eq('campaign_slug', slug);
+      const targets = (recs || []).filter((r: any) => (r.numbers || []).some((n: any) => digits10(n.phone) === d10));
+      if (!targets.length) return json({ error: 'no lead found for that number' }, 404);
+      let confirmed = 0, retired = 0;
+      for (const r of targets) {
+        const nums = (r.numbers || []).map((n: any) => digits10(n.phone) === d10 ? { ...n, status: 'confirmed' } : { ...n, status: 'retired' });
+        await client.from('dispatch_lead_records').update({ numbers: nums, confirmed_phone: phone, status: 'resolved', updated_at: new Date().toISOString() }).eq('id', r.id);
+        for (const n of nums) {
+          const cid = n.ghl_contact_id; if (!cid) continue;
+          if (n.status === 'confirmed') { await ghl(`/contacts/${cid}/tags`, { method: 'POST', body: JSON.stringify({ tags: ['owner: confirmed'] }) }).catch(() => {}); confirmed++; }
+          else {
+            await ghl(`/contacts/${cid}/tags`, { method: 'POST', body: JSON.stringify({ tags: ['lead: not owner', 'do not text'] }) }).catch(() => {});
+            await ghl(`/contacts/${cid}/tags`, { method: 'DELETE', body: JSON.stringify({ tags: [QUEUE_TAG] }) }).catch(() => {});
+            retired++;
+          }
+        }
+      }
+      return json({ ok: true, leads: targets.length, confirmed, retired });
+    }
+
+    // ---- exports: two shapes of the same campaign data ----
+    //      export.byLead   → one row per property, every number spread across phone_1..phone_N columns.
+    //      export.byNumber → one row per number, all property context concatenated onto it.
+    if (action === 'export.byLead' || action === 'export.byNumber') {
+      const slug = str('slug').toLowerCase();
+      const { data: recs } = await client.from('dispatch_lead_records').select('*').eq('campaign_slug', slug).order('created_at', { ascending: true });
+      const { data: calls } = await client.from('ai_calls').select('to_number, disposition, call_status, duration_seconds, recording_url, started_at').eq('agent_id', ADRIAN_AGENT).order('started_at', { ascending: false }).limit(5000);
+      const om = new Map<string, any>();
+      for (const c of (calls || [])) { const k = digits10(c.to_number); if (k && !om.has(k)) om.set(k, c); } // first seen = most recent
+      const outcome = (phone: string) => om.get(digits10(phone)) || null;
+
+      if (action === 'export.byLead') {
+        let maxN = 1; for (const r of (recs || [])) maxN = Math.max(maxN, (r.numbers || []).length);
+        const rows = (recs || []).map((r: any) => {
+          const row: any = { lead_key: r.lead_key, owner: r.owner_name || '', address: r.address || '', email: r.email || '', lead_status: r.status, confirmed_phone: r.confirmed_phone || '' };
+          for (const [k, v] of Object.entries(r.fields || {})) row[k] = v;
+          (r.numbers || []).forEach((n: any, i: number) => {
+            const o = outcome(n.phone); const p = i + 1;
+            row[`phone_${p}`] = n.phone; row[`phone_${p}_label`] = n.label || ''; row[`phone_${p}_type`] = n.line_type || 'unverified';
+            row[`phone_${p}_verified_at`] = n.verified_at || ''; row[`phone_${p}_status`] = n.status || '';
+            row[`phone_${p}_last_disposition`] = o ? (o.disposition || o.call_status || '') : ''; row[`phone_${p}_recording`] = o ? (o.recording_url || '') : '';
+          });
+          row.notes = r.notes || '';
+          return row;
+        });
+        return json({ ok: true, view: 'by_lead', count: rows.length, maxNumbers: maxN, rows });
+      }
+
+      const rows: any[] = [];
+      for (const r of (recs || [])) {
+        for (const n of (r.numbers || [])) {
+          const o = outcome(n.phone);
+          const base: any = {
+            phone: n.phone, relationship: n.label || '', line_type: n.line_type || 'unverified',
+            textable: n.line_type === 'Mobile' ? 'yes' : (n.line_type ? 'no' : ''), verified_at: n.verified_at || '', number_status: n.status || 'active',
+            owner: r.owner_name || '', address: r.address || '', email: r.email || '', lead_key: r.lead_key, lead_status: r.status, confirmed_phone: r.confirmed_phone || '',
+            last_disposition: o ? (o.disposition || o.call_status || '') : '', last_call_at: o ? (o.started_at || '') : '', call_seconds: o ? (o.duration_seconds ?? '') : '', recording: o ? (o.recording_url || '') : '', notes: r.notes || '',
+          };
+          for (const [k, v] of Object.entries(r.fields || {})) if (!(k in base)) base[k] = v;
+          rows.push(base);
+        }
+      }
+      return json({ ok: true, view: 'by_number', count: rows.length, rows });
     }
 
     // ---- dialer passthroughs ----
