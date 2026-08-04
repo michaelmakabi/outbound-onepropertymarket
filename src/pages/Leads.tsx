@@ -46,7 +46,11 @@ export default function Leads() {
   }, []);
 
   const pipeName = useMemo(() => Object.fromEntries(pipelines.map((p) => [p.id, p.name])), [pipelines]);
-  const stages = useMemo(() => pipelines.find((p) => String(p.id) === pipelineId)?.stages || [], [pipelines, pipelineId]);
+  const stages = useMemo(() => {
+    if (pipelineId) return pipelines.find((p) => String(p.id) === pipelineId)?.stages || [];
+    // no pipeline picked: show every stage that actually has leads
+    return pipelines.flatMap((p: any) => (p.stages || [])).filter((s: any) => s.leadCount > 0);
+  }, [pipelines, pipelineId]);
   const allTags = useMemo(() => {
     const s = new Set<string>();
     allRows.forEach((r) => (r.tags || []).forEach((t: string) => s.add(t)));
@@ -129,7 +133,7 @@ export default function Leads() {
             <option value="">All pipelines</option>
             {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <select value={stageId} onChange={(e) => setStageId(e.target.value)} className="input !py-1.5 text-sm" disabled={!pipelineId}>
+          <select value={stageId} onChange={(e) => setStageId(e.target.value)} className="input !py-1.5 text-sm">
             <option value="">All stages</option>
             {stages.map((s: any) => <option key={s.id} value={s.id}>{s.name} ({s.leadCount})</option>)}
           </select>
