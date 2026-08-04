@@ -21,8 +21,7 @@ import Reports from './pages/Reports';
 import Leads from './pages/Leads';
 import LeadDetail from './pages/LeadDetail';
 import Pipelines from './pages/Pipelines';
-import Campaigns from './pages/Campaigns';
-import CampaignBuilder from './pages/CampaignBuilder';
+import SellerContacts from './pages/SellerContacts';
 
 function Protected({ children, admin }: { children: JSX.Element; admin?: boolean }) {
   const { user, loading, isAdmin } = useAuth();
@@ -47,14 +46,13 @@ export default function App() {
       <Route path="/contacts/:number" element={<Protected><ContactDetail /></Protected>} />
       <Route path="/leads" element={<Protected><Leads /></Protected>} />
       <Route path="/leads/:id" element={<Protected><LeadDetail /></Protected>} />
+      <Route path="/seller-contacts" element={<Protected><SellerContacts /></Protected>} />
       <Route path="/pipelines" element={<Protected><Pipelines /></Protected>} />
       <Route path="/compare" element={<Protected><Compare /></Protected>} />
       <Route path="/agents" element={<Protected><Agents /></Protected>} />
       <Route path="/suggestions" element={<Protected><Suggestions /></Protected>} />
       <Route path="/prompt-studio" element={<Protected><PromptStudio /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
-      <Route path="/campaigns" element={<Protected admin><Campaigns /></Protected>} />
-      <Route path="/campaigns/:slug" element={<Protected admin><CampaignBuilder /></Protected>} />
       <Route path="/usage" element={<Protected admin><UsageAnalytics /></Protected>} />
       <Route path="/users" element={<Protected admin><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
