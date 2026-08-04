@@ -6,7 +6,7 @@ import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  UserSquare2, Columns3, ChevronDown, Check, DollarSign, Webhook,
+  UserSquare2, Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -49,6 +49,7 @@ const NAV = [
   { to: '/calls', label: 'Call History', icon: PhoneCall },
   { to: '/compare', label: 'Compare', icon: GitCompare },
   { to: '/agents', label: 'Agents & Models', icon: Bot },
+  { to: '/test-ai', label: 'Test AI', icon: PhoneOutgoing },
   { to: '/suggestions', label: 'AI Suggestions', icon: Sparkles },
   { to: '/prompt-studio', label: 'Prompt Studio', icon: PenLine },
   { to: '/reports', label: 'Reports', icon: FileBarChart },
@@ -110,7 +111,6 @@ export default function Layout({ children }: { children: ReactNode }) {
             {collapsed && <div className="my-2 border-t border-white/10" />}
             {ADMIN_NAV.map(item)}
             {user?.role === 'super_admin' && item({ to: '/billing', label: 'Billing', icon: DollarSign })}
-            {user?.role === 'super_admin' && item({ to: '/integrations', label: 'Integrations', icon: Webhook })}
           </>
         )}
       </nav>
