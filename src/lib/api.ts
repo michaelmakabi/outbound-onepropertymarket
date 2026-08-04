@@ -122,6 +122,29 @@ export const opm = {
   billingSetConfig: (b: any) => opmCall('billing_set_config', { method: 'POST', params: { workspace: '' }, body: b }),
 };
 
+// ---- Billing operations (separate `billing-run` edge function; super-admin) ----
+const BILLING_BASE =
+  (import.meta as any).env?.VITE_BILLING_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/billing-run') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/billing-run');
+
+async function billingCall(action: string, opts: { method?: string; body?: any } = {}) {
+  const url = new URL(BILLING_BASE);
+  url.searchParams.set('action', action);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'POST', headers, body: opts.body ? JSON.stringify(opts.body) : '{}' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+export const billing = {
+  ingestCalls: () => billingCall('ingest_calls'),
+  createCustomer: (workspace_slug: string, email?: string) => billingCall('create_customer', { body: { workspace_slug, email } }),
+  generateInvoice: (workspace_slug: string) => billingCall('generate_invoice', { body: { workspace_slug } }),
+};
+
 // Fetch a call recording via the backend proxy (bypasses CORS) as a Blob.
 export async function fetchRecordingBlob(callId: string): Promise<Blob> {
   const base = (import.meta as any).env?.VITE_API_BASE || 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
