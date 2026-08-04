@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { dispatch, parseCsv, autoMatch, CANONICAL_FIELDS, LINE_TYPE_META } from '../lib/dispatch';
+import { dispatch, parseCsv, autoMatch, LINE_TYPE_META, explodeSkipTrace, skipTraceStats, downloadSheet } from '../lib/dispatch';
 import { PageHeader, SectionCard, LoadingBlock, EmptyState } from '../components/dash';
 import { num } from '../lib/format';
 import {
-  ArrowLeft, Upload, ShieldCheck, Settings2, Rocket, Loader2, FileUp, UserPlus, Plus, Trash2,
-  AlertTriangle, MapPin, Radio, PenLine, Sparkles, RefreshCw, PhoneCall,
+  ArrowLeft, Upload, ShieldCheck, Settings2, Rocket, Check, Loader2, FileUp, UserPlus, Plus, Trash2,
+  AlertTriangle, PhoneOutgoing, MapPin, Radio, PenLine, Sparkles, RefreshCw, PhoneCall, Download, Users, CheckCircle2,
 } from 'lucide-react';
 
 const STEPS = [
@@ -93,27 +93,18 @@ function CsvUpload({ slug, onDone }: { slug: string; onDone: () => void }) {
     setHeaders(headers); setRows(rows); setMap(autoMatch(headers));
   };
 
-  const mappedLeads = useMemo(() => {
-    const idx: Record<string, number> = {};
-    for (const [field, header] of Object.entries(map)) idx[field] = headers.indexOf(header);
-    return rows.map((r) => {
-      const lead: any = { customFields: {} };
-      for (const f of CANONICAL_FIELDS) { const i = idx[f.key]; if (i != null && i >= 0) lead[f.key] = (r[i] || '').trim(); }
-      const mappedHeaders = new Set(Object.values(map));
-      headers.forEach((h, i) => { if (!mappedHeaders.has(h) && (r[i] || '').trim()) lead.customFields[h] = r[i].trim(); });
-      if (lead.city || lead.state || lead.zip) lead.address = [lead.address, [lead.city, lead.state, lead.zip].filter(Boolean).join(', ')].filter(Boolean).join(', ');
-      return lead;
-    }).filter((l) => l.phone);
-  }, [rows, map, headers]);
+  // Skip-trace explode: each row → one property lead carrying every phone number it contains.
+  const leads = useMemo(() => explodeSkipTrace(headers, rows, map), [headers, rows, map]);
+  const stats = useMemo(() => skipTraceStats(leads), [leads]);
 
   const submit = async () => {
     setBusy(true); setError('');
-    try { const r = await dispatch.createLeads(slug, mappedLeads); setResult(r); onDone(); }
+    try { const r = await dispatch.ingestLeads(slug, leads); setResult(r); onDone(); }
     catch (e: any) { setError(String(e?.message || e)); } finally { setBusy(false); }
   };
 
   return (
-    <SectionCard className="lg:col-span-2" title="CSV upload" description="Map your columns, preview, then push to GoHighLevel (tagged for this campaign, line type unverified)">
+    <SectionCard className="lg:col-span-2" title="Upload skip-trace list" description="We detect every phone number on each row, keep the property as one master record, and create a separate dialable record per number so Adrian can call each one and confirm the right person.">
       {!headers.length ? (
         <div onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }} onDragOver={(e) => e.preventDefault()}
           className="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line bg-surface/40 p-10 text-center">
@@ -121,47 +112,68 @@ function CsvUpload({ slug, onDone }: { slug: string; onDone: () => void }) {
           <p className="text-sm text-slate-600">Drag & drop a .csv here, or</p>
           <button className="btn-ghost" onClick={() => fileRef.current?.click()}>Choose file</button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
-          <p className="mt-1 text-xs text-slate-400">Every extra column becomes AI context on the call — bring property details.</p>
+          <p className="mt-1 text-xs text-slate-400">Multiple phone columns per row are expected — owner, relatives, tenants. Every other column is kept on the record.</p>
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {CANONICAL_FIELDS.map((f) => (
-              <div key={f.key}>
-                <label className="label mb-1 block">{f.label}{f.required && <span className="text-red-500"> *</span>}</label>
-                <select className="input" value={map[f.key] || ''} onChange={(e) => setMap((m) => ({ ...m, [f.key]: e.target.value }))}>
-                  <option value="">— none —</option>
-                  {headers.map((h) => <option key={h} value={h}>{h}</option>)}
-                </select>
-              </div>
-            ))}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div><label className="label mb-1 block">Owner / name column</label>
+              <select className="input" value={map.firstName || ''} onChange={(e) => setMap((m) => ({ ...m, firstName: e.target.value }))}>
+                <option value="">— auto-detect —</option>{headers.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select></div>
+            <div><label className="label mb-1 block">Property address column</label>
+              <select className="input" value={map.address || ''} onChange={(e) => setMap((m) => ({ ...m, address: e.target.value }))}>
+                <option value="">— none —</option>{headers.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select></div>
+            <div><label className="label mb-1 block">Email column</label>
+              <select className="input" value={map.email || ''} onChange={(e) => setMap((m) => ({ ...m, email: e.target.value }))}>
+                <option value="">— none —</option>{headers.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select></div>
           </div>
 
-          {!map.phone && <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">Map a <b>Phone</b> column to continue.</div>}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-line p-3"><div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500"><Users className="h-3.5 w-3.5" /> Properties</div><div className="text-2xl font-extrabold text-ink">{num(stats.leads)}</div></div>
+            <div className="rounded-xl border border-line p-3"><div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500"><PhoneOutgoing className="h-3.5 w-3.5" /> Dialable numbers</div><div className="text-2xl font-extrabold text-ink">{num(stats.numbers)}</div></div>
+            <div className="rounded-xl border border-line p-3"><div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Avg / property</div><div className="text-2xl font-extrabold text-ink">{stats.avg.toFixed(1)}</div></div>
+          </div>
+
+          {Object.keys(stats.byLabel).length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(stats.byLabel).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([label, n]) => (
+                <span key={label} className="pill bg-surface text-slate-600">{label}: <b className="ml-1">{num(n)}</b></span>
+              ))}
+            </div>
+          )}
 
           <div className="overflow-x-auto rounded-xl border border-line">
             <table className="w-full text-xs">
               <thead className="bg-surface text-left uppercase tracking-wide text-slate-500">
-                <tr>{CANONICAL_FIELDS.filter((f) => map[f.key]).map((f) => <th key={f.key} className="px-2 py-1.5">{f.label}</th>)}</tr>
+                <tr><th className="px-2 py-1.5">Owner</th><th className="px-2 py-1.5">Property</th><th className="px-2 py-1.5">Numbers on this record</th></tr>
               </thead>
               <tbody>
-                {mappedLeads.slice(0, 20).map((l, i) => (
-                  <tr key={i} className="border-t border-line">
-                    {CANONICAL_FIELDS.filter((f) => map[f.key]).map((f) => <td key={f.key} className="px-2 py-1.5 text-slate-700">{l[f.key] || '—'}</td>)}
+                {leads.slice(0, 20).map((l, i) => (
+                  <tr key={i} className="border-t border-line align-top">
+                    <td className="px-2 py-1.5 font-medium text-ink">{l.ownerName || '—'}</td>
+                    <td className="px-2 py-1.5 text-slate-600">{l.address || '—'}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex flex-wrap gap-1">
+                        {l.numbers.map((n, j) => <span key={j} className="pill bg-brand-light text-brand"><span className="font-mono">{n.phone}</span><span className="ml-1 text-[10px] text-slate-500">{n.label}</span></span>)}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-slate-500">{num(mappedLeads.length)} rows with a phone number ready · showing first 20.</p>
+          <p className="text-xs text-slate-500">Showing first 20 of {num(stats.leads)} properties. Each number becomes its own record (line type unverified) tagged back to the property.</p>
 
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
-          {result && <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">Added {result.added}, merged {result.merged}, rejected {result.rejected}.</div>}
+          {result && <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">Created {num(result.numbers)} dialable numbers across {num(result.leads)} properties (added {result.added}, merged {result.merged}{result.rejected ? `, rejected ${result.rejected}` : ''}).</div>}
 
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={() => { setHeaders([]); setRows([]); setResult(null); }}>← Choose another file</button>
-            <button className="btn-primary flex-1" disabled={busy || !map.phone || mappedLeads.length === 0} onClick={submit}>
-              {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading {num(mappedLeads.length)} leads…</> : <><Upload className="h-4 w-4" /> Add {num(mappedLeads.length)} leads to GoHighLevel</>}
+            <button className="btn-primary flex-1" disabled={busy || stats.numbers === 0} onClick={submit}>
+              {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Ingesting {num(stats.numbers)} numbers…</> : <><Upload className="h-4 w-4" /> Ingest {num(stats.leads)} properties · {num(stats.numbers)} numbers</>}
             </button>
           </div>
         </div>
@@ -416,9 +428,27 @@ function LaunchStep({ campaign }: { campaign: any }) {
   const [testPhone, setTestPhone] = useState('');
   const [testMsg, setTestMsg] = useState('');
   const [testing, setTesting] = useState(false);
+  const [dl, setDl] = useState('');
+  const [ownerPhone, setOwnerPhone] = useState('');
+  const [resolveMsg, setResolveMsg] = useState('');
+  const [resolving, setResolving] = useState(false);
 
   const load = () => dispatch.monitor(campaign.slug).then(setMon).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [campaign.slug]);
+
+  const download = async (view: 'lead' | 'number') => {
+    setDl(view);
+    try {
+      const r = view === 'lead' ? await dispatch.exportByLead(campaign.slug) : await dispatch.exportByNumber(campaign.slug);
+      const name = view === 'lead' ? `${campaign.slug}-by-property.xlsx` : `${campaign.slug}-by-number.xlsx`;
+      await downloadSheet(name, r.rows || [], view === 'lead' ? 'By property' : 'By number');
+    } catch (e: any) { setResolveMsg(String(e?.message || e)); } finally { setDl(''); }
+  };
+  const confirmOwner = async () => {
+    setResolving(true); setResolveMsg('');
+    try { const r = await dispatch.resolveLead(campaign.slug, ownerPhone.trim()); setResolveMsg(`Confirmed the owner number and retired ${r.retired} sibling number(s) across ${r.leads} propert${r.leads === 1 ? 'y' : 'ies'}.`); setOwnerPhone(''); load(); }
+    catch (e: any) { setResolveMsg(String(e?.message || e)); } finally { setResolving(false); }
+  };
 
   const doLaunch = async () => {
     setLaunching(true); setMsg('');
@@ -486,6 +516,22 @@ function LaunchStep({ campaign }: { campaign: any }) {
             </table>
           </div>
         )}
+      </SectionCard>
+
+      <SectionCard title="Right-person resolution" description="When a call reaches the actual owner, confirm that number — its siblings (relatives, tenants, old numbers) are retired so the dialer stops calling them.">
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="input w-[220px]" value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} placeholder="+1 confirmed owner number" />
+          <button className="btn-ghost" disabled={resolving || !ownerPhone.trim()} onClick={confirmOwner}>{resolving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Confirm as the owner</button>
+        </div>
+        {resolveMsg && <div className="mt-2 text-sm text-slate-600">{resolveMsg}</div>}
+      </SectionCard>
+
+      <SectionCard title="Download the list" description="Two structured exports — as it came in (one row per property with every number and its call log) and exploded (one row per number with the property context concatenated, line type, and verification timestamp).">
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-ghost" disabled={dl === 'lead'} onClick={() => download('lead')}>{dl === 'lead' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} By property (master)</button>
+          <button className="btn-ghost" disabled={dl === 'number'} onClick={() => download('number')}>{dl === 'number' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} By number (exploded)</button>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">Each export includes line type, verified timestamp, relationship label, latest disposition and call recording where available.</p>
       </SectionCard>
 
       <SectionCard title="Test the agent" description="Place a single live call to a number you control (a real call will be made)">
