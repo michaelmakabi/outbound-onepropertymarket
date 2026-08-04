@@ -96,6 +96,7 @@ export const opm = {
   leads: (p: any) => opmCall('leads', { params: p }),
   sellerContacts: (p: any = {}) => opmCall('contacts', { params: p }),
   resolve: (phones: string[]) => opmCall('resolve', { params: { phones: phones.join(',') } }),
+  placeCall: (b: any) => opmCall('place_call', { method: 'POST', body: b }),
   lead: (id: string) => opmCall('lead', { params: { id } }),
   moveLead: (b: any) => opmCall('move_lead', { method: 'POST', body: b }),
   addNote: (b: any) => opmCall('add_note', { method: 'POST', body: b }),
