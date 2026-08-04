@@ -70,9 +70,19 @@ const OPM_BASE =
   (import.meta as any).env?.VITE_OPM_BASE ||
   ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm');
 
+// Active CRM workspace (tenant) — set by the WorkspaceProvider; injected into every opm call.
+const WS_KEY = 'opm_active_workspace';
+let activeWorkspace: string | null = localStorage.getItem(WS_KEY);
+export const workspaceStore = {
+  get: () => activeWorkspace,
+  set: (w: string | null) => { activeWorkspace = w; if (w) localStorage.setItem(WS_KEY, w); else localStorage.removeItem(WS_KEY); },
+};
+
 async function opmCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
   const url = new URL(OPM_BASE);
   url.searchParams.set('action', action);
+  // Scope every CRM call to the active tenant (backend still defaults to pitman if absent).
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
   for (const [k, v] of Object.entries(opts.params || {})) {
     if (v === undefined || v === null || v === '') continue;
     url.searchParams.set(k, String(v));
@@ -87,6 +97,7 @@ async function opmCall(action: string, opts: { method?: string; params?: Record<
 }
 
 export const opm = {
+  workspaces: () => opmCall('workspaces'),
   summary: () => opmCall('summary'),
   pipelines: () => opmCall('pipelines'),
   savePipeline: (b: any) => opmCall('save_pipeline', { method: 'POST', body: b }),
