@@ -94,6 +94,7 @@ export const opm = {
   saveStage: (b: any) => opmCall('save_stage', { method: 'POST', body: b }),
   deleteStage: (id: number) => opmCall('delete_stage', { method: 'POST', body: { id } }),
   leads: (p: any) => opmCall('leads', { params: p }),
+  sellerContacts: (p: any = {}) => opmCall('contacts', { params: p }),
   lead: (id: string) => opmCall('lead', { params: { id } }),
   moveLead: (b: any) => opmCall('move_lead', { method: 'POST', body: b }),
   addNote: (b: any) => opmCall('add_note', { method: 'POST', body: b }),
