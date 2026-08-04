@@ -6,7 +6,7 @@ import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  UserSquare2, Columns3, ChevronDown, Check,
+  UserSquare2, Columns3, ChevronDown, Check, DollarSign,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -109,6 +109,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             {!collapsed && <div className="mt-4 mb-1 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Admin</div>}
             {collapsed && <div className="my-2 border-t border-white/10" />}
             {ADMIN_NAV.map(item)}
+            {user?.role === 'super_admin' && item({ to: '/billing', label: 'Billing', icon: DollarSign })}
           </>
         )}
       </nav>
