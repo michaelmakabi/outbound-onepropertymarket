@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { opm } from '../lib/api';
 import { LoadingBlock, EmptyState } from '../components/dash';
-import { ArrowLeft, Star, BadgeCheck, Phone, Smartphone, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
+  Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag,
+} from 'lucide-react';
 
 function fmtNum(n: string) {
   const d = (n || '').replace(/\D/g, '').replace(/^1/, '');
@@ -11,14 +14,10 @@ function fmtNum(n: string) {
 const money = (n: any) => (n ? `$${Number(n).toLocaleString('en-US')}` : '—');
 
 // Notes arrive as messy, often double-escaped GHL HTML (&lt;p&gt;, <hr>, mention spans).
-// Decode, turn @mentions into plain text, drop junk tags -> clean readable text.
 function cleanNote(raw: string): string {
   if (!raw) return '';
   let s = raw;
-  try {
-    const ta = document.createElement('textarea');
-    ta.innerHTML = s; s = ta.value; ta.innerHTML = s; s = ta.value; // decode up to 2x
-  } catch {}
+  try { const ta = document.createElement('textarea'); ta.innerHTML = s; s = ta.value; ta.innerHTML = s; s = ta.value; } catch {}
   s = s.replace(/<span[^>]*data-user-id=[^>]*>(.*?)<\/span>/gi, '@$1');
   s = s.replace(/<hr\s*\/?>/gi, '\n');
   s = s.replace(/<\/p>/gi, '\n').replace(/<p[^>]*>/gi, '').replace(/<br\s*\/?>/gi, '\n');
@@ -32,6 +31,17 @@ const PARCEL_LABELS: Record<string, string> = {
   'commercial units': 'Comm Units', stories: 'Stories', 'zoning districts': 'Zoning', 'tax class': 'Tax Class',
   'unused far': 'Unused FAR', 'corner lot': 'Corner Lot', 'main address': 'Parcel Address', 'vacant status': 'Vacant', borough: 'Borough',
 };
+const SOURCE_STYLE: Record<string, string> = {
+  call: 'bg-sky-100 text-sky-700', email: 'bg-violet-100 text-violet-700', text: 'bg-emerald-100 text-emerald-700',
+  ai: 'bg-fuchsia-100 text-fuchsia-700', manual: 'bg-slate-100 text-slate-600', import: 'bg-slate-100 text-slate-500',
+};
+const COMPOSE_TABS = [
+  { k: 'note', label: 'Note', icon: PenLine },
+  { k: 'email', label: 'Email', icon: Mail },
+  { k: 'text', label: 'Text', icon: MessageSquare },
+  { k: 'call', label: 'Log Call', icon: PhoneCall },
+] as const;
+const CALL_OUTCOMES = ['Connected', 'No Answer', 'Voicemail', 'Callback Scheduled', 'Wrong Number', 'Not Interested'];
 
 export default function LeadDetail() {
   const { id = '' } = useParams();
@@ -39,27 +49,28 @@ export default function LeadDetail() {
   const location = useLocation();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'all' | 'notes' | 'calls'>('all');
-  // Ordered id list for prev/next. Prefer the filtered order passed from the Leads/Pipelines
-  // page via router state; fall back to fetching the full default-ordered list on direct load.
   const [ids, setIds] = useState<string[]>((location.state as any)?.ids || []);
+
+  // composer
+  const [mode, setMode] = useState<'note' | 'email' | 'text' | 'call'>('note');
+  const [body, setBody] = useState('');
+  const [subject, setSubject] = useState('');
+  const [callOutcome, setCallOutcome] = useState('');
 
   const load = () => { setLoading(true); opm.lead(id).then(setData).finally(() => setLoading(false)); };
   useEffect(load, [id]);
-  useEffect(() => {
-    if (ids.length) return;
-    opm.leads({}).then((d) => setIds((d.leads || []).map((l: any) => l.lead_id))).catch(() => {});
-  }, []);
+  useEffect(() => { if (!ids.length) opm.leads({}).then((d) => setIds((d.leads || []).map((l: any) => l.lead_id))).catch(() => {}); }, []);
 
   const idx = ids.indexOf(id);
   const prevId = idx > 0 ? ids[idx - 1] : null;
   const nextId = idx >= 0 && idx < ids.length - 1 ? ids[idx + 1] : null;
-  const goto = (target: string | null) => { if (target) nav(`/leads/${encodeURIComponent(target)}`, { state: { ids } }); };
+  const goto = (t: string | null) => { if (t) nav(`/leads/${encodeURIComponent(t)}`, { state: { ids } }); };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return;
       if (e.key === 'ArrowLeft') goto(prevId);
       if (e.key === 'ArrowRight') goto(nextId);
     };
@@ -74,153 +85,224 @@ export default function LeadDetail() {
   const owners = contacts.filter((c) => c.contact_kind !== 'relative');
   const relatives = contacts.filter((c) => c.contact_kind === 'relative');
 
-  async function patch(contact_id: string, body: any) {
-    setData((d: any) => ({ ...d, contacts: d.contacts.map((c: any) => c.contact_id === contact_id ? { ...c, ...body } : (body.is_primary_number ? { ...c, is_primary_number: false } : c)) }));
-    await opm.updateContact({ contact_id, lead_id: id, ...body }).catch(() => load());
+  async function patch(contact_id: string, b: any) {
+    setData((d: any) => ({ ...d, contacts: d.contacts.map((c: any) => c.contact_id === contact_id ? { ...c, ...b } : (b.is_primary_number ? { ...c, is_primary_number: false } : c)) }));
+    await opm.updateContact({ contact_id, lead_id: id, ...b }).catch(() => load());
   }
-  async function addNote(source: 'manual' | 'ai') {
-    if (!note.trim()) return;
+  async function saveActivity() {
+    const srcMap: Record<string, string> = { note: 'manual', email: 'email', text: 'text', call: 'call' };
+    let text = body.trim();
+    if (mode === 'call') { if (!callOutcome) return; text = `☎ ${callOutcome}${text ? ` — ${text}` : ''}`; }
+    else if (mode === 'email') { if (!text && !subject.trim()) return; text = `✉ ${subject ? `${subject}: ` : ''}${text}`; }
+    else if (mode === 'text') { if (!text) return; text = `💬 ${text}`; }
+    if (!text) return;
     setSaving(true);
-    const text = source === 'ai' ? `✨ ${note}` : note;
-    await opm.addNote({ lead_id: id, text, html: text.replace(/\n/g, '<br>'), source }).catch(() => {});
-    setNote(''); setSaving(false); load();
+    await opm.addNote({ lead_id: id, text, html: text.replace(/\n/g, '<br>'), source: srcMap[mode] }).catch(() => {});
+    setBody(''); setSubject(''); setCallOutcome(''); setSaving(false); load();
+  }
+  async function aiNote() {
+    if (!body.trim()) return;
+    setSaving(true);
+    await opm.addNote({ lead_id: id, text: `✨ ${body}`, html: `✨ ${body}`.replace(/\n/g, '<br>'), source: 'ai' }).catch(() => {});
+    setBody(''); setSaving(false); load();
   }
 
-  if (loading) return <LoadingBlock />;
+  if (loading) return <div className="mx-auto max-w-[1500px]"><LoadingBlock label="Loading lead…" /></div>;
   if (!lead) return <EmptyState text="Lead not found." />;
 
   const parcel = lead.parcel || {};
-  const filteredActivity = tab === 'calls' ? [] : notes;
+  const activity = tab === 'calls' ? [] : (tab === 'notes' ? notes.filter((n) => n.source !== 'call') : notes);
+  const initials = (lead.name || '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('');
+  const verifiedN = contacts.filter((c) => c.phone_verified).length;
 
   return (
-    <div>
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <button onClick={() => nav('/leads', { state: { ids } })} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-brand"><ArrowLeft className="h-4 w-4" /> All leads</button>
-        <div className="flex items-center gap-1.5">
-          {idx >= 0 && ids.length > 0 && <span className="mr-1 text-xs text-slate-400">{idx + 1} of {ids.length}</span>}
-          <button onClick={() => goto(prevId)} disabled={!prevId} title="Previous lead (←)" className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-sm font-semibold text-slate-600 enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40"><ChevronLeft className="h-4 w-4" /> Prev</button>
-          <button onClick={() => goto(nextId)} disabled={!nextId} title="Next lead (→)" className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-sm font-semibold text-slate-600 enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40">Next <ChevronRight className="h-4 w-4" /></button>
+    <div className="mx-auto max-w-[1500px]">
+      {/* top bar */}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <button onClick={() => nav('/leads', { state: { ids } })} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 transition hover:text-brand"><ArrowLeft className="h-4 w-4" /> All leads</button>
+        <div className="flex items-center gap-2">
+          {idx >= 0 && ids.length > 0 && <span className="text-xs tabular-nums text-slate-400">{idx + 1} of {ids.length}</span>}
+          <button onClick={() => goto(prevId)} disabled={!prevId} title="Previous (←)" className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-slate-600 transition enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40"><ChevronLeft className="h-4 w-4" /> Prev</button>
+          <button onClick={() => goto(nextId)} disabled={!nextId} title="Next (→)" className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-slate-600 transition enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40">Next <ChevronRight className="h-4 w-4" /></button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr_300px]">
-        {/* LEFT */}
-        <div className="flex flex-col gap-4">
-          <div className="card">
-            <div className="flex items-center gap-3">
-              <div className="grid h-12 w-12 place-items-center rounded-full bg-brand/10 text-lg font-extrabold text-brand">{(lead.name || '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
-              <div><div className="text-lg font-extrabold text-ink">{lead.name}</div><div className="text-xs text-slate-500">{lead.lead_source}</div></div>
+      {/* identity + deal strip */}
+      <div className="mb-4 flex flex-col gap-4 rounded-2xl border border-line bg-white p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-brand/10 text-lg font-extrabold text-brand">{initials}</div>
+          <div className="min-w-0">
+            <div className="truncate text-lg font-extrabold leading-tight text-ink">{lead.name}</div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2">
+              <span className="pill bg-brand/10 text-brand">{lead.stage_name || lead.crm_stage || '—'}</span>
+              <span className="text-xs text-slate-400">{lead.pipeline_name || 'Pitman Seller Pipeline'}</span>
             </div>
-            <div className="mt-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">Phone numbers</div>
-            {owners.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} />)}
-            {lead.emails?.[0]?.email && <div className="mt-2 text-sm text-brand">{lead.emails[0].email}</div>}
-            {lead.addresses?.[0] && <div className="text-xs text-slate-500">{lead.addresses[0].Street}, {lead.addresses[0].City} {lead.addresses[0].State} {lead.addresses[0].Zip}</div>}
           </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat icon={DollarSign} label="Deal Value" value={money(lead.deal_price)} />
+          <Stat icon={GitBranch} label="Source" value={lead.lead_source || '—'} />
+          <Stat icon={User} label="Assigned" value={lead.assigned_to || '—'} />
+          <Stat icon={Phone} label="Numbers" value={`${contacts.length} · ${verifiedN} ✓`} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
+        {/* LEFT column */}
+        <div className="space-y-4">
+          <Card title="Phone Numbers" count={owners.length}>
+            <div className="space-y-2">
+              {owners.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} />)}
+            </div>
+            {lead.emails?.[0]?.email && <div className="mt-3 flex items-center gap-1.5 text-sm text-brand"><Mail className="h-3.5 w-3.5" /> {lead.emails[0].email}</div>}
+            {lead.addresses?.[0] && <div className="mt-1 text-xs text-slate-500">{lead.addresses[0].Street}, {lead.addresses[0].City} {lead.addresses[0].State} {lead.addresses[0].Zip}</div>}
+          </Card>
 
           {relatives.length > 0 && (
-            <div className="card">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Relationships · {relatives.length} numbers</div>
-              {relatives.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} showRel />)}
-            </div>
+            <Card title="Relationships" count={relatives.length}>
+              <div className="space-y-2">{relatives.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} showRel />)}</div>
+            </Card>
           )}
 
-          <div className="card">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Details</div>
-            <Detail k="Stage" v={<span className="pill bg-brand/10 text-brand">{lead.crm_stage || '—'}</span>} />
-            <Detail k="Pipeline" v={`${lead.pipeline_name || '—'} · ${lead.stage_name || '—'}`} />
-            <Detail k="Assigned to" v={lead.assigned_to || '—'} />
-            <Detail k="Deal Price" v={money(lead.deal_price)} />
-            <Detail k="Subject Property" v={lead.property_ref || '—'} />
-            {lead.tags?.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{lead.tags.slice(0, 12).map((t: string) => <span key={t} className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-slate-500">{t}</span>)}</div>}
-          </div>
+          <Card title="Details">
+            <dl className="space-y-0.5">
+              <Row k="Stage" v={<span className="pill bg-brand/10 text-brand">{lead.stage_name || lead.crm_stage || '—'}</span>} />
+              <Row k="Pipeline" v={lead.pipeline_name || '—'} />
+              <Row k="Assigned to" v={lead.assigned_to || '—'} />
+              <Row k="Deal Price" v={money(lead.deal_price)} />
+              <Row k="Subject Property" v={lead.property_ref || '—'} />
+            </dl>
+            {lead.tags?.length > 0 && (
+              <div className="mt-3">
+                <div className="mb-1.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Tag className="h-3 w-3" /> Tags</div>
+                <div className="flex flex-wrap gap-1">{lead.tags.slice(0, 16).map((t: string) => <span key={t} className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-slate-500">{t}</span>)}{lead.tags.length > 16 && <span className="text-[10px] text-slate-400">+{lead.tags.length - 16}</span>}</div>
+              </div>
+            )}
+          </Card>
 
           {Object.keys(parcel).length > 0 && (
-            <div className="card">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Custom fields · parcel</div>
-              {Object.entries(parcel).filter(([k]) => k !== 'is related' && k !== 'lat long').map(([k, v]) => <Detail key={k} k={PARCEL_LABELS[k] || k} v={String(v)} />)}
-            </div>
-          )}
-        </div>
-
-        {/* CENTER */}
-        <div className="flex flex-col gap-4">
-          <div className="card">
-            <div className="mb-2 flex gap-4 border-b border-line pb-2 text-sm font-semibold">
-              <span className="text-brand">✍ Create Note</span><span className="text-slate-400">✉ Email</span><span className="text-slate-400">💬 Text</span><span className="text-slate-400">📞 Log Call</span>
-            </div>
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note… (saved with your name + timestamp)" className="input min-h-[80px] w-full" />
-            <div className="mt-2 flex justify-end gap-2">
-              <button onClick={() => addNote('ai')} disabled={saving} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> AI Note</button>
-              <button onClick={() => addNote('manual')} disabled={saving} className="rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">Create Note</button>
-            </div>
-          </div>
-
-          <div className="flex gap-4 px-1 text-xs font-semibold text-slate-500">
-            <button className={tab === 'all' ? 'text-ink' : ''} onClick={() => setTab('all')}>All <b>{notes.length}</b></button>
-            <button className={tab === 'notes' ? 'text-ink' : ''} onClick={() => setTab('notes')}>Notes</button>
-            <button className={tab === 'calls' ? 'text-ink' : ''} onClick={() => setTab('calls')}>Calls <b>{calls.length}</b></button>
-          </div>
-
-          <div className="card">
-            {tab === 'calls' ? (
-              calls.length === 0 ? <EmptyState text="No dialer calls matched to this lead's numbers yet." /> :
-              <ol className="flex flex-col gap-3">{calls.map((c) => (
-                <li key={c.call_id} className="rounded-xl border border-line p-3">
-                  <div className="flex justify-between text-sm"><span className="font-semibold">{c.disposition || 'Call'}</span><span className="text-slate-400">{c.to_number}</span></div>
-                  {c.call_summary && <div className="mt-1 text-xs text-slate-600">{c.call_summary}</div>}
-                  {c.recording_url && <audio controls src={c.recording_url} className="mt-2 h-8 w-full" />}
-                </li>))}</ol>
-            ) : (
-              filteredActivity.length === 0 ? <EmptyState text="No notes yet." /> :
-              <ol className="flex flex-col gap-3">{filteredActivity.map((n) => (
-                <li key={n.id} className="flex gap-3">
-                  <div className="grid h-7 w-7 flex-none place-items-center rounded-full bg-surface text-[10px] font-bold text-slate-500">{(n.author || 'SY').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
-                  <div className="flex-1 rounded-xl border border-line bg-surface p-2.5">
-                    <div className="flex justify-between"><span className="text-sm font-semibold text-ink">{n.author || 'System'}</span><span className="text-xs text-slate-400">{n.note_date || ''}{n.source && n.source !== 'import' ? ` · ${n.source}` : ''}</span></div>
-                    <div className="mt-1 whitespace-pre-line text-sm leading-relaxed text-slate-700">{cleanNote(n.body_html || n.body_text || '')}</div>
+            <Card title="Property · Parcel">
+              <dl className="grid grid-cols-2 gap-x-4">
+                {Object.entries(parcel).filter(([k, v]) => k !== 'is related' && k !== 'lat long' && v !== '' && v != null).map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between gap-2 border-b border-dashed border-line py-1.5 text-xs">
+                    <span className="text-slate-400">{PARCEL_LABELS[k] || k}</span>
+                    <span className="text-right font-medium text-ink">{String(v)}</span>
                   </div>
-                </li>))}</ol>
-            )}
-          </div>
+                ))}
+              </dl>
+            </Card>
+          )}
         </div>
 
-        {/* RIGHT */}
-        <div className="flex flex-col gap-4">
-          <div className="card"><div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Deal</div>
-            <Detail k="Property" v={lead.property_ref || '—'} /><Detail k="Stage" v={lead.stage_name || '—'} /><Detail k="Value" v={money(lead.deal_price)} /></div>
-          <div className="card"><div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Files &amp; recordings</div>
-            <div className="mt-1 text-xs text-slate-500">Dialer recordings + voice transcriptions auto-append here and to the call thread, matched to the number dialed.</div></div>
-          {lead.disposition_flags && Object.keys(lead.disposition_flags).length > 0 && (
-            <div className="card"><div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Last call disposition</div>
-              {Object.entries(lead.disposition_flags).slice(0, 8).map(([k, v]) => <Detail key={k} k={k.replace('eve ', '')} v={String(v)} />)}</div>
-          )}
+        {/* RIGHT column */}
+        <div className="space-y-4">
+          {/* composer */}
+          <div className="rounded-2xl border border-line bg-white">
+            <div className="flex items-center gap-1 border-b border-line px-2 pt-2">
+              {COMPOSE_TABS.map((t) => (
+                <button key={t.k} onClick={() => setMode(t.k)} className={`inline-flex items-center gap-1.5 rounded-t-lg px-3 py-2 text-sm font-semibold transition ${mode === t.k ? 'bg-brand/5 text-brand' : 'text-slate-500 hover:text-ink'}`}>
+                  <t.icon className="h-3.5 w-3.5" /> {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2 p-3">
+              {mode === 'email' && <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="input w-full" />}
+              {mode === 'call' && (
+                <div className="flex flex-wrap gap-1.5">
+                  {CALL_OUTCOMES.map((o) => <button key={o} onClick={() => setCallOutcome(o)} className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${callOutcome === o ? 'border-brand bg-brand text-white' : 'border-line text-slate-600 hover:border-brand'}`}>{o}</button>)}
+                </div>
+              )}
+              <textarea value={body} onChange={(e) => setBody(e.target.value)}
+                placeholder={mode === 'note' ? 'Add a note… (saved with your name + timestamp)' : mode === 'email' ? 'Email body — logged to the timeline' : mode === 'text' ? 'Text message — logged to the timeline' : 'Call notes (optional)'}
+                className="input min-h-[84px] w-full resize-y" />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-400">{mode === 'note' ? 'Saved as a note' : mode === 'call' ? 'Logs a call activity' : `Logs ${mode === 'email' ? 'an email' : 'a text'} touch`}</span>
+                <div className="flex gap-2">
+                  {mode === 'note' && <button onClick={aiNote} disabled={saving || !body.trim()} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> AI Note</button>}
+                  <button onClick={saveActivity} disabled={saving} className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{saving ? 'Saving…' : COMPOSE_TABS.find((t) => t.k === mode)!.label}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* activity */}
+          <div className="rounded-2xl border border-line bg-white">
+            <div className="flex items-center gap-4 border-b border-line px-4 py-2.5 text-sm font-semibold text-slate-500">
+              <button className={tab === 'all' ? 'text-ink' : 'hover:text-ink'} onClick={() => setTab('all')}>Activity <span className="text-slate-400">{notes.length}</span></button>
+              <button className={tab === 'notes' ? 'text-ink' : 'hover:text-ink'} onClick={() => setTab('notes')}>Notes</button>
+              <button className={tab === 'calls' ? 'text-ink' : 'hover:text-ink'} onClick={() => setTab('calls')}>Calls <span className="text-slate-400">{calls.length}</span></button>
+            </div>
+            <div className="p-4">
+              {tab === 'calls' ? (
+                calls.length === 0 ? <EmptyState text="No dialer calls matched to this lead's numbers yet." /> :
+                <ol className="space-y-3">{calls.map((c) => (
+                  <li key={c.call_id} className="rounded-xl border border-line p-3">
+                    <div className="flex items-center justify-between text-sm"><span className="font-semibold text-ink">{c.disposition || 'Call'}</span><span className="font-mono text-xs text-slate-400">{fmtNum(c.to_number || '')}</span></div>
+                    {c.call_summary && <div className="mt-1 text-xs text-slate-600">{c.call_summary}</div>}
+                    {c.recording_url && <audio controls src={c.recording_url} className="mt-2 h-8 w-full" />}
+                  </li>))}</ol>
+              ) : (
+                activity.length === 0 ? <EmptyState text="No activity yet — add a note, log a call, or record an email/text above." /> :
+                <ol className="space-y-3">{activity.map((n) => (
+                  <li key={n.id} className="flex gap-3">
+                    <div className="grid h-7 w-7 flex-none place-items-center rounded-full bg-surface text-[10px] font-bold text-slate-500">{(n.author || 'SY').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
+                    <div className="min-w-0 flex-1 rounded-xl border border-line bg-surface/60 p-3">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2"><span className="text-sm font-semibold text-ink">{n.author || 'System'}</span>{n.source && n.source !== 'import' && n.source !== 'manual' && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SOURCE_STYLE[n.source] || 'bg-slate-100 text-slate-500'}`}>{n.source}</span>}</div>
+                        <span className="shrink-0 text-xs text-slate-400">{n.note_date || ''}</span>
+                      </div>
+                      <div className="whitespace-pre-line text-sm leading-relaxed text-slate-700">{cleanNote(n.body_html || n.body_text || '')}</div>
+                    </div>
+                  </li>))}</ol>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function Detail({ k, v }: { k: string; v: any }) {
-  return <div className="flex items-start justify-between gap-3 border-b border-dashed border-line py-1.5 text-sm last:border-0"><span className="text-slate-500">{k}</span><span className="text-right font-medium text-ink">{v}</span></div>;
+function Stat({ icon: Icon, label, value }: { icon: any; label: string; value: any }) {
+  return (
+    <div className="rounded-xl border border-line bg-surface/50 px-3 py-2">
+      <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Icon className="h-3 w-3" /> {label}</div>
+      <div className="mt-0.5 truncate text-sm font-bold text-ink" title={String(value)}>{value}</div>
+    </div>
+  );
+}
+
+function Card({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-line bg-white p-4">
+      <div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+        {title}{count != null && <span className="rounded-full bg-surface px-1.5 text-[10px] text-slate-500">{count}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: any }) {
+  return <div className="flex items-start justify-between gap-3 border-b border-dashed border-line py-1.5 text-sm last:border-0"><span className="shrink-0 text-slate-500">{k}</span><span className="text-right font-medium text-ink">{v}</span></div>;
 }
 
 function PhoneRow({ c, onPatch, showRel }: { c: any; onPatch: (id: string, b: any) => void; showRel?: boolean }) {
   const isMobile = c.phone_channel === 'mobile';
   return (
-    <div className={`mt-2 rounded-lg border p-2 ${c.is_primary_number ? 'border-brand bg-brand/5' : 'border-line'}`}>
+    <div className={`rounded-xl border p-2.5 transition ${c.is_primary_number ? 'border-brand bg-brand/5' : 'border-line hover:border-slate-300'}`}>
       <div className="flex items-center justify-between gap-2">
-        <a href={`tel:${c.phone}`} className="font-mono font-semibold text-brand">{fmtNum(c.phone)}</a>
-        <div className="flex items-center gap-1">
-          <button title="Toggle verified" onClick={() => onPatch(c.contact_id, { phone_verified: !c.phone_verified })} className={`rounded p-1 ${c.phone_verified ? 'text-emerald-600' : 'text-slate-300 hover:text-slate-400'}`}><BadgeCheck className="h-4 w-4" /></button>
-          <button title="Set primary number" onClick={() => onPatch(c.contact_id, { is_primary_number: true })} className={`rounded p-1 ${c.is_primary_number ? 'text-brand' : 'text-slate-300 hover:text-slate-400'}`}><Star className="h-4 w-4" /></button>
+        <a href={`tel:${c.phone}`} className="font-mono text-sm font-semibold text-brand hover:underline">{fmtNum(c.phone)}</a>
+        <div className="flex items-center gap-0.5">
+          <button title={c.phone_verified ? 'Verified — click to unverify' : 'Mark verified'} onClick={() => onPatch(c.contact_id, { phone_verified: !c.phone_verified })} className={`rounded-md p-1 transition ${c.phone_verified ? 'text-emerald-600' : 'text-slate-300 hover:text-slate-500'}`}><BadgeCheck className="h-4 w-4" /></button>
+          <button title="Set as primary number" onClick={() => onPatch(c.contact_id, { is_primary_number: true })} className={`rounded-md p-1 transition ${c.is_primary_number ? 'text-amber-500' : 'text-slate-300 hover:text-slate-500'}`}><Star className={`h-4 w-4 ${c.is_primary_number ? 'fill-amber-400' : ''}`} /></button>
         </div>
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${isMobile ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{isMobile ? <Smartphone className="h-3 w-3" /> : <Phone className="h-3 w-3" />}{c.phone_channel}</span>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${isMobile ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{isMobile ? <Smartphone className="h-3 w-3" /> : <Phone className="h-3 w-3" />}{c.phone_channel || 'other'}</span>
         {c.phone_verified && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">✓ verified</span>}
-        {c.is_primary_number && <span className="rounded-full bg-brand/15 px-2 py-0.5 text-brand">★ primary</span>}
+        {c.is_primary_number && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">★ primary</span>}
         {showRel && c.related_name && <span className="text-slate-500">{c.related_name}{c.relation_type ? ` · ${c.relation_type}` : ''}</span>}
-        {!showRel && c.phone_label && <span className="text-slate-500">{c.phone_label}</span>}
       </div>
     </div>
   );
