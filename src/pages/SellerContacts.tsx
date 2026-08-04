@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { opm } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import ImportWizard from '../components/ImportWizard';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews,
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
 } from '../components/dash';
 import { num } from '../lib/format';
-import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload } from 'lucide-react';
 
 const PAGE_KEY = 'opm-contacts';
 const PAGE_SIZE = 50;
@@ -36,6 +38,7 @@ type ViewCfg = { kind: string; channel: string[]; verified: string; search: stri
 
 export default function SellerContacts() {
   const nav = useNavigate();
+  const { user } = useAuth();
   const [allRows, setAllRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [kind, setKind] = useState('');
@@ -43,6 +46,7 @@ export default function SellerContacts() {
   const [verified, setVerified] = useState('');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showImport, setShowImport] = useState(false);
 
   // ---- Bulk AI caller ----
   const [callModal, setCallModal] = useState(false);
@@ -148,9 +152,20 @@ export default function SellerContacts() {
     setRunning(false);
   }
 
+  const isSuperAdmin = user?.role === 'super_admin';
+
   return (
     <div>
-      <PageHeader title="Contacts" description="Every dialable phone number — owners and relationships, each its own record" showDate={false} />
+      <div className="flex items-start justify-between gap-3">
+        <PageHeader title="Contacts" description="Every dialable phone number — owners and relationships, each its own record" showDate={false} />
+        {isSuperAdmin && (
+          <button className="mt-1 inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-light" onClick={() => setShowImport(true)}>
+            <Upload className="h-4 w-4" /> Import CSV
+          </button>
+        )}
+      </div>
+
+      {showImport && <ImportWizard onClose={() => setShowImport(false)} />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Dialable Contacts" value={num(allRows.length)} sub="one per phone number" icon={Contact} accent="blue" />
