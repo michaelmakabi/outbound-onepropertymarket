@@ -61,7 +61,7 @@ const ADMIN_NAV = [
 const COLLAPSE_KEY = 'opm_sidebar_collapsed';
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, impersonating, stopImpersonation } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState<boolean>(() => localStorage.getItem(COLLAPSE_KEY) === '1');
@@ -168,7 +168,19 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <main className={`flex-1 px-4 py-6 pt-20 transition-all md:px-6 md:pt-6 ${collapsed ? 'md:ml-[68px]' : 'md:ml-60'}`}>{children}</main>
+      <main className={`flex-1 px-4 py-6 pt-20 transition-all md:px-6 md:pt-6 ${collapsed ? 'md:ml-[68px]' : 'md:ml-60'}`}>
+        {impersonating && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5">
+            <span className="text-sm font-semibold text-amber-800">
+              You're viewing as <b>{user?.name}</b>. Everything you see and do is scoped to this user's access.
+            </span>
+            <button onClick={stopImpersonation} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
+              <LogOut className="h-3.5 w-3.5" /> Return to my account
+            </button>
+          </div>
+        )}
+        {children}
+      </main>
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </div>
   );
