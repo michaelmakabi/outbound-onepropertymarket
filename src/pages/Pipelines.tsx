@@ -4,7 +4,7 @@ import { opm } from '../lib/api';
 import { PageHeader, LoadingBlock, EmptyState } from '../components/dash';
 import { Plus, Trash2, GripVertical } from 'lucide-react';
 
-type Stage = { id: number; name: string; color: string; sort_order: number; leadCount: number };
+type Stage = { id: number; name: string; color: string; sort_order: number; leadCount: number; valueSum?: number };
 type Pipeline = { id: number; name: string; stages: Stage[] };
 
 export default function Pipelines() {
@@ -60,15 +60,22 @@ export default function Pipelines() {
         ))}
       </div>
 
+      {current && (
+        <div className="mb-3 text-sm text-slate-500">Pipeline total: <span className="font-bold text-emerald-600">${current.stages.reduce((a, s) => a + (s.valueSum || 0), 0).toLocaleString('en-US')}</span> across {current.stages.reduce((a, s) => a + s.leadCount, 0).toLocaleString('en-US')} leads</div>
+      )}
+
       {!current ? <EmptyState text="No pipeline selected." /> : (
         <div className="flex gap-3 overflow-x-auto pb-4">
           {current.stages.map((s) => (
             <div key={s.id} className="w-64 flex-none rounded-xl border border-line bg-surface">
-              <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2" style={{ borderTopColor: s.color, borderTopWidth: 3 }}>
-                <div className="flex items-center gap-1.5"><GripVertical className="h-3.5 w-3.5 text-slate-300" />
-                  <button onClick={() => renameStage(s)} className="text-sm font-bold text-ink">{s.name}</button></div>
-                <div className="flex items-center gap-1"><span className="rounded-full bg-white px-2 text-xs font-semibold text-slate-500">{s.leadCount}</span>
-                  <Trash2 className="h-3.5 w-3.5 cursor-pointer text-slate-300 hover:text-red-500" onClick={() => delStage(s)} /></div>
+              <div className="border-b border-line px-3 py-2" style={{ borderTopColor: s.color, borderTopWidth: 3 }}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-1.5"><GripVertical className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+                    <button onClick={() => renameStage(s)} className="truncate text-sm font-bold text-ink" title={s.name}>{s.name}</button></div>
+                  <div className="flex shrink-0 items-center gap-1"><span className="rounded-full bg-white px-2 text-xs font-semibold text-slate-500">{s.leadCount}</span>
+                    <Trash2 className="h-3.5 w-3.5 cursor-pointer text-slate-300 hover:text-red-500" onClick={() => delStage(s)} /></div>
+                </div>
+                <div className="mt-1 text-xs font-bold text-emerald-600">{(s.valueSum || 0) > 0 ? `$${Number(s.valueSum).toLocaleString('en-US')}` : <span className="font-normal text-slate-300">$0</span>}</div>
               </div>
               <StageLeads pipelineId={current.id} stageId={s.id} onOpen={(id, ids) => nav(`/leads/${encodeURIComponent(id)}`, { state: { ids } })} />
             </div>
