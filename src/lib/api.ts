@@ -117,6 +117,9 @@ export const opm = {
   // Pass workspace:'' so the active-tenant param is NOT injected — target_workspace governs.
   importLeads: (b: { target_workspace: string; rows: any[]; allow_pitman?: boolean }) =>
     opmCall('import_leads', { method: 'POST', params: { workspace: '' }, body: b }),
+  // Billing console (super-admin). Global, so suppress the active-tenant param.
+  billingOverview: () => opmCall('billing_overview', { params: { workspace: '' } }),
+  billingSetConfig: (b: any) => opmCall('billing_set_config', { method: 'POST', params: { workspace: '' }, body: b }),
 };
 
 // Fetch a call recording via the backend proxy (bypasses CORS) as a Blob.
