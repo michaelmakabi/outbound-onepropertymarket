@@ -24,6 +24,7 @@ import LeadDetail from './pages/LeadDetail';
 import Pipelines from './pages/Pipelines';
 import SellerContacts from './pages/SellerContacts';
 import Billing from './pages/Billing';
+import Integrations from './pages/Integrations';
 
 function Protected({ children, admin }: { children: JSX.Element; admin?: boolean }) {
   const { user, loading, isAdmin } = useAuth();
@@ -56,6 +57,7 @@ export default function App() {
       <Route path="/prompt-studio" element={<Protected><PromptStudio /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/billing" element={<Protected admin><Billing /></Protected>} />
+      <Route path="/integrations" element={<Protected admin><Integrations /></Protected>} />
       <Route path="/usage" element={<Protected admin><UsageAnalytics /></Protected>} />
       <Route path="/users" element={<Protected admin><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
