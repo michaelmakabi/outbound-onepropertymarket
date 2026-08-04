@@ -60,6 +60,7 @@ export const api = {
     createUser: (b: any) => call('admin.createUser', { method: 'POST', body: b }),
     updateUser: (b: any) => call('admin.updateUser', { method: 'PATCH', body: b }),
     resetPassword: (b: any) => call('admin.resetPassword', { method: 'POST', body: b }),
+    impersonate: (id: number) => call('admin.impersonate', { method: 'POST', body: { id } }),
     resendInvite: (b: any) => call('admin.resendInvite', { method: 'POST', body: b }),
     setAccess: (b: any) => call('admin.setAccess', { method: 'POST', body: b }),
   },
