@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/auth';
+import { WorkspaceProvider } from './lib/workspace';
 import { Spinner } from './components/ui';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -29,7 +30,7 @@ function Protected({ children, admin }: { children: JSX.Element; admin?: boolean
   if (loading) return <div className="grid min-h-screen place-items-center"><Spinner /></div>;
   if (!user) return <Navigate to="/login" state={{ from: loc.pathname }} replace />;
   if (admin && !isAdmin) return <Navigate to="/" replace />;
-  return <Layout>{children}</Layout>;
+  return <WorkspaceProvider><Layout>{children}</Layout></WorkspaceProvider>;
 }
 
 export default function App() {
