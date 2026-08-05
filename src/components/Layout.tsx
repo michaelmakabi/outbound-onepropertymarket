@@ -6,7 +6,7 @@ import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  UserSquare2, Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes,
+  UserSquare2, Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -39,20 +39,21 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+// op:true = operator tooling, hidden from customers (role=user).
 const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/leads', label: 'Leads', icon: UserSquare2 },
   { to: '/seller-contacts', label: 'Contacts', icon: Contact },
   { to: '/pipelines', label: 'Pipelines', icon: Columns3 },
-  { to: '/workspaces', label: 'Workspaces', icon: Building2 },
+  { to: '/workspaces', label: 'Workspaces', icon: Building2, op: true },
   { to: '/dispositions', label: 'Dispositions', icon: PieChart },
   { to: '/calls', label: 'Call History', icon: PhoneCall },
-  { to: '/compare', label: 'Compare', icon: GitCompare },
-  { to: '/agents', label: 'Agents & Models', icon: Bot },
+  { to: '/compare', label: 'Compare', icon: GitCompare, op: true },
+  { to: '/agents', label: 'Agents & Models', icon: Bot, op: true },
   { to: '/test-ai', label: 'Test AI', icon: PhoneOutgoing },
-  { to: '/suggestions', label: 'AI Suggestions', icon: Sparkles },
-  { to: '/prompt-studio', label: 'Prompt Studio', icon: PenLine },
-  { to: '/reports', label: 'Reports', icon: FileBarChart },
+  { to: '/suggestions', label: 'AI Suggestions', icon: Sparkles, op: true },
+  { to: '/prompt-studio', label: 'Prompt Studio', icon: PenLine, op: true },
+  { to: '/reports', label: 'Reports', icon: FileBarChart, op: true },
 ];
 const ADMIN_NAV = [
   { to: '/usage', label: 'Usage Analytics', icon: Activity },
@@ -63,6 +64,7 @@ const COLLAPSE_KEY = 'opm_sidebar_collapsed';
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout, isAdmin, impersonating, stopImpersonation } = useAuth();
+  const isCustomer = user?.role === 'user';
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState<boolean>(() => localStorage.getItem(COLLAPSE_KEY) === '1');
@@ -73,7 +75,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   const width = collapsed ? 'w-[68px]' : 'w-60';
-  const activeLabel = [...NAV, ...ADMIN_NAV].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
+  const activeLabel = [...NAV, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Tenants' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
 
   const item = (n: any) => (
     <NavLink
@@ -104,7 +106,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       </div>
       <WorkspaceSwitcher collapsed={collapsed} />
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
-        {NAV.map(item)}
+        {NAV.filter((n) => !isCustomer || !n.op).map(item)}
+        {isCustomer && item({ to: '/account', label: 'Account & Billing', icon: CreditCard })}
         {isAdmin && (
           <>
             {!collapsed && <div className="mt-4 mb-1 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">Admin</div>}
