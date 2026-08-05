@@ -84,9 +84,13 @@ export default function Account() {
                 )}
               </div>
             </div>
-            <button className="btn-primary" onClick={openPortal} disabled={portalBusy}>
-              {portalBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Opening…</> : <><CreditCard className="h-4 w-4" /> {w.card ? 'Update card' : 'Add card'}</>}
-            </button>
+            {w.can_manage_billing ? (
+              <button className="btn-primary" onClick={openPortal} disabled={portalBusy}>
+                {portalBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Opening…</> : <><CreditCard className="h-4 w-4" /> {w.card ? 'Update card' : 'Add card'}</>}
+              </button>
+            ) : (
+              <span className="text-[11px] text-slate-400">Only your account owner can change the payment method.</span>
+            )}
           </div>
           {portalMsg && <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{portalMsg}</div>}
 
