@@ -42,6 +42,7 @@ export const onboarding = {
 
 // The canonical consent wording. Bump the version string whenever the text changes;
 // the exact snapshot shown to the signer is frozen server-side at signing time.
+// Replace with your attorney's exact approved language when finalized.
 export const AUTHORIZATION_VERSION = 'v1';
 export const AUTHORIZATION_TEXT = (company: string) =>
-  `I authorize ${company} (One Property Market) to store my payment card and to charge it on a recurring basis for my outbound-calling usage and spend, including hard costs and applicable margins, until I revoke this authorization in writing. I confirm I am an authorized user of this card and that the billing information provided is accurate.`;
+  `I authorize ${company} (One Property Market) to securely store my payment card on file — including the card number, expiration date, and security code (CVV) — and to charge it on a recurring basis for my outbound-calling usage and spend, including hard costs and applicable margins, until I revoke this authorization in writing. I understand and agree that my full card details are retained on file for this purpose, I confirm I am an authorized user of the card, the billing information I provided is accurate, and I accept mutual responsibility for this arrangement.`;
