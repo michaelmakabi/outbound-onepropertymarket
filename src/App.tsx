@@ -26,6 +26,7 @@ import SellerContacts from './pages/SellerContacts';
 import TestAI from './pages/TestAI';
 import Billing from './pages/Billing';
 import Integrations from './pages/Integrations';
+import Tenants from './pages/Tenants';
 import Register from './pages/Register';
 import RegisterComplete from './pages/RegisterComplete';
 
@@ -64,6 +65,7 @@ export default function App() {
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/billing" element={<Protected admin><Billing /></Protected>} />
       <Route path="/integrations" element={<Protected admin><Integrations /></Protected>} />
+      <Route path="/tenants" element={<Protected admin><Tenants /></Protected>} />
       <Route path="/usage" element={<Protected admin><UsageAnalytics /></Protected>} />
       <Route path="/users" element={<Protected admin><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
