@@ -196,6 +196,8 @@ async function adminOpsCall(action: string, opts: { method?: string; body?: any 
 }
 
 export const adminOps = {
+  tenantsList: () => adminOpsCall('tenants_list'),
+  tenantUpsert: (b: any) => adminOpsCall('tenant_upsert', { method: 'POST', body: b }),
   webhooksList: () => adminOpsCall('webhooks_list'),
   webhooksSave: (b: any) => adminOpsCall('webhooks_save', { method: 'POST', body: b }),
   webhooksDelete: (id: number) => adminOpsCall('webhooks_delete', { method: 'POST', body: { id } }),
