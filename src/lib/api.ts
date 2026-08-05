@@ -194,7 +194,7 @@ async function billingGet(action: string) {
   return data;
 }
 
-// ---- Super-admin ops (separate `admin-ops` edge function): webhooks + dialer routing ----
+// ---- Super-admin ops (separate `admin-ops` edge function): webhooks + dialer routing + provisioning ----
 const ADMINOPS_BASE =
   (import.meta as any).env?.VITE_ADMINOPS_BASE ||
   ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/admin-ops') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/admin-ops');
@@ -214,6 +214,7 @@ async function adminOpsCall(action: string, opts: { method?: string; body?: any 
 export const adminOps = {
   tenantsList: () => adminOpsCall('tenants_list'),
   tenantUpsert: (b: any) => adminOpsCall('tenant_upsert', { method: 'POST', body: b }),
+  provisionTenant: (b: any) => adminOpsCall('provision_tenant', { method: 'POST', body: b }),
   webhooksList: () => adminOpsCall('webhooks_list'),
   webhooksSave: (b: any) => adminOpsCall('webhooks_save', { method: 'POST', body: b }),
   webhooksDelete: (id: number) => adminOpsCall('webhooks_delete', { method: 'POST', body: { id } }),
