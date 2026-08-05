@@ -127,7 +127,34 @@ export const opm = {
   // Billing console (super-admin). Global, so suppress the active-tenant param.
   billingOverview: () => opmCall('billing_overview', { params: { workspace: '' } }),
   billingSetConfig: (b: any) => opmCall('billing_set_config', { method: 'POST', params: { workspace: '' }, body: b }),
+  // Smart lists + bulk actions (companion `opm-ext` function).
+  savedLists: (page: string) => opmExtCall('saved_lists', { params: { page } }),
+  saveList: (b: { id?: number; page: string; name: string; config: any; shared?: boolean }) => opmExtCall('save_list', { method: 'POST', body: b }),
+  deleteList: (id: number) => opmExtCall('delete_list', { method: 'POST', body: { id } }),
+  deleteContacts: (contact_ids: string[]) => opmExtCall('delete_contacts', { method: 'POST', body: { contact_ids } }),
 };
+
+// companion `opm-ext` edge function — shares OPM auth + active-workspace scoping.
+const OPMEXT_BASE =
+  (import.meta as any).env?.VITE_OPMEXT_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-ext') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-ext');
+
+async function opmExtCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMEXT_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
 
 // ---- Test AI (separate `test-call` edge function) — place live test calls ----
 const TESTAI_BASE =
