@@ -172,6 +172,10 @@ export const billing = {
   ingestCalls: () => billingCall('ingest_calls'),
   createCustomer: (workspace_slug: string, email?: string) => billingCall('create_customer', { body: { workspace_slug, email } }),
   generateInvoice: (workspace_slug: string) => billingCall('generate_invoice', { body: { workspace_slug } }),
+  // Public self-serve signup (no auth). register returns a Stripe Checkout URL for card capture;
+  // completeRegistration provisions the account after the card is saved and logs the user in.
+  register: (b: { name: string; email: string; company?: string; password: string }) => billingCall('register', { body: b }),
+  completeRegistration: (token: string, session_id?: string) => billingCall('complete_registration', { body: { token, session_id } }),
 };
 
 // ---- Super-admin ops (separate `admin-ops` edge function): webhooks + dialer routing ----
