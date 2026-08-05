@@ -113,10 +113,17 @@ export const opm = {
   moveLead: (b: any) => opmCall('move_lead', { method: 'POST', body: b }),
   addNote: (b: any) => opmCall('add_note', { method: 'POST', body: b }),
   updateContact: (b: any) => opmCall('update_contact', { method: 'POST', body: b }),
-  // Import a batch of mapped rows into a (possibly new) CRM tenant. Super-admin only.
+  // Import a batch of mapped rows into a (possibly new) CRM tenant.
   // Pass workspace:'' so the active-tenant param is NOT injected — target_workspace governs.
   importLeads: (b: { target_workspace: string; rows: any[]; allow_pitman?: boolean }) =>
     opmCall('import_leads', { method: 'POST', params: { workspace: '' }, body: b }),
+  // Smart import: consolidate/dedupe by phone. mode:'preview' returns stats only; 'commit' writes.
+  smartImport: (b: { target_workspace: string; records: any[]; mode: 'preview' | 'commit' }) =>
+    opmCall('smart_import', { method: 'POST', params: { workspace: '' }, body: b }),
+  addContact: (b: any) => opmCall('add_contact', { method: 'POST', body: b }),
+  customFields: () => opmCall('custom_fields'),
+  saveCustomField: (b: any) => opmCall('save_custom_field', { method: 'POST', body: b }),
+  deleteCustomField: (id: number) => opmCall('delete_custom_field', { method: 'POST', body: { id } }),
   // Billing console (super-admin). Global, so suppress the active-tenant param.
   billingOverview: () => opmCall('billing_overview', { params: { workspace: '' } }),
   billingSetConfig: (b: any) => opmCall('billing_set_config', { method: 'POST', params: { workspace: '' }, body: b }),
