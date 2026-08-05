@@ -8,7 +8,7 @@ import {
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
 } from '../components/dash';
 import { num } from '../lib/format';
-import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload } from 'lucide-react';
+import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, Layers } from 'lucide-react';
 
 const PAGE_KEY = 'opm-contacts';
 const PAGE_SIZE = 50;
@@ -47,6 +47,7 @@ export default function SellerContacts() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showImport, setShowImport] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   // ---- Bulk AI caller ----
   const [callModal, setCallModal] = useState(false);
@@ -56,7 +57,8 @@ export default function SellerContacts() {
   const [progress, setProgress] = useState<{ done: number; total: number; ok: number; fail: number; current: string }>({ done: 0, total: 0, ok: 0, fail: 0, current: '' });
   const [callLog, setCallLog] = useState<{ name: string; phone: string; ok: boolean; err?: string }[]>([]);
 
-  useEffect(() => { setLoading(true); opm.sellerContacts().then((d) => setAllRows(d.contacts || [])).finally(() => setLoading(false)); }, []);
+  const load = useCallback(() => { setLoading(true); return opm.sellerContacts().then((d) => setAllRows(d.contacts || [])).finally(() => setLoading(false)); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const channelOpts = useMemo(() => {
     const s = new Set<string>(); allRows.forEach((r) => s.add(r.phone_channel || 'other'));
@@ -160,13 +162,19 @@ export default function SellerContacts() {
       <div className="flex items-start justify-between gap-3">
         <PageHeader title="Contacts" description="Every dialable phone number — owners and relationships, each its own record" showDate={false} />
         {canImport && (
-          <button className="mt-1 inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-light" onClick={() => setShowImport(true)}>
-            <Upload className="h-4 w-4" /> Import CSV
-          </button>
+          <div className="mt-1 flex shrink-0 items-center gap-2">
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={() => setShowAdd(true)}>
+              <Plus className="h-4 w-4" /> Add contact
+            </button>
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-light" onClick={() => setShowImport(true)}>
+              <Upload className="h-4 w-4" /> Import CSV
+            </button>
+          </div>
         )}
       </div>
 
       {showImport && <ImportWizard onClose={() => setShowImport(false)} lockedWorkspace={!isStaff && ownsActive ? (active || undefined) : undefined} />}
+      {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Dialable Contacts" value={num(allRows.length)} sub="one per phone number" icon={Contact} accent="blue" />
@@ -290,7 +298,13 @@ export default function SellerContacts() {
                   <tr key={r.contact_id} className="cursor-pointer border-t border-line hover:bg-surface" onClick={() => nav(`/leads/${encodeURIComponent(r.lead_id)}`)}>
                     <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selected.has(r.contact_id)} onChange={() => toggleSel(r.contact_id)} className="h-3.5 w-3.5 accent-[#1f6feb]" /></td>
                     <td className="px-2 py-2.5 text-right font-mono text-xs text-slate-400">{(page - 1) * PAGE_SIZE + i + 1}</td>
-                    {isVisible('name') && <td className="px-3 py-2.5"><div className="font-semibold text-ink">{r.lead_name || r.name}</div>{r.contact_kind === 'relative' && r.related_name && <div className="text-[10px] text-slate-400">{r.relation_type || 'relative'}</div>}</td>}
+                    {isVisible('name') && <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5"><span className="font-semibold text-ink">{r.lead_name || r.name}</span>
+                        {r.workspace_count > 1 && <span title={`This number appears in ${r.workspace_count} workspaces`} className="inline-flex items-center gap-0.5 rounded bg-indigo-100 px-1 py-0.5 text-[9px] font-bold text-indigo-700"><Layers className="h-2.5 w-2.5" /> {r.workspace_count} WS</span>}
+                      </div>
+                      {r.contact_kind === 'relative' && r.related_name && <div className="text-[10px] text-slate-400">{r.relation_type || 'relative'}</div>}
+                      {Array.isArray(r.alt_names) && r.alt_names.length > 0 && <div className="text-[10px] text-violet-500">also: {r.alt_names.join(', ')}</div>}
+                    </td>}
                     {isVisible('phone') && <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-brand">{fmtNum(r.phone)}</td>}
                     {isVisible('channel') && <td className="px-3 py-2.5"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.phone_channel === 'mobile' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{r.phone_channel === 'mobile' ? <Smartphone className="h-3 w-3" /> : <Phone className="h-3 w-3" />}{r.phone_channel || 'other'}</span></td>}
                     {isVisible('verified') && <td className="px-3 py-2.5">{r.phone_verified ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><BadgeCheck className="h-3.5 w-3.5" />yes</span> : <span className="text-xs text-slate-300">—</span>}</td>}
@@ -306,6 +320,38 @@ export default function SellerContacts() {
           </div>
         )}
       </SectionCard>
+    </div>
+  );
+}
+
+// One-at-a-time manual add: creates a property + a single dialable contact in the active workspace.
+function AddContactModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({ name: '', phone: '', email: '', street: '', city: '', state: '', zip: '', property_ref: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const save = async () => {
+    setErr(''); setBusy(true);
+    try { await opm.addContact(form); onSaved(); }
+    catch (e: any) { setErr(e?.message || 'Could not add contact.'); } finally { setBusy(false); }
+  };
+  const f = (k: string, label: string, ph = '', cls = '') => (
+    <label className={`block ${cls}`}><span className="label mb-1 block">{label}</span>
+      <input className="input w-full" value={(form as any)[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} placeholder={ph} /></label>
+  );
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
+      <div className="card w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between"><h3 className="flex items-center gap-2 text-lg font-bold text-ink"><Plus className="h-5 w-5 text-brand" /> Add contact</h3><button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button></div>
+        {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">{f('name', 'Name', 'Jane Owner')}{f('phone', 'Phone', '(561) 555-0000')}</div>
+          {f('email', 'Email', 'jane@example.com')}
+          {f('street', 'Street address', '123 Main St')}
+          <div className="grid grid-cols-3 gap-2">{f('city', 'City')}{f('state', 'State')}{f('zip', 'ZIP')}</div>
+          {f('property_ref', 'Property ref / APN')}
+        </div>
+        <button className="btn-primary mt-4 w-full" disabled={busy || (!form.name && form.phone.replace(/\D/g, '').length < 10)} onClick={save}>{busy ? 'Saving…' : <><Plus className="h-4 w-4" /> Add contact</>}</button>
+      </div>
     </div>
   );
 }
