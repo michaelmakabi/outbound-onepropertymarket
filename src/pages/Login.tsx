@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { Loader2 } from 'lucide-react';
 import { LOGO_FULL } from '../lib/logo';
@@ -46,7 +46,9 @@ export default function Login() {
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sign in'}
           </button>
         </form>
-        <p className="mt-4 text-center text-xs text-slate-500">Private tool · authorized users only</p>
+        <p className="mt-4 text-center text-sm text-slate-400">
+          New here? <Link to="/register" className="font-semibold text-white underline">Create an account</Link>
+        </p>
       </div>
     </div>
   );
