@@ -4,12 +4,13 @@ import { opm } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
 import CustomFieldsModal from '../components/CustomFieldsModal';
+import SmartLists from '../components/SmartLists';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews,
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
 } from '../components/dash';
 import { num } from '../lib/format';
-import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, Layers, SlidersHorizontal } from 'lucide-react';
+import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, Layers, SlidersHorizontal, Trash2 } from 'lucide-react';
 
 const PAGE_KEY = 'opm-contacts';
 const PAGE_SIZE = 50;
@@ -128,6 +129,23 @@ export default function SellerContacts() {
   const currentCfg: ViewCfg = { kind, channel, verified, search, sort };
   const applyView = (c: ViewCfg) => { setKind(c.kind || ''); setChannel(c.channel || []); setVerified(c.verified || ''); setSearch(c.search || ''); setSort(c.sort || null); };
 
+  // ---- Bulk delete ----
+  const canManage = isStaff || ownsActive;
+  const [deleting, setDeleting] = useState(false);
+  const bulkDelete = async () => {
+    if (deleting || selected.size === 0) return;
+    if (!window.confirm(`Delete ${selected.size} contact${selected.size === 1 ? '' : 's'}? This also removes any property records left with no numbers. This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      const ids = Array.from(selected);
+      for (let i = 0; i < ids.length; i += 500) await opm.deleteContacts(ids.slice(i, i + 500));
+      setSelected(new Set());
+      await load();
+    } catch (e: any) {
+      window.alert(e?.message || 'Could not delete contacts.');
+    } finally { setDeleting(false); }
+  };
+
   const exportCsv = () => {
     const cols = ['#', 'Name', 'Phone', 'Type', 'Verified', 'Role', 'Property', 'Address', 'Stage', 'Source', 'Assigned', 'LeadID'];
     const src = selected.size ? rows.filter((r) => selected.has(r.contact_id)) : rows;
@@ -210,6 +228,7 @@ export default function SellerContacts() {
 
       <SectionCard title="Filters" description={`${total.toLocaleString()} contact${total === 1 ? '' : 's'} match`} className="mb-4"
         action={<div className="flex items-center gap-2">
+          <SmartLists<ViewCfg> page="contacts" current={currentCfg} onApply={applyView} />
           <SavedViews<ViewCfg> pageKey={PAGE_KEY} current={currentCfg} onApply={applyView} />
           <ColumnToggleMenu columns={columns} isVisible={isVisible} onToggle={toggle} />
         </div>}>
@@ -235,6 +254,7 @@ export default function SellerContacts() {
           <span className="mx-1 h-4 w-px bg-brand/20" />
           <button className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand/90" onClick={() => { setCallLog([]); setProgress({ done: 0, total: 0, ok: 0, fail: 0, current: '' }); setCallModal(true); }}><PhoneOutgoing className="h-3.5 w-3.5" /> Launch AI calls</button>
           <button className="btn-ghost !py-1.5" onClick={exportCsv}><Download className="h-3.5 w-3.5" /> Export selected</button>
+          {canManage && <button className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={deleting} onClick={bulkDelete}>{deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete</button>}
           <button className="btn-ghost !py-1.5" onClick={() => setSelected(new Set())}>Clear</button>
         </div>
       )}
