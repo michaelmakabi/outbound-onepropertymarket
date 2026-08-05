@@ -56,6 +56,7 @@ export default function SellerContacts() {
   // ---- Bulk AI caller ----
   const [callModal, setCallModal] = useState(false);
   const [callFrom, setCallFrom] = useState<'rotate' | string>('rotate');
+  const [callScope, setCallScope] = useState<'selected' | 'primary' | 'all'>('selected');
   const [gapSec, setGapSec] = useState(8);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; ok: number; fail: number; current: string }>({ done: 0, total: 0, ok: 0, fail: 0, current: '' });
@@ -156,15 +157,43 @@ export default function SellerContacts() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `contacts-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
   };
 
-  // Rows queued for AI dialing: selected, dialable, de-duplicated by phone number
+  // All contacts grouped by their lead/record — used to expand the dial scope beyond
+  // the rows the user literally checked (e.g. "every number on the record").
+  const contactsByLead = useMemo(() => {
+    const m: Record<string, any[]> = {};
+    for (const r of allRows) { (m[r.lead_id] ||= []).push(r); }
+    return m;
+  }, [allRows]);
+
+  // Rows queued for AI dialing. Scope decides which numbers actually get dialed:
+  //  selected → only the checked phone rows; primary → the primary number of each
+  //  selected record; all → every number on each selected record. Always dedup by phone.
   const callQueue = useMemo(() => {
+    const picked = rows.filter((r) => selected.has(r.contact_id));
+    let candidates: any[];
+    if (callScope === 'selected') {
+      candidates = picked;
+    } else {
+      const leadIds = [...new Set(picked.map((r) => r.lead_id))];
+      candidates = [];
+      for (const lid of leadIds) {
+        const sibs = contactsByLead[lid] || [];
+        if (callScope === 'primary') {
+          const prim = sibs.find((s) => s.is_primary_number) || sibs[0];
+          if (prim) candidates.push(prim);
+        } else {
+          candidates.push(...sibs);
+        }
+      }
+    }
     const seen = new Set<string>();
-    return rows.filter((r) => selected.has(r.contact_id)).filter((r) => {
+    return candidates.filter((r) => {
+      if (r.do_not_call) return false;
       const p = (r.phone || '').replace(/\D/g, '');
       if (p.length < 10 || seen.has(p)) return false;
       seen.add(p); return true;
     });
-  }, [rows, selected]);
+  }, [rows, selected, callScope, contactsByLead]);
 
   async function runBulkCalls() {
     if (running || callQueue.length === 0) return;
@@ -272,8 +301,15 @@ export default function SellerContacts() {
                 <p className="mb-3 text-sm text-slate-600">
                   This will place <span className="font-bold text-ink">{callQueue.length}</span> live AI call{callQueue.length === 1 ? '' : 's'} to real sellers, one at a time, using <span className="font-semibold">{DIAL_AGENT.name}</span>. Each call carries the seller's property context, stage, and our assessed value. Calls are spaced so none overlap.
                 </p>
-                {callQueue.length !== selected.size && (
-                  <div className="mb-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {selected.size - callQueue.length} of your {selected.size} selected were skipped (no dialable number or duplicate phone).</div>
+                <label className="mb-3 block text-xs font-semibold text-slate-500">Numbers to dial
+                  <select value={callScope} onChange={(e) => setCallScope(e.target.value as any)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
+                    <option value="selected">Only the numbers I selected</option>
+                    <option value="primary">Primary number of each record</option>
+                    <option value="all">Every number on each record</option>
+                  </select>
+                </label>
+                {callScope !== 'all' && (
+                  <div className="mb-3 text-xs text-slate-400">A record (property) can hold several phone numbers. Choose whether to reach just the primary line or every number on it.</div>
                 )}
                 <div className="mb-4 grid grid-cols-2 gap-3">
                   <label className="text-xs font-semibold text-slate-500">Caller ID
