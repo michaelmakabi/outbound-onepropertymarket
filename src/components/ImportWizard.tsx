@@ -76,7 +76,9 @@ function parseCsv(text: string): string[][] {
 const slugify = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
 const BATCH = 200;
 
-export default function ImportWizard({ onClose }: { onClose: () => void }) {
+// When `lockedWorkspace` is set (a customer/company owner), the import target is fixed to
+// their own tenant — they cannot create or write into any other workspace.
+export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: () => void; lockedWorkspace?: string }) {
   const { workspaces, setActive } = useWorkspace();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [fileName, setFileName] = useState('');
@@ -90,7 +92,7 @@ export default function ImportWizard({ onClose }: { onClose: () => void }) {
   const [result, setResult] = useState<{ leads: number; contacts: number; noPhone: number } | null>(null);
   const [importErr, setImportErr] = useState('');
 
-  const slug = slugify(tenantName);
+  const slug = lockedWorkspace || slugify(tenantName);
   const slugTaken = workspaces.some((w) => w.slug === slug);
 
   function onFile(file: File) {
@@ -231,16 +233,26 @@ export default function ImportWizard({ onClose }: { onClose: () => void }) {
           {step === 3 && (
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-500">Import into tenant</label>
-              <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-slate-400" />
-                <input value={tenantName} onChange={(e) => setTenantName(e.target.value)} placeholder="e.g. Acme Realty" className="input flex-1" />
-              </div>
-              {slug && (
-                <div className="mt-1.5 text-xs text-slate-500">
-                  Workspace slug: <span className="font-mono font-semibold text-ink">{slug || '—'}</span>
-                  {slugTaken ? <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">existing tenant — rows will be added</span>
-                    : <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">new tenant</span>}
+              {lockedWorkspace ? (
+                <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
+                  <Building2 className="h-4 w-4 text-slate-400" />
+                  <span className="text-sm font-semibold text-ink">{workspaces.find((w) => w.slug === lockedWorkspace)?.display_name || lockedWorkspace}</span>
+                  <span className="font-mono text-[11px] text-slate-400">{lockedWorkspace}</span>
                 </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-slate-400" />
+                    <input value={tenantName} onChange={(e) => setTenantName(e.target.value)} placeholder="e.g. Acme Realty" className="input flex-1" />
+                  </div>
+                  {slug && (
+                    <div className="mt-1.5 text-xs text-slate-500">
+                      Workspace slug: <span className="font-mono font-semibold text-ink">{slug || '—'}</span>
+                      {slugTaken ? <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">existing tenant — rows will be added</span>
+                        : <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">new tenant</span>}
+                    </div>
+                  )}
+                </>
               )}
               <div className="mt-4 mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Preview — first {preview.length} of {dataRows.length.toLocaleString()} rows</div>
               <div className="overflow-x-auto rounded-lg border border-line">
