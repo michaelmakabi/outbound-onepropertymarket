@@ -176,7 +176,23 @@ export const billing = {
   // completeRegistration provisions the account after the card is saved and logs the user in.
   register: (b: { name: string; email: string; company?: string; password: string }) => billingCall('register', { body: b }),
   completeRegistration: (token: string, session_id?: string) => billingCall('complete_registration', { body: { token, session_id } }),
+  // Customer self-serve account portal (any authenticated user; scoped to their own tenant).
+  myAccount: () => billingGet('my_account'),
+  portal: () => billingCall('portal'),
 };
+
+// GET helper for authenticated billing reads (my_account).
+async function billingGet(action: string) {
+  const url = new URL(BILLING_BASE);
+  url.searchParams.set('action', action);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
 
 // ---- Super-admin ops (separate `admin-ops` edge function): webhooks + dialer routing ----
 const ADMINOPS_BASE =
