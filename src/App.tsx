@@ -25,6 +25,9 @@ import Pipelines from './pages/Pipelines';
 import SellerContacts from './pages/SellerContacts';
 import TestAI from './pages/TestAI';
 import Billing from './pages/Billing';
+import Integrations from './pages/Integrations';
+import Register from './pages/Register';
+import RegisterComplete from './pages/RegisterComplete';
 
 function Protected({ children, admin }: { children: JSX.Element; admin?: boolean }) {
   const { user, loading, isAdmin } = useAuth();
@@ -39,6 +42,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/register/complete" element={<RegisterComplete />} />
       <Route path="/" element={<Protected><Overview /></Protected>} />
       <Route path="/workspaces" element={<Protected><Workspaces /></Protected>} />
       <Route path="/workspaces/:slug" element={<Protected><WorkspaceDetail /></Protected>} />
@@ -58,6 +63,7 @@ export default function App() {
       <Route path="/prompt-studio" element={<Protected><PromptStudio /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/billing" element={<Protected admin><Billing /></Protected>} />
+      <Route path="/integrations" element={<Protected admin><Integrations /></Protected>} />
       <Route path="/usage" element={<Protected admin><UsageAnalytics /></Protected>} />
       <Route path="/users" element={<Protected admin><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
