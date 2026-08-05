@@ -20,7 +20,7 @@ export default function Tenants() {
   const load = () => adminOps.tenantsList().then((d: any) => { setTenants(d.tenants || []); setUsers(d.users || []); }).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
-  if (user?.role !== 'super_admin') return <div className="py-16 text-center text-slate-400">Tenants are restricted to super admins.</div>;
+  if (user?.role !== 'super_admin') return <div className="py-16 text-center text-slate-400">Customers are restricted to super admins.</div>;
   if (loading) return <Spinner />;
 
   const jumpIn = (t: any) => { workspaceStore.set(t.crm_workspace); window.location.assign('/'); };
@@ -33,8 +33,8 @@ export default function Tenants() {
 
   return (
     <div>
-      <PageHead title="Tenants" subtitle="Every customer as one unified account — CRM, dialer, billing, and usage"
-        right={<button className="btn-primary" onClick={() => setEdit({ slug: '', display_name: '', crm_workspace: '', dialer_slug: '', billing_slug: '', owner_user_id: '', status: 'onboarding', _new: true })}><Plus className="h-4 w-4" /> New tenant</button>} />
+      <PageHead title="Customers" subtitle="Every customer as one unified account — CRM, dialer, billing, and usage"
+        right={<button className="btn-primary" onClick={() => setEdit({ slug: '', display_name: '', crm_workspace: '', dialer_slug: '', billing_slug: '', owner_user_id: '', status: 'onboarding', _new: true })}><Plus className="h-4 w-4" /> New customer</button>} />
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <div className="card p-4"><div className="label flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5" /> Customers</div><div className="mt-1 text-2xl font-bold text-ink">{tenants.length}</div><div className="text-[11px] text-slate-400">{activeN} active</div></div>
@@ -50,7 +50,7 @@ export default function Tenants() {
             <tr>
               <th className="px-4 py-2.5">Customer</th>
               <th className="px-3 py-2.5">Status</th>
-              <th className="px-3 py-2.5">Retell</th>
+              <th className="px-3 py-2.5">Dialer</th>
               <th className="px-3 py-2.5 text-right">Leads</th>
               <th className="px-3 py-2.5 text-right">Agents</th>
               <th className="px-3 py-2.5 text-right">Users</th>
@@ -79,7 +79,7 @@ export default function Tenants() {
                 <td className="px-3 py-2.5 text-right tabular-nums">{fmt.money(t.usage?.unbilled || 0)}</td>
                 <td className="px-3 py-2.5">
                   <div className="flex items-center justify-end gap-1">
-                    <button className="btn-ghost !px-2 !py-1 text-xs" title="Provision dialer (Retell)" onClick={() => setProvision(t)}><Zap className="h-3.5 w-3.5" /></button>
+                    <button className="btn-ghost !px-2 !py-1 text-xs" title="Provision dialer" onClick={() => setProvision(t)}><Zap className="h-3.5 w-3.5" /></button>
                     <button className="btn-ghost !px-2 !py-1 text-xs" title="Jump into this account's CRM" onClick={() => jumpIn(t)}><LogIn className="h-3.5 w-3.5" /></button>
                     <button className="btn-ghost !px-2 !py-1 text-xs" title="Edit" onClick={() => setEdit({ ...t, owner_user_id: t.owner_user_id || '' })}><Pencil className="h-3.5 w-3.5" /></button>
                   </div>
@@ -118,11 +118,11 @@ function ProvisionModal({ t, onClose, onDone }: any) {
           <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><Zap className="h-5 w-5 text-brand" /> Provision dialer</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button>
         </div>
-        <p className="mb-4 text-sm text-slate-500">Connect <span className="font-semibold text-ink">{t.display_name || t.slug}</span> to its own Retell subaccount. Paste the subaccount's API key — we'll discover its agents and phone numbers and wire up outbound dialing automatically.</p>
+        <p className="mb-4 text-sm text-slate-500">Connect <span className="font-semibold text-ink">{t.display_name || t.slug}</span> to its own voice-platform subaccount. Paste the subaccount's API key — we'll discover its agents and phone numbers and wire up outbound dialing automatically.</p>
 
         {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
 
-        <label className="block"><span className="label mb-1 block">Retell API key {t.has_key && <span className="ml-1 text-[10px] text-emerald-600">(key already on file — leave blank to keep it)</span>}</span>
+        <label className="block"><span className="label mb-1 block">Voice-platform API key {t.has_key && <span className="ml-1 text-[10px] text-emerald-600">(key already on file — leave blank to keep it)</span>}</span>
           <input className="input w-full font-mono text-xs" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={t.has_key ? '•••••• (keep existing)' : 'key_...'} /></label>
 
         <div className="mt-4 flex gap-2">
@@ -132,15 +132,15 @@ function ProvisionModal({ t, onClose, onDone }: any) {
 
         {res && (
           <div className="mt-4 space-y-2 rounded-xl border border-line bg-surface p-3 text-sm">
-            <div className="flex items-center gap-2">{res.has_key ? <Check className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-red-500" />} <span className="font-semibold text-ink">Retell key</span> <span className="text-slate-500">{res.has_key ? 'on file' : 'missing'}</span></div>
+            <div className="flex items-center gap-2">{res.has_key ? <Check className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-red-500" />} <span className="font-semibold text-ink">Dialer key</span> <span className="text-slate-500">{res.has_key ? 'on file' : 'missing'}</span></div>
             <div className="flex items-center gap-2"><Bot className="h-4 w-4 text-slate-400" /> <span className="font-semibold text-ink">{res.agents?.length || 0}</span> <span className="text-slate-500">agent(s)</span></div>
             {res.agents?.length > 0 && <div className="pl-6 text-[11px] text-slate-500">{res.agents.map((a: any) => a.agent_name).join(', ')}</div>}
             <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-slate-400" /> <span className="font-semibold text-ink">{res.numbers?.length || 0}</span> <span className="text-slate-500">phone number(s)</span></div>
             {res.numbers?.length > 0 && <div className="pl-6 font-mono text-[11px] text-slate-500">{res.numbers.join(', ')}</div>}
             <div className="flex items-center gap-2">{res.dialer_configured ? <Check className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-amber-500" />} <span className="font-semibold text-ink">Dialer routing</span> <span className="text-slate-500">{res.dialer_configured ? (res.wired ? `wired → ${res.wired_agent?.slice(0, 14)}… · ${res.wired_numbers} number(s)` : 'configured') : 'not configured'}</span></div>
-            {res.retell_error && <div className="rounded bg-red-50 px-2 py-1 text-[11px] text-red-600">Retell: {res.retell_error}</div>}
-            {res.has_key && !res.agents?.length && <div className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">No agents found in this Retell subaccount yet — create one in Retell, then re-run.</div>}
-            {res.has_key && res.agents?.length > 0 && !res.numbers?.length && <div className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">No phone numbers in this subaccount yet — buy/import one in Retell, then re-run.</div>}
+            {res.retell_error && <div className="rounded bg-red-50 px-2 py-1 text-[11px] text-red-600">Dialer: {res.retell_error}</div>}
+            {res.has_key && !res.agents?.length && <div className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">No agents found in this subaccount yet — create one on the voice platform, then re-run.</div>}
+            {res.has_key && res.agents?.length > 0 && !res.numbers?.length && <div className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">No phone numbers in this subaccount yet — buy/import one, then re-run.</div>}
           </div>
         )}
       </div>
@@ -148,22 +148,29 @@ function ProvisionModal({ t, onClose, onDone }: any) {
   );
 }
 
+const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+
 function TenantModal({ t, users, onClose, onSaved }: any) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<any>({
     slug: t.slug || '', display_name: t.display_name || '', crm_workspace: t.crm_workspace || '',
-    dialer_slug: t.dialer_slug || '', billing_slug: t.billing_slug || '', owner_user_id: t.owner_user_id || '', status: t.status || 'onboarding',
+    dialer_slug: t.dialer_slug || '', billing_slug: t.billing_slug || '', owner_user_id: t.owner_user_id || '', status: t.status || 'onboarding', _slugTouched: false,
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const isNew = !!t._new;
+  // Only reveal the CRM/dialer/billing overrides when an existing customer actually has a
+  // mismatched mapping (e.g. legacy 1PM→pitman). New customers = one ID for everything.
+  const [adv, setAdv] = useState(!isNew && !!((form.crm_workspace && form.crm_workspace !== form.slug) || (form.dialer_slug && form.dialer_slug !== form.slug) || (form.billing_slug && form.billing_slug !== form.slug)));
 
   const save = async () => {
     setErr(''); setBusy(true);
     try {
+      // one ID governs everything unless the operator explicitly opened Advanced mapping.
+      const s = isNew ? slugify(form.slug) : form.slug;
       await adminOps.tenantUpsert({
-        slug: form.slug, display_name: form.display_name,
-        crm_workspace: form.crm_workspace || form.slug, dialer_slug: form.dialer_slug || null,
-        billing_slug: form.billing_slug || form.slug, status: form.status,
+        slug: s, display_name: form.display_name,
+        crm_workspace: (adv && form.crm_workspace) || s, dialer_slug: (adv && form.dialer_slug) || s,
+        billing_slug: (adv && form.billing_slug) || s, status: form.status,
         owner_user_id: form.owner_user_id ? Number(form.owner_user_id) : null,
       });
       onSaved();
@@ -173,29 +180,35 @@ function TenantModal({ t, users, onClose, onSaved }: any) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
       <div className="card w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-bold text-ink">{isNew ? 'New tenant' : `Edit ${t.display_name || t.slug}`}</h3><button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button></div>
+        <div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-bold text-ink">{isNew ? 'New customer' : `Edit ${t.display_name || t.slug}`}</h3><button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button></div>
         {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
         <div className="space-y-3">
-          <label className="block"><span className="label mb-1 block">Canonical slug</span><input className="input w-full font-mono text-xs" value={form.slug} disabled={!isNew} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="acme_realty" /></label>
-          <label className="block"><span className="label mb-1 block">Display name</span><input className="input w-full" value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} /></label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block"><span className="label mb-1 block">CRM workspace</span><input className="input w-full font-mono text-xs" value={form.crm_workspace} onChange={(e) => setForm({ ...form, crm_workspace: e.target.value })} placeholder="= slug" /></label>
-            <label className="block"><span className="label mb-1 block">Dialer slug (Retell)</span><input className="input w-full font-mono text-xs" value={form.dialer_slug} onChange={(e) => setForm({ ...form, dialer_slug: e.target.value })} placeholder="= slug" /></label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block"><span className="label mb-1 block">Billing slug</span><input className="input w-full font-mono text-xs" value={form.billing_slug} onChange={(e) => setForm({ ...form, billing_slug: e.target.value })} placeholder="= slug" /></label>
-            <label className="block"><span className="label mb-1 block">Status</span>
-              <select className="input w-full" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                {['active', 'onboarding', 'paused', 'trial_expired', 'closed'].map((s) => <option key={s} value={s}>{s}</option>)}
-              </select></label>
-          </div>
+          <label className="block"><span className="label mb-1 block">Company name</span><input className="input w-full" value={form.display_name} autoFocus onChange={(e) => setForm({ ...form, display_name: e.target.value, ...(isNew && !form._slugTouched ? { slug: slugify(e.target.value) } : {}) })} placeholder="Acme Realty" /></label>
+          <label className="block"><span className="label mb-1 block">Workspace ID {isNew && <span className="text-[10px] text-slate-400">(one ID for CRM, dialing &amp; billing)</span>}</span><input className="input w-full font-mono text-xs" value={form.slug} disabled={!isNew} onChange={(e) => setForm({ ...form, slug: slugify(e.target.value), _slugTouched: true })} placeholder="acme_realty" /></label>
+          <label className="block"><span className="label mb-1 block">Status</span>
+            <select className="input w-full" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+              {['active', 'onboarding', 'paused', 'trial_expired', 'closed'].map((s) => <option key={s} value={s}>{s}</option>)}
+            </select></label>
           <label className="block"><span className="label mb-1 block">Owner (company admin)</span>
             <select className="input w-full" value={form.owner_user_id} onChange={(e) => setForm({ ...form, owner_user_id: e.target.value })}>
               <option value="">— none —</option>
               {users.map((u: any) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
             </select></label>
+
+          {!adv ? (
+            <button type="button" className="text-xs font-semibold text-brand hover:underline" onClick={() => setAdv(true)}>Advanced mapping ▸</button>
+          ) : (
+            <div className="space-y-3 rounded-lg border border-line bg-surface p-3">
+              <div className="text-[11px] font-semibold text-slate-500">Advanced mapping — only needed when this customer's CRM, dialer, or billing IDs differ from the workspace ID.</div>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="block"><span className="label mb-1 block">CRM</span><input className="input w-full font-mono text-[11px]" value={form.crm_workspace} onChange={(e) => setForm({ ...form, crm_workspace: e.target.value })} placeholder="= id" /></label>
+                <label className="block"><span className="label mb-1 block">Dialer</span><input className="input w-full font-mono text-[11px]" value={form.dialer_slug} onChange={(e) => setForm({ ...form, dialer_slug: e.target.value })} placeholder="= id" /></label>
+                <label className="block"><span className="label mb-1 block">Billing</span><input className="input w-full font-mono text-[11px]" value={form.billing_slug} onChange={(e) => setForm({ ...form, billing_slug: e.target.value })} placeholder="= id" /></label>
+              </div>
+            </div>
+          )}
         </div>
-        <button className="btn-primary mt-4 w-full" disabled={busy || !form.slug} onClick={save}>{busy ? 'Saving…' : isNew ? 'Create tenant' : <><Check className="h-4 w-4" /> Save changes</>}</button>
+        <button className="btn-primary mt-4 w-full" disabled={busy || !form.slug} onClick={save}>{busy ? 'Saving…' : isNew ? 'Create customer' : <><Check className="h-4 w-4" /> Save changes</>}</button>
       </div>
     </div>
   );
