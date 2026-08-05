@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
 import {
   UserPlus, ShieldCheck, CreditCard, Link2, Eye, Check, X, AlertCircle, Copy,
-  KeyRound, RefreshCw, FileSignature, Loader2, Building2,
+  KeyRound, RefreshCw, FileSignature, Building2,
 } from 'lucide-react';
 
 const COMPANY = '1PropertyMarket';
@@ -153,13 +153,13 @@ function AccountDrawer({ slug, onClose }: { slug: string; onClose: () => void })
                 <div className="space-y-2">
                   {d.vault.map((v: any) => (
                     <div key={v.id} className="flex items-center justify-between rounded-lg border border-line px-3 py-2 text-sm">
-                      <span>····{/* last4 lives on the payment method */} card · exp {String(v.exp_month).padStart(2, '0')}/{v.exp_year} · {v.has_cvv ? <span className="text-emerald-700">CVV available</span> : <span className="text-slate-400">CVV purged</span>}{v.keyed_into_retell_at && <span className="ml-1 text-emerald-700">· keyed ✓</span>}</span>
+                      <span>card · exp {String(v.exp_month).padStart(2, '0')}/{v.exp_year} · {v.has_cvv ? <span className="text-emerald-700">CVV on file</span> : <span className="text-slate-400">no CVV</span>}{v.keyed_into_retell_at && <span className="ml-1 text-emerald-700">· keyed ✓</span>}</span>
                       <button className="btn-ghost !py-1 text-xs" onClick={() => doReveal(v.id)}><Eye className="h-3.5 w-3.5" /> Reveal to key</button>
                     </div>
                   ))}
                 </div>
               )}
-              <div className="mt-2 text-xs text-slate-400">Retell has no API to add a card, so the full card is revealed once for your team to key in. The CVV is available only during the onboarding window, then purged.</div>
+              <div className="mt-2 text-xs text-slate-400">Retell has no API to add a card, so the full card is revealed for your team to key in. It stays on file under the customer's signed authorization.</div>
             </Step>
           </>
         )}
@@ -190,7 +190,7 @@ function ConsentModal({ slug, onClose, onDone }: any) {
   const text = AUTHORIZATION_TEXT(COMPANY);
   const [signer, setSigner] = useState(''); const [email, setEmail] = useState('');
   const [agree, setAgree] = useState(false); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
-  const sigRef = useRef<{ toDataURL: () => string; clear: () => void } | null>(null);
+  const sigRef = useRef<any>(null);
   const submit = async () => {
     setErr(''); setBusy(true);
     try {
@@ -228,7 +228,7 @@ function ManualCardModal({ slug, authId, onClose, onDone }: any) {
   };
   return (
     <Modal title="Enter card" onClose={onClose}>
-      <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> Stored encrypted for keying into Retell. The CVV is retained only through the onboarding window, then purged automatically.</div>
+      <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> Stored encrypted and kept on file under the customer's signed authorization — used to key the card into Retell and for recurring billing.</div>
       {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
       <Field label="Cardholder name"><input className="input" value={f.cardholder_name} onChange={(e) => setF({ ...f, cardholder_name: e.target.value })} /></Field>
       <Field label="Card number"><input className="input font-mono" inputMode="numeric" value={f.card_number} onChange={(e) => setF({ ...f, card_number: e.target.value })} /></Field>
@@ -262,7 +262,7 @@ function SetupLinkModal({ slug, email, onClose }: any) {
   );
 }
 
-// ---------------- One-time card reveal ----------------
+// ---------------- Full-card reveal ----------------
 function RevealModal({ data, onClose, onKeyed }: any) {
   const [copied, setCopied] = useState('');
   const copy = (k: string, v: string) => { navigator.clipboard.writeText(v); setCopied(k); setTimeout(() => setCopied(''), 1200); };
@@ -273,7 +273,7 @@ function RevealModal({ data, onClose, onKeyed }: any) {
       <RevealRow label="Card number" value={grouped} copyVal={String(data.card_number)} copied={copied === 'n'} onCopy={() => copy('n', String(data.card_number))} />
       <div className="grid grid-cols-2 gap-2">
         <RevealRow label="Expiry" value={`${String(data.exp_month).padStart(2, '0')}/${data.exp_year}`} copyVal={`${String(data.exp_month).padStart(2, '0')}/${data.exp_year}`} copied={copied === 'e'} onCopy={() => copy('e', `${data.exp_month}/${data.exp_year}`)} />
-        <RevealRow label="CVV" value={data.cvv_available ? data.cvv : 'purged'} copyVal={data.cvv || ''} copied={copied === 'c'} onCopy={() => data.cvv && copy('c', data.cvv)} />
+        <RevealRow label="CVV" value={data.cvv_available ? data.cvv : 'none'} copyVal={data.cvv || ''} copied={copied === 'c'} onCopy={() => data.cvv && copy('c', data.cvv)} />
       </div>
       <button className="btn-primary mt-4 w-full" onClick={onKeyed}><Check className="h-4 w-4" /> I've keyed it into Retell</button>
     </Modal>
