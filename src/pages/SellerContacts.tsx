@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { opm } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews,
@@ -38,7 +38,7 @@ type ViewCfg = { kind: string; channel: string[]; verified: string; search: stri
 
 export default function SellerContacts() {
   const nav = useNavigate();
-  const { user } = useAuth();
+  const { isStaff, ownsActive, active } = useWorkspace();
   const [allRows, setAllRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [kind, setKind] = useState('');
@@ -152,20 +152,21 @@ export default function SellerContacts() {
     setRunning(false);
   }
 
-  const isSuperAdmin = user?.role === 'super_admin';
+  // Staff can import into any tenant; a company owner can import into their own tenant only.
+  const canImport = isStaff || ownsActive;
 
   return (
     <div>
       <div className="flex items-start justify-between gap-3">
         <PageHeader title="Contacts" description="Every dialable phone number — owners and relationships, each its own record" showDate={false} />
-        {isSuperAdmin && (
+        {canImport && (
           <button className="mt-1 inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-light" onClick={() => setShowImport(true)}>
             <Upload className="h-4 w-4" /> Import CSV
           </button>
         )}
       </div>
 
-      {showImport && <ImportWizard onClose={() => setShowImport(false)} />}
+      {showImport && <ImportWizard onClose={() => setShowImport(false)} lockedWorkspace={!isStaff && ownsActive ? (active || undefined) : undefined} />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Dialable Contacts" value={num(allRows.length)} sub="one per phone number" icon={Contact} accent="blue" />
