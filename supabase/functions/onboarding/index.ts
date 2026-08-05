@@ -1,19 +1,16 @@
 // One Property Market — Outbound: customer onboarding + card authorization.
 // Super-admin only. Custom bearer-token auth (same sessions model as /api).
 //
-// Sensitive-card design:
-//   * Consent is stored in card_authorizations (no raw card).
-//   * Full card is AES-GCM encrypted in the edge function (key = CARD_ENC_KEY,
-//     a base64 32-byte secret) and only the ciphertext lands in card_vault.
-//   * CVV is retained ONLY until cvv_purge_after (onboarding window), then a
-//     scheduled job nulls it. Reveal returns the CVV only while it still exists.
+// Card storage: the full card + CVV are AES-GCM encrypted in the edge function
+// (key = CARD_ENC_KEY, a base64 32-byte secret) and kept on file for the life of
+// the account under the customer's signed authorization + mutual-responsibility
+// consent (attorney-approved). Only ciphertext lands in card_vault.
 //
 // Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), CARD_ENC_KEY (base64 32B),
 //      STRIPE_SECRET_KEY (or STRIPE_KEY / STRIPE), APP_BASE_URL (optional).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const APP_BASE = Deno.env.get('APP_BASE_URL') || 'https://outbound.1propertymarket.com';
-const CVV_WINDOW_DAYS = Number(Deno.env.get('CVV_WINDOW_DAYS') ?? '14');
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -133,10 +130,10 @@ Deno.serve(async (req) => {
         client.from('billing_workspaces').select('*').eq('workspace_slug', slug).maybeSingle(),
         client.from('card_authorizations').select('*').eq('workspace_slug', slug).order('signed_at', { ascending: false }).limit(1).maybeSingle(),
         client.from('payment_methods').select('*').eq('workspace_slug', slug).order('created_at', { ascending: false }),
-        client.from('card_vault').select('id, payment_method_id, exp_month, exp_year, cvv_ciphertext, cvv_purge_after, keyed_into_retell_at, last_revealed_at, created_at').eq('workspace_slug', slug),
+        client.from('card_vault').select('id, payment_method_id, exp_month, exp_year, cvv_ciphertext, keyed_into_retell_at, last_revealed_at, created_at').eq('workspace_slug', slug),
         client.from('workspaces').select('slug, api_key').eq('slug', slug).maybeSingle(),
       ]);
-      const vaultSafe = (vault || []).map((v: any) => ({ id: v.id, payment_method_id: v.payment_method_id, exp_month: v.exp_month, exp_year: v.exp_year, has_cvv: !!v.cvv_ciphertext, cvv_purge_after: v.cvv_purge_after, keyed_into_retell_at: v.keyed_into_retell_at, last_revealed_at: v.last_revealed_at }));
+      const vaultSafe = (vault || []).map((v: any) => ({ id: v.id, payment_method_id: v.payment_method_id, exp_month: v.exp_month, exp_year: v.exp_year, has_cvv: !!v.cvv_ciphertext, keyed_into_retell_at: v.keyed_into_retell_at, last_revealed_at: v.last_revealed_at }));
       return json({ workspace: ws, authorization: auth, payment_methods: pms || [], vault: vaultSafe, retell_connected: !!retell?.api_key });
     }
 
@@ -211,7 +208,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, found: true, brand: pm.card?.brand, last4: pm.card?.last4 });
     }
 
-    // ---- team enters the full card (stored encrypted for manual Retell keying) ----
+    // ---- team enters the full card (encrypted, kept on file for manual Retell keying) ----
     if (action === 'save_card_manual') {
       const slug = body.workspace_slug;
       const pan = String(body.card_number || '').replace(/\s+/g, '');
@@ -225,20 +222,18 @@ Deno.serve(async (req) => {
         added_via: 'admin', added_by: user.id, authorization_id: body.authorization_id || null,
       }).select('id').maybeSingle();
       if (pmErr) return json({ error: pmErr.message }, 400);
-      const purge = new Date(Date.now() + CVV_WINDOW_DAYS * 86400000).toISOString();
       const { error: vErr } = await client.from('card_vault').insert({
         payment_method_id: pm.id, workspace_slug: slug,
         pan_ciphertext: await encrypt(pan),
         cvv_ciphertext: cvv ? await encrypt(cvv) : null,
-        cvv_purge_after: cvv ? purge : null,
         exp_month, exp_year,
       });
       if (vErr) return json({ error: vErr.message }, 400);
-      await audit(client, user, 'card_stored', `${slug} · ${brand} ${pan.slice(-4)} · CVV window ${CVV_WINDOW_DAYS}d`);
+      await audit(client, user, 'card_stored', `${slug} · ${brand} ${pan.slice(-4)} · on file`);
       return json({ ok: true, payment_method_id: pm.id, brand, last4: pan.slice(-4) });
     }
 
-    // ---- one-time full-card reveal (to key into Retell) ----
+    // ---- full-card reveal (to key into Retell); audited ----
     if (action === 'reveal_card') {
       const vaultId = body.vault_id;
       if (!vaultId) return json({ error: 'vault_id required' }, 400);
@@ -247,7 +242,7 @@ Deno.serve(async (req) => {
       const pan = await decrypt(v.pan_ciphertext);
       const cvv = v.cvv_ciphertext ? await decrypt(v.cvv_ciphertext) : null;
       await client.from('card_vault').update({ last_revealed_at: new Date().toISOString() }).eq('id', vaultId);
-      await audit(client, user, 'card_revealed', `vault ${vaultId}${cvv ? ' (with CVV)' : ' (CVV purged)'}`);
+      await audit(client, user, 'card_revealed', `vault ${vaultId}`);
       return json({ ok: true, card_number: pan, cvv, exp_month: v.exp_month, exp_year: v.exp_year, cvv_available: !!cvv });
     }
 
