@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { opm } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
+import CustomFieldsModal from '../components/CustomFieldsModal';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews,
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
 } from '../components/dash';
 import { num } from '../lib/format';
-import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, Layers } from 'lucide-react';
+import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, Layers, SlidersHorizontal } from 'lucide-react';
 
 const PAGE_KEY = 'opm-contacts';
 const PAGE_SIZE = 50;
@@ -48,6 +49,8 @@ export default function SellerContacts() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showImport, setShowImport] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showFields, setShowFields] = useState(false);
+  const [customFields, setCustomFields] = useState<any[]>([]);
 
   // ---- Bulk AI caller ----
   const [callModal, setCallModal] = useState(false);
@@ -59,6 +62,22 @@ export default function SellerContacts() {
 
   const load = useCallback(() => { setLoading(true); return opm.sellerContacts().then((d) => setAllRows(d.contacts || [])).finally(() => setLoading(false)); }, []);
   useEffect(() => { load(); }, [load]);
+
+  const loadFields = useCallback(() => { opm.customFields().then((d: any) => setCustomFields(d.fields || [])).catch(() => setCustomFields([])); }, []);
+  useEffect(() => { loadFields(); }, [loadFields]);
+
+  // Custom (dynamic) fields render as extra searchable/sortable columns after the built-ins.
+  const customCols = useMemo<ColumnDef[]>(() => customFields.map((cf) => ({
+    key: `cf_${cf.entity}_${cf.field_key}`, label: cf.label, sortKey: `cf_${cf.entity}_${cf.field_key}`,
+  })), [customFields]);
+
+  const cfValue = useCallback((r: any, key: string): string => {
+    const m = key.match(/^cf_(lead|contact)_(.+)$/);
+    if (!m) return '';
+    const bag = m[1] === 'lead' ? (r.lead_custom || {}) : (r.custom || {});
+    const v = bag[m[2]];
+    return v === undefined || v === null ? '' : String(v);
+  }, []);
 
   const channelOpts = useMemo(() => {
     const s = new Set<string>(); allRows.forEach((r) => s.add(r.phone_channel || 'other'));
@@ -84,12 +103,14 @@ export default function SellerContacts() {
       case 'crm_stage': return r.crm_stage || '';
       case 'lead_source': return r.lead_source || '';
       case 'assigned_to': return r.assigned_to || '';
-      default: return '';
+      default: return key.startsWith('cf_') ? cfValue(r, key) : '';
     }
-  }, []);
+  }, [cfValue]);
+
+  const columns = useMemo<ColumnDef[]>(() => [...COLUMNS, ...customCols], [customCols]);
 
   const { rows, search, setSearch, sort, setSort, isVisible, toggle } = useClientTable<any>({
-    pageKey: PAGE_KEY, columns: COLUMNS, rows: preFiltered, getValue, initialSort: { by: 'name', dir: 'asc' },
+    pageKey: PAGE_KEY, columns, rows: preFiltered, getValue, initialSort: { by: 'name', dir: 'asc' },
   });
 
   useEffect(() => { setPage(1); }, [kind, channel, verified, search, sort]);
@@ -163,6 +184,9 @@ export default function SellerContacts() {
         <PageHeader title="Contacts" description="Every dialable phone number — owners and relationships, each its own record" showDate={false} />
         {canImport && (
           <div className="mt-1 flex shrink-0 items-center gap-2">
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={() => setShowFields(true)}>
+              <SlidersHorizontal className="h-4 w-4" /> Custom fields
+            </button>
             <button className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={() => setShowAdd(true)}>
               <Plus className="h-4 w-4" /> Add contact
             </button>
@@ -175,6 +199,7 @@ export default function SellerContacts() {
 
       {showImport && <ImportWizard onClose={() => setShowImport(false)} lockedWorkspace={!isStaff && ownsActive ? (active || undefined) : undefined} />}
       {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
+      {showFields && <CustomFieldsModal onClose={() => setShowFields(false)} onChanged={loadFields} />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Dialable Contacts" value={num(allRows.length)} sub="one per phone number" icon={Contact} accent="blue" />
@@ -186,7 +211,7 @@ export default function SellerContacts() {
       <SectionCard title="Filters" description={`${total.toLocaleString()} contact${total === 1 ? '' : 's'} match`} className="mb-4"
         action={<div className="flex items-center gap-2">
           <SavedViews<ViewCfg> pageKey={PAGE_KEY} current={currentCfg} onApply={applyView} />
-          <ColumnToggleMenu columns={COLUMNS} isVisible={isVisible} onToggle={toggle} />
+          <ColumnToggleMenu columns={columns} isVisible={isVisible} onToggle={toggle} />
         </div>}>
         <div className="flex flex-wrap items-center gap-3">
           <select value={kind} onChange={(e) => setKind(e.target.value)} className="input !py-1.5 text-sm">
@@ -290,7 +315,7 @@ export default function SellerContacts() {
                 <tr>
                   <th className="px-3 py-2.5 w-8"><input type="checkbox" checked={allOnPage} onChange={toggleAll} className="h-3.5 w-3.5 accent-[#1f6feb]" /></th>
                   <th className="px-2 py-2.5 text-right w-10">#</th>
-                  {COLUMNS.filter((c) => isVisible(c.key)).map((c) => <SortableHead key={c.key} col={c} sort={sort} onSort={setSort}>{c.label}</SortableHead>)}
+                  {columns.filter((c) => isVisible(c.key)).map((c) => <SortableHead key={c.key} col={c} sort={sort} onSort={setSort}>{c.label}</SortableHead>)}
                 </tr>
               </thead>
               <tbody>
@@ -313,6 +338,7 @@ export default function SellerContacts() {
                     {isVisible('crm_stage') && <td className="whitespace-nowrap px-3 py-2.5"><span className="pill bg-brand/10 text-brand">{r.crm_stage || '—'}</span></td>}
                     {isVisible('lead_source') && <td className="max-w-[150px] truncate px-3 py-2.5 text-xs text-slate-500">{r.lead_source || '—'}</td>}
                     {isVisible('assigned_to') && <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{r.assigned_to || '—'}</td>}
+                    {customCols.filter((c) => isVisible(c.key)).map((c) => <td key={c.key} className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600">{cfValue(r, c.key) || '—'}</td>)}
                   </tr>
                 ))}
               </tbody>
