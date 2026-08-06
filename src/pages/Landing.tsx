@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LOGO_FULL } from '../lib/logo';
+import { demo } from '../lib/api';
 import {
   ArrowRight, Bot, Upload, BarChart3, Phone, ListChecks, FileText, Users,
   ShieldCheck, CreditCard, Sparkles, CheckCircle2, Headphones, Building2, Zap,
-  Play, Pause, PhoneCall, TrendingUp, ChevronRight,
+  Play, Pause, PhoneCall, TrendingUp, ChevronRight, Loader2, PhoneOutgoing,
 } from 'lucide-react';
 
 // Wide, near-full-bleed container used across the marketing site (minimal side gutters).
@@ -273,6 +274,106 @@ function ProductTour() {
   );
 }
 
+/* ============================ live "talk to our AI" demo ============================ */
+const DEMO_AGENTS = [
+  { key: 'real_estate_cold', label: 'Real estate cold caller', blurb: 'Prospects sellers & buyers, qualifies motivation.' },
+  { key: 'negotiator', label: 'Deal negotiator', blurb: 'Works price & terms using a proven framework.' },
+  { key: 'dispatch', label: 'Dispatch AI', blurb: 'Handles service calls — intake, triage, scheduling.' },
+  { key: 'b2b_seller', label: 'B2B outbound seller', blurb: 'Pitches your offer to businesses and books meetings.' },
+];
+
+function TalkToAI() {
+  const [useCase, setUseCase] = useState('real_estate_cold');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [consent, setConsent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const active = DEMO_AGENTS.find((a) => a.key === useCase)!;
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(''); setMsg('');
+    if (!consent) { setErr('Please check the box so we can call you.'); return; }
+    setBusy(true);
+    try {
+      const r: any = await demo.call({ use_case: useCase, name: name.trim(), phone, email: email.trim(), consent });
+      setMsg(r.message || 'Calling you now — your phone should ring within a few seconds.');
+    } catch (e: any) { setErr(e?.message || 'Could not start the call. Please try again.'); } finally { setBusy(false); }
+  };
+
+  return (
+    <section id="talk" className="relative overflow-hidden bg-ink text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="animate-aurora absolute -left-24 top-0 h-[32rem] w-[32rem] rounded-full bg-brand/35 blur-[130px]" />
+        <div className="animate-aurora-2 absolute -right-24 bottom-0 h-[32rem] w-[32rem] rounded-full bg-[#8f6bff]/30 blur-[130px]" />
+      </div>
+      <div className={`${WRAP} relative py-20 md:py-28`}>
+        <div className="grid items-center gap-12 lg:grid-cols-2">
+          <div className="reveal">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-1.5 text-sm font-bold text-white/90 backdrop-blur"><PhoneOutgoing className="h-4 w-4 text-brand" /> Live demo — no signup</span>
+            <h2 className="mt-5 text-4xl font-extrabold tracking-tight md:text-6xl">Talk to our AI <span className="text-gradient">right now.</span></h2>
+            <p className="mt-5 max-w-[560px] text-lg text-slate-300 md:text-xl">Pick a sample agent, enter your number, and our AI will call <span className="font-semibold text-white">you</span> in seconds. Have a real two-way conversation — the same voice tech we run for our customers.</p>
+            <div className="mt-7 grid gap-3 sm:grid-cols-2">
+              {DEMO_AGENTS.map((a) => (
+                <button key={a.key} type="button" onClick={() => setUseCase(a.key)}
+                  className={`rounded-2xl border p-4 text-left transition ${useCase === a.key ? 'border-brand bg-brand/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
+                  <div className="flex items-center gap-2 font-bold">{useCase === a.key ? <CheckCircle2 className="h-4 w-4 text-brand" /> : <Bot className="h-4 w-4 text-slate-400" />} {a.label}</div>
+                  <div className="mt-1 text-sm text-slate-400">{a.blurb}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="reveal reveal-2 rounded-3xl border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
+            {msg ? (
+              <div className="py-8 text-center">
+                <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-500/20 text-emerald-400"><PhoneCall className="h-8 w-8" /></div>
+                <h3 className="mt-5 text-2xl font-bold">Your phone is ringing</h3>
+                <p className="mt-2 text-slate-300">{msg}</p>
+                <p className="mt-4 text-sm text-slate-400">Talking to <span className="font-semibold text-white">{active.label}</span>. Didn't get it? Check for calls from an unknown number.</p>
+                <button className="btn-ghost mt-6 border-white/20 bg-white/5 text-white hover:bg-white/10" onClick={() => { setMsg(''); setConsent(false); }}>Try another agent</button>
+              </div>
+            ) : (
+              <form onSubmit={submit}>
+                <h3 className="text-2xl font-bold">Get a call from <span className="text-brand">{active.label}</span></h3>
+                <p className="mt-1 text-sm text-slate-400">We'll call the number you enter. It's free.</p>
+                {err && <div className="mt-4 rounded-lg bg-red-500/15 px-3 py-2 text-sm font-medium text-red-300">{err}</div>}
+                <label className="mt-5 block text-sm font-semibold text-slate-200">Which AI?
+                  <select className="mt-1.5 w-full rounded-lg border border-white/10 bg-ink/60 px-3 py-2.5 text-white outline-none focus:border-brand" value={useCase} onChange={(e) => setUseCase(e.target.value)}>
+                    {DEMO_AGENTS.map((a) => <option key={a.key} value={a.key} className="bg-ink">{a.label}</option>)}
+                  </select>
+                </label>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label className="block text-sm font-semibold text-slate-200">Your name
+                    <input className="mt-1.5 w-full rounded-lg border border-white/10 bg-ink/60 px-3 py-2.5 text-white placeholder:text-slate-500 outline-none focus:border-brand" value={name} onChange={(e) => setName(e.target.value)} placeholder="Alex" required />
+                  </label>
+                  <label className="block text-sm font-semibold text-slate-200">Your mobile
+                    <input className="mt-1.5 w-full rounded-lg border border-white/10 bg-ink/60 px-3 py-2.5 text-white placeholder:text-slate-500 outline-none focus:border-brand" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(555) 123-4567" inputMode="tel" required />
+                  </label>
+                </div>
+                <label className="mt-4 block text-sm font-semibold text-slate-200">Email <span className="font-normal text-slate-500">(optional)</span>
+                  <input className="mt-1.5 w-full rounded-lg border border-white/10 bg-ink/60 px-3 py-2.5 text-white placeholder:text-slate-500 outline-none focus:border-brand" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
+                </label>
+                <label className="mt-4 flex items-start gap-2.5 text-sm text-slate-300">
+                  <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#1f6feb]" />
+                  <span>I agree to receive a one-time automated demo call at the number I entered. This is my own number.</span>
+                </label>
+                <button className="btn-primary btn-glow mt-6 w-full !py-3.5 text-lg" disabled={busy}>
+                  {busy ? <><Loader2 className="h-5 w-5 animate-spin" /> Starting your call…</> : <><PhoneOutgoing className="h-5 w-5" /> Call me now</>}
+                </button>
+                <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-slate-500"><ShieldCheck className="h-3.5 w-3.5" /> One demo call per number. We never share your info.</p>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ============================ page ============================ */
 export default function Landing() {
   useReveal();
@@ -296,6 +397,7 @@ export default function Landing() {
             <span className="text-xl font-extrabold tracking-tight">1PropertyMarket <span className="text-brand">Outbound</span></span>
           </Link>
           <nav className="hidden items-center gap-9 text-base font-semibold text-slate-500 lg:flex">
+            <a href="#talk" className="text-brand hover:text-brand-dark">Talk to our AI</a>
             <a href="#tour" className="hover:text-ink">See it work</a>
             <a href="#how" className="hover:text-ink">How it works</a>
             <a href="#features" className="hover:text-ink">Features</a>
@@ -327,7 +429,7 @@ export default function Landing() {
             </p>
             <div className="animate-rise mt-9 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Link to="/register" className="btn-primary btn-glow w-full !px-8 !py-4 text-lg sm:w-auto">Start free <ArrowRight className="h-5 w-5" /></Link>
-              <a href="#tour" className="btn w-full border border-white/20 bg-white/5 text-white hover:bg-white/10 !px-8 !py-4 text-lg sm:w-auto"><Play className="h-5 w-5" /> Watch the 90-sec walkthrough</a>
+              <a href="#talk" className="btn w-full border border-white/20 bg-white/5 text-white hover:bg-white/10 !px-8 !py-4 text-lg sm:w-auto"><PhoneOutgoing className="h-5 w-5" /> Talk to our AI now</a>
             </div>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-base font-medium text-slate-400">
               <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-5 w-5 text-emerald-400" /> No monthly fees</span>
@@ -358,6 +460,9 @@ export default function Landing() {
           </div>
         </div>
       </section>
+
+      {/* Live "talk to our AI" demo */}
+      <TalkToAI />
 
       {/* Product tour */}
       <section id="tour" className={`${WRAP} py-20 md:py-28`}>
