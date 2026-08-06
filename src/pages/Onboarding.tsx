@@ -41,7 +41,7 @@ export default function Onboarding() {
               <th className="px-5 py-2.5 font-semibold">Account</th>
               <th className="px-3 py-2.5 font-semibold">Status</th>
               <th className="px-3 py-2.5 font-semibold">Mode</th>
-              <th class‑Name="px-3 py-2.5 font-semibold">Authorization</th>
+              <th className="px-3 py-2.5 font-semibold">Authorization</th>
               <th className="px-3 py-2.5 font-semibold">Card on file</th>
               <th className="px-3 py-2.5 text-right font-semibold">Setup</th>
             </tr>
