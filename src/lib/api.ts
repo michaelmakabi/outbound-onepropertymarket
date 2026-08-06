@@ -267,6 +267,20 @@ export const adminOps = {
   dialerSet: (b: any) => adminOpsCall('dialer_set', { method: 'POST', body: b }),
 };
 
+// ---- Public homepage "talk to our AI" demo caller (no auth) ----
+const DEMOCALL_BASE =
+  (import.meta as any).env?.VITE_DEMOCALL_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/demo-call') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/demo-call');
+
+export const demo = {
+  call: async (b: { use_case: string; name: string; phone: string; email?: string; consent: boolean }) => {
+    const res = await fetch(DEMOCALL_BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+    return data;
+  },
+};
+
 // Fetch a call recording via the backend proxy (bypasses CORS) as a Blob.
 export async function fetchRecordingBlob(callId: string): Promise<Blob> {
   const base = (import.meta as any).env?.VITE_API_BASE || 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
