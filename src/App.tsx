@@ -19,7 +19,6 @@ import ContactDetail from './pages/ContactDetail';
 import Suggestions from './pages/Suggestions';
 import PromptStudio from './pages/PromptStudio';
 import Reports from './pages/Reports';
-import Leads from './pages/Leads';
 import LeadDetail from './pages/LeadDetail';
 import Pipelines from './pages/Pipelines';
 import SellerContacts from './pages/SellerContacts';
@@ -56,7 +55,7 @@ export default function App() {
       <Route path="/calls/:callId" element={<Protected><CallDetail /></Protected>} />
       <Route path="/contacts" element={<Protected><Contacts /></Protected>} />
       <Route path="/contacts/:number" element={<Protected><ContactDetail /></Protected>} />
-      <Route path="/leads" element={<Protected><Leads /></Protected>} />
+      <Route path="/leads" element={<Protected><SellerContacts /></Protected>} />
       <Route path="/leads/:id" element={<Protected><LeadDetail /></Protected>} />
       <Route path="/seller-contacts" element={<Protected><SellerContacts /></Protected>} />
       <Route path="/pipelines" element={<Protected><Pipelines /></Protected>} />
