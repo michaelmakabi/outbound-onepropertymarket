@@ -280,6 +280,7 @@ const DEMO_AGENTS = [
   { key: 'negotiator', label: 'Deal negotiator', blurb: 'Works price & terms using a proven framework.' },
   { key: 'dispatch', label: 'Dispatch AI', blurb: 'Handles service calls — intake, triage, scheduling.' },
   { key: 'b2b_seller', label: 'B2B outbound seller', blurb: 'Pitches your offer to businesses and books meetings.' },
+  { key: 'concierge', label: 'Concierge — sell me on this', blurb: 'Walks you through the service, pricing & books your follow-up.' },
 ];
 
 function TalkToAI() {
@@ -429,7 +430,7 @@ export default function Landing() {
             </p>
             <div className="animate-rise mt-9 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Link to="/register" className="btn-primary btn-glow w-full !px-8 !py-4 text-lg sm:w-auto">Start free <ArrowRight className="h-5 w-5" /></Link>
-              <a href="#talk" className="btn w-full border border-white/20 bg-white/5 text-white hover:bg-white/10 !px-8 !py-4 text-lg sm:w-auto"><PhoneOutgoing className="h-5 w-5" /> Talk to our AI now</a>
+              <a href="#tour" className="btn w-full border border-white/20 bg-white/5 text-white hover:bg-white/10 !px-8 !py-4 text-lg sm:w-auto"><Play className="h-5 w-5" /> Watch the 90-sec walkthrough</a>
             </div>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-2 text-base font-medium text-slate-400">
               <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-5 w-5 text-emerald-400" /> No monthly fees</span>
