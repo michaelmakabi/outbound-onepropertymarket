@@ -6,7 +6,7 @@ import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  UserSquare2, Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -42,7 +42,6 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 // op:true = operator tooling, hidden from customers (role=user).
 const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
-  { to: '/leads', label: 'Leads', icon: UserSquare2 },
   { to: '/seller-contacts', label: 'Contacts', icon: Contact },
   { to: '/pipelines', label: 'Pipelines', icon: Columns3 },
   { to: '/workspaces', label: 'Workspaces', icon: Building2, op: true },
@@ -75,7 +74,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   const width = collapsed ? 'w-[68px]' : 'w-60';
-  const activeLabel = [...NAV, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
+  const activeLabel = [...NAV, { to: '/leads', label: 'Contacts' }, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
 
   const item = (n: any) => (
     <NavLink
