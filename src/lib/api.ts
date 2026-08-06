@@ -132,6 +132,9 @@ export const opm = {
   saveList: (b: { id?: number; page: string; name: string; config: any; shared?: boolean }) => opmExtCall('save_list', { method: 'POST', body: b }),
   deleteList: (id: number) => opmExtCall('delete_list', { method: 'POST', body: { id } }),
   deleteContacts: (contact_ids: string[]) => opmExtCall('delete_contacts', { method: 'POST', body: { contact_ids } }),
+  // Record detail: full call history (incl. transcript) + edit a lead's record fields.
+  leadCalls: (lead_id: string) => opmExtCall('lead_calls', { params: { lead_id } }),
+  updateLead: (b: { lead_id: string; [k: string]: any }) => opmExtCall('update_lead', { method: 'POST', body: b }),
 };
 
 // companion `opm-ext` edge function — shares OPM auth + active-workspace scoping.
