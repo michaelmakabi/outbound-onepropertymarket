@@ -29,7 +29,6 @@ import Tenants from './pages/Tenants';
 import Account from './pages/Account';
 import Register from './pages/Register';
 import RegisterComplete from './pages/RegisterComplete';
-import Onboarding from './pages/Onboarding';
 
 // admin: admin/super_admin only. op: operator tooling — hidden from customers (role=user).
 function Protected({ children, admin, op }: { children: JSX.Element; admin?: boolean; op?: boolean }) {
@@ -70,7 +69,6 @@ export default function App() {
       <Route path="/billing" element={<Protected admin><Billing /></Protected>} />
       <Route path="/integrations" element={<Protected admin><Integrations /></Protected>} />
       <Route path="/tenants" element={<Protected admin><Tenants /></Protected>} />
-      <Route path="/onboarding" element={<Protected admin><Onboarding /></Protected>} />
       <Route path="/usage" element={<Protected admin><UsageAnalytics /></Protected>} />
       <Route path="/users" element={<Protected admin><UsersAdmin /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
