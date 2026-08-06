@@ -6,7 +6,7 @@ import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -74,7 +74,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   const width = collapsed ? 'w-[68px]' : 'w-60';
-  const activeLabel = [...NAV, { to: '/leads', label: 'Contacts' }, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }, { to: '/onboarding', label: 'Card Authorization' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
+  const activeLabel = [...NAV, { to: '/leads', label: 'Contacts' }, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
 
   const item = (n: any) => (
     <NavLink
@@ -114,7 +114,6 @@ export default function Layout({ children }: { children: ReactNode }) {
             {ADMIN_NAV.map(item)}
             {user?.role === 'super_admin' && item({ to: '/tenants', label: 'Customers', icon: Boxes })}
             {user?.role === 'super_admin' && item({ to: '/billing', label: 'Billing', icon: DollarSign })}
-            {user?.role === 'super_admin' && item({ to: '/onboarding', label: 'Card Authorization', icon: FileSignature })}
             {user?.role === 'super_admin' && item({ to: '/integrations', label: 'Integrations', icon: Webhook })}
           </>
         )}
