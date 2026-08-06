@@ -1,35 +1,77 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { adminOps, workspaceStore, fmt } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
-import { Building2, Users, PhoneCall, TrendingUp, Check, X, Pencil, LogIn, KeyRound, AlertCircle, Plus, Zap, Loader2, Phone, Bot } from 'lucide-react';
+import { Building2, Users, PhoneCall, TrendingUp, Check, X, Pencil, LogIn, KeyRound, AlertCircle, Plus, Zap, Loader2, Phone, Bot, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronRight } from 'lucide-react';
 
 const statusColor: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700', onboarding: 'bg-amber-100 text-amber-700',
   paused: 'bg-slate-100 text-slate-600', trial_expired: 'bg-orange-100 text-orange-700', closed: 'bg-red-100 text-red-700',
 };
 
+type SortKey = 'name' | 'status' | 'leads' | 'calls' | 'agents' | 'users' | 'mult' | 'margin' | 'unbilled';
+
 export default function Tenants() {
   const { user } = useAuth();
+  const nav = useNavigate();
   const [tenants, setTenants] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState<any>(null);
   const [provision, setProvision] = useState<any>(null);
+  const [q, setQ] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'leads', dir: 'desc' });
 
   const load = () => adminOps.tenantsList().then((d: any) => { setTenants(d.tenants || []); setUsers(d.users || []); }).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    let rows = tenants.filter((t) => statusFilter === 'all' || t.status === statusFilter);
+    if (needle) rows = rows.filter((t) => [t.display_name, t.slug, t.crm_workspace, t.dialer_slug, t.billing_slug, ...(t.workspaces || [])].filter(Boolean).some((s: string) => String(s).toLowerCase().includes(needle)));
+    const val = (t: any, k: SortKey) => {
+      switch (k) {
+        case 'name': return (t.display_name || t.slug || '').toLowerCase();
+        case 'status': return t.status || '';
+        case 'mult': return t.billing?.multiplier ?? 0;
+        case 'margin': return t.usage?.margin || 0;
+        case 'unbilled': return t.usage?.unbilled || 0;
+        default: return t[k] || 0;
+      }
+    };
+    return [...rows].sort((a, b) => {
+      const av = val(a, sort.key), bv = val(b, sort.key);
+      const c = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+      return sort.dir === 'asc' ? c : -c;
+    });
+  }, [tenants, q, statusFilter, sort]);
 
   if (user?.role !== 'super_admin') return <div className="py-16 text-center text-slate-400">Customers are restricted to super admins.</div>;
   if (loading) return <Spinner />;
 
   const jumpIn = (t: any) => { workspaceStore.set(t.crm_workspace); window.location.assign('/'); };
+  const openDetail = (t: any, tab?: string) => nav(`/tenants/${t.slug}${tab ? `?tab=${tab}` : ''}`);
+  const toggleSort = (key: SortKey) => setSort((s) => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'name' || key === 'status' ? 'asc' : 'desc' });
 
-  const totalLeads = tenants.reduce((s, t) => s + (t.leads || 0), 0);
-  const totalAgents = tenants.reduce((s, t) => s + (t.agents || 0), 0);
-  const totalRetail = tenants.reduce((s, t) => s + (t.usage?.retail || 0), 0);
-  const totalMargin = tenants.reduce((s, t) => s + (t.usage?.margin || 0), 0);
+  const totalLeads = filtered.reduce((s, t) => s + (t.leads || 0), 0);
+  const totalCalls = filtered.reduce((s, t) => s + (t.calls || 0), 0);
+  const totalAgents = filtered.reduce((s, t) => s + (t.agents || 0), 0);
+  const totalMargin = filtered.reduce((s, t) => s + (t.usage?.margin || 0), 0);
   const activeN = tenants.filter((t) => t.status === 'active').length;
+
+  const SortTh = ({ label, k, align = 'right' }: { label: string; k: SortKey; align?: 'left' | 'right' }) => (
+    <th className={`px-3 py-2.5 ${align === 'right' ? 'text-right' : 'text-left'} cursor-pointer select-none hover:text-ink`} onClick={() => toggleSort(k)}>
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>{label}{sort.key === k ? (sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}</span>
+    </th>
+  );
+  // clickable metric cell — drills into that customer's detail scope
+  const MetricCell = ({ t, tab, children, cls = '' }: any) => (
+    <td className={`px-3 py-2.5 text-right tabular-nums ${cls}`}>
+      <button className="rounded px-1.5 py-0.5 font-medium text-ink hover:bg-brand-light/50 hover:text-brand" onClick={(e) => { e.stopPropagation(); openDetail(t, tab); }}>{children}</button>
+    </td>
+  );
 
   return (
     <div>
@@ -39,45 +81,57 @@ export default function Tenants() {
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <div className="card p-4"><div className="label flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5" /> Customers</div><div className="mt-1 text-2xl font-bold text-ink">{tenants.length}</div><div className="text-[11px] text-slate-400">{activeN} active</div></div>
         <div className="card p-4"><div className="label flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /> Leads</div><div className="mt-1 text-2xl font-bold text-ink">{fmt.int(totalLeads)}</div></div>
-        <div className="card p-4"><div className="label flex items-center gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> AI agents</div><div className="mt-1 text-2xl font-bold text-ink">{fmt.int(totalAgents)}</div></div>
-        <div className="card p-4"><div className="label">Retail usage</div><div className="mt-1 text-2xl font-bold text-ink">{fmt.money(totalRetail)}</div></div>
+        <div className="card p-4"><div className="label flex items-center gap-1.5"><PhoneCall className="h-3.5 w-3.5" /> Calls</div><div className="mt-1 text-2xl font-bold text-ink">{fmt.int(totalCalls)}</div></div>
+        <div className="card p-4"><div className="label flex items-center gap-1.5"><Bot className="h-3.5 w-3.5" /> AI agents</div><div className="mt-1 text-2xl font-bold text-ink">{fmt.int(totalAgents)}</div></div>
         <div className="card p-4"><div className="label flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Margin</div><div className={`mt-1 text-2xl font-bold ${totalMargin > 0 ? 'text-emerald-600' : 'text-ink'}`}>{fmt.money(totalMargin)}</div></div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input className="input w-full pl-9" placeholder="Search customers, workspaces…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="all">All statuses</option>
+          {['active', 'onboarding', 'paused', 'trial_expired', 'closed'].map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <span className="text-xs text-slate-400">{filtered.length} of {tenants.length}</span>
       </div>
 
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-2.5">Customer</th>
-              <th className="px-3 py-2.5">Status</th>
+              <SortTh label="Customer" k="name" align="left" />
+              <SortTh label="Status" k="status" align="left" />
               <th className="px-3 py-2.5">Dialer</th>
-              <th className="px-3 py-2.5 text-right">Leads</th>
-              <th className="px-3 py-2.5 text-right">Agents</th>
-              <th className="px-3 py-2.5 text-right">Users</th>
-              <th className="px-3 py-2.5 text-right">Mult</th>
-              <th className="px-3 py-2.5 text-right">Hard cost</th>
-              <th className="px-3 py-2.5 text-right">Margin</th>
-              <th className="px-3 py-2.5 text-right">Unbilled</th>
+              <SortTh label="Leads" k="leads" />
+              <SortTh label="Calls" k="calls" />
+              <SortTh label="Agents" k="agents" />
+              <SortTh label="Users" k="users" />
+              <SortTh label="Mult" k="mult" />
+              <SortTh label="Margin" k="margin" />
+              <SortTh label="Unbilled" k="unbilled" />
               <th className="px-3 py-2.5"></th>
             </tr>
           </thead>
           <tbody>
-            {tenants.map((t) => (
-              <tr key={t.slug} className="border-t border-line hover:bg-surface">
+            {filtered.map((t) => (
+              <tr key={t.slug} className="border-t border-line hover:bg-surface cursor-pointer" onClick={() => openDetail(t)}>
                 <td className="px-4 py-2.5">
-                  <div className="font-semibold text-ink">{t.display_name || t.slug}</div>
-                  <div className="font-mono text-[11px] text-slate-400">{t.slug}{t.crm_workspace !== t.slug && <span> · crm:{t.crm_workspace}</span>}</div>
+                  <div className="flex items-center gap-1.5 font-semibold text-ink">{t.display_name || t.slug} <ChevronRight className="h-3.5 w-3.5 text-slate-300" /></div>
+                  <div className="font-mono text-[11px] text-slate-400">{t.slug}{t.crm_workspace !== t.slug && <span> · crm:{t.crm_workspace}</span>}{t.dialer_slug && t.dialer_slug !== t.slug && <span> · dial:{t.dialer_slug}</span>}</div>
                 </td>
                 <td className="px-3 py-2.5"><span className={`pill ${statusColor[t.status] || 'bg-slate-100 text-slate-600'}`}>{t.status}</span></td>
                 <td className="px-3 py-2.5">{t.has_key ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><KeyRound className="h-3.5 w-3.5" /> key</span> : <span className="inline-flex items-center gap-1 text-xs text-red-500"><AlertCircle className="h-3.5 w-3.5" /> none</span>}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(t.leads)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(t.agents)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(t.users)}</td>
+                <MetricCell t={t} tab="activity">{fmt.int(t.leads)}</MetricCell>
+                <MetricCell t={t} tab="activity">{fmt.int(t.calls)}</MetricCell>
+                <MetricCell t={t} tab="agents">{fmt.int(t.agents)}</MetricCell>
+                <MetricCell t={t} tab="users">{fmt.int(t.users)}</MetricCell>
                 <td className="px-3 py-2.5 text-right tabular-nums">{t.billing?.multiplier ?? '—'}×</td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">{fmt.money(t.usage?.hard || 0)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-emerald-600">{fmt.money(t.usage?.margin || 0)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{fmt.money(t.usage?.unbilled || 0)}</td>
-                <td className="px-3 py-2.5">
+                <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end gap-1">
                     <button className="btn-ghost !px-2 !py-1 text-xs" title="Provision dialer" onClick={() => setProvision(t)}><Zap className="h-3.5 w-3.5" /></button>
                     <button className="btn-ghost !px-2 !py-1 text-xs" title="Jump into this account's CRM" onClick={() => jumpIn(t)}><LogIn className="h-3.5 w-3.5" /></button>
@@ -86,6 +140,7 @@ export default function Tenants() {
                 </td>
               </tr>
             ))}
+            {filtered.length === 0 && <tr><td colSpan={11} className="px-4 py-10 text-center text-slate-400">No customers match your search.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -158,14 +213,11 @@ function TenantModal({ t, users, onClose, onSaved }: any) {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const isNew = !!t._new;
-  // Only reveal the CRM/dialer/billing overrides when an existing customer actually has a
-  // mismatched mapping (e.g. legacy 1PM→pitman). New customers = one ID for everything.
   const [adv, setAdv] = useState(!isNew && !!((form.crm_workspace && form.crm_workspace !== form.slug) || (form.dialer_slug && form.dialer_slug !== form.slug) || (form.billing_slug && form.billing_slug !== form.slug)));
 
   const save = async () => {
     setErr(''); setBusy(true);
     try {
-      // one ID governs everything unless the operator explicitly opened Advanced mapping.
       const s = isNew ? slugify(form.slug) : form.slug;
       await adminOps.tenantUpsert({
         slug: s, display_name: form.display_name,
