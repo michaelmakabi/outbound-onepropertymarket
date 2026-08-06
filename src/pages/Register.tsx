@@ -36,9 +36,9 @@ export default function Register() {
       <div className="flex items-center justify-center bg-white px-5 py-10">
         <div className="w-full max-w-md">
           <Link to="/" className="mb-6 inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-ink"><ArrowLeft className="h-4 w-4" /> Back to home</Link>
-          <div className="mb-6 lg:hidden">
-            <img src={LOGO_FULL} alt="1PropertyMarket" className="h-10 w-auto object-contain" />
-          </div>
+          <Link to="/" className="mb-6 inline-block lg:hidden">
+            <img src={LOGO_FULL} alt="1PropertyMarket — home" className="h-10 w-auto object-contain" />
+          </Link>
           <h1 className="text-2xl font-extrabold text-ink">Create your account</h1>
           <p className="mt-1 text-sm text-slate-500">AI outbound calling — pay only for what you use.</p>
 
