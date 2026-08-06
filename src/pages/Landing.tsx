@@ -6,10 +6,17 @@ import {
   ArrowRight, Bot, Upload, BarChart3, Phone, ListChecks, FileText, Users,
   ShieldCheck, CreditCard, Sparkles, CheckCircle2, Headphones, Building2, Zap,
   Play, Pause, PhoneCall, TrendingUp, ChevronRight, Loader2, PhoneOutgoing,
+  Volume2, VolumeX, Maximize, Gauge,
 } from 'lucide-react';
 
 // Wide, near-full-bleed container used across the marketing site (minimal side gutters).
 const WRAP = 'mx-auto w-full max-w-[1900px] px-6 sm:px-10';
+
+// Narrated product walkthrough (hosted on Supabase Storage). Locked player — no download.
+const MEDIA_BASE = (import.meta as any).env?.VITE_MEDIA_BASE || 'https://sehrlbmatklgghrvyxes.supabase.co/storage/v1/object/public/media';
+const WALKTHROUGH_SRC = `${MEDIA_BASE}/walkthrough.mp4`;
+const WALKTHROUGH_POSTER = `${MEDIA_BASE}/walkthrough-poster.jpg`;
+const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
 
 /* ============================ little hooks ============================ */
 function useReveal() {
@@ -293,10 +300,16 @@ function TalkToAI() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const active = DEMO_AGENTS.find((a) => a.key === useCase)!;
+  const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+  const phoneOk = phone.replace(/\D/g, '').length >= 10;
+  const canCall = name.trim().length >= 2 && emailOk && phoneOk && consent && !busy;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(''); setMsg('');
+    if (name.trim().length < 2) { setErr('Please enter your name.'); return; }
+    if (!emailOk) { setErr('Please enter a valid email address.'); return; }
+    if (!phoneOk) { setErr('Please enter a valid mobile number.'); return; }
     if (!consent) { setErr('Please check the box so we can call you.'); return; }
     setBusy(true);
     try {
@@ -355,14 +368,14 @@ function TalkToAI() {
                     <input className="mt-1.5 w-full rounded-lg border border-white/10 bg-ink/60 px-3 py-2.5 text-white placeholder:text-slate-500 outline-none focus:border-brand" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(555) 123-4567" inputMode="tel" required />
                   </label>
                 </div>
-                <label className="mt-4 block text-sm font-semibold text-slate-200">Email <span className="font-normal text-slate-500">(optional)</span>
-                  <input className="mt-1.5 w-full rounded-lg border border-white/10 bg-ink/60 px-3 py-2.5 text-white placeholder:text-slate-500 outline-none focus:border-brand" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />
+                <label className="mt-4 block text-sm font-semibold text-slate-200">Work email
+                  <input className="mt-1.5 w-full rounded-lg border border-white/10 bg-ink/60 px-3 py-2.5 text-white placeholder:text-slate-500 outline-none focus:border-brand" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
                 </label>
                 <label className="mt-4 flex items-start gap-2.5 text-sm text-slate-300">
                   <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#1f6feb]" />
                   <span>I agree to receive a one-time automated demo call at the number I entered. This is my own number.</span>
                 </label>
-                <button className="btn-primary btn-glow mt-6 w-full !py-3.5 text-lg" disabled={busy}>
+                <button className="btn-primary btn-glow mt-6 w-full !py-3.5 text-lg disabled:cursor-not-allowed disabled:opacity-50" disabled={!canCall}>
                   {busy ? <><Loader2 className="h-5 w-5 animate-spin" /> Starting your call…</> : <><PhoneOutgoing className="h-5 w-5" /> Call me now</>}
                 </button>
                 <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-slate-500"><ShieldCheck className="h-3.5 w-3.5" /> One demo call per number. We never share your info.</p>
@@ -372,6 +385,117 @@ function TalkToAI() {
         </div>
       </div>
     </section>
+  );
+}
+
+/* ============================ locked walkthrough video player ============================ */
+function fmtTime(s: number) {
+  if (!isFinite(s) || s < 0) s = 0;
+  const m = Math.floor(s / 60);
+  const r = Math.floor(s % 60);
+  return `${m}:${r.toString().padStart(2, '0')}`;
+}
+
+function WalkthroughVideo() {
+  const vref = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [cur, setCur] = useState(0);
+  const [dur, setDur] = useState(0);
+  const [rate, setRate] = useState(1);
+  const [speedOpen, setSpeedOpen] = useState(false);
+  const [started, setStarted] = useState(false);
+
+  const toggle = () => {
+    const v = vref.current; if (!v) return;
+    if (v.paused) { v.play(); setStarted(true); } else v.pause();
+  };
+  const onTime = () => { const v = vref.current; if (v) setCur(v.currentTime); };
+  const onLoaded = () => { const v = vref.current; if (v) setDur(v.duration || 0); };
+  const seek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = vref.current; if (!v) return;
+    v.currentTime = (Number(e.target.value) / 1000) * (v.duration || 0);
+    setCur(v.currentTime);
+  };
+  const setSpeed = (r: number) => { const v = vref.current; if (v) v.playbackRate = r; setRate(r); setSpeedOpen(false); };
+  const toggleMute = () => { const v = vref.current; if (!v) return; v.muted = !v.muted; setMuted(v.muted); };
+  const fullscreen = () => { const v = vref.current as any; if (!v) return; (v.requestFullscreen || v.webkitEnterFullscreen)?.call(v); };
+  const pct = dur ? (cur / dur) * 1000 : 0;
+
+  return (
+    <div className="group relative overflow-hidden rounded-3xl border border-white/10 bg-ink shadow-2xl">
+      {/* top chrome */}
+      <div className="flex items-center gap-3 border-b border-white/10 bg-white/5 px-5 py-3.5">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-bold text-red-400"><span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> REC</span>
+        <img src={LOGO_FULL} alt="" className="h-7 w-7 rounded-md object-contain" />
+        <div className="text-sm font-medium text-slate-300">Product walkthrough · <span className="text-slate-500">90-second tour</span></div>
+      </div>
+
+      <div className="relative bg-black">
+        <video
+          ref={vref}
+          src={WALKTHROUGH_SRC}
+          poster={WALKTHROUGH_POSTER}
+          className="block w-full cursor-pointer select-none"
+          playsInline
+          preload="metadata"
+          controlsList="nodownload noremoteplayback noplaybackrate"
+          disablePictureInPicture
+          onContextMenu={(e) => e.preventDefault()}
+          onClick={toggle}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onTimeUpdate={onTime}
+          onLoadedMetadata={onLoaded}
+          onEnded={() => setPlaying(false)}
+        />
+
+        {/* big center play button (before start / when paused) */}
+        {!playing && (
+          <button type="button" onClick={toggle} aria-label="Play walkthrough"
+            className="absolute inset-0 grid place-items-center bg-black/25 transition hover:bg-black/15">
+            <span className="grid h-20 w-20 place-items-center rounded-full bg-white/95 text-ink shadow-2xl transition group-hover:scale-105">
+              <Play className="ml-1 h-9 w-9" />
+            </span>
+            {!started && <span className="absolute bottom-6 rounded-full bg-black/50 px-4 py-1.5 text-sm font-semibold text-white backdrop-blur">Watch the 90-second walkthrough</span>}
+          </button>
+        )}
+
+        {/* control bar */}
+        <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 bg-gradient-to-t from-black/80 to-transparent px-4 pb-3 pt-8 text-white">
+          <button type="button" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'} className="shrink-0 rounded-full p-1.5 hover:bg-white/15">
+            {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+          </button>
+          <span className="shrink-0 tabular-nums text-xs text-slate-200">{fmtTime(cur)} / {fmtTime(dur)}</span>
+          <input type="range" min={0} max={1000} value={pct} onChange={seek} aria-label="Seek"
+            className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 accent-[#1f6feb]" />
+          <button type="button" onClick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'} className="shrink-0 rounded-full p-1.5 hover:bg-white/15">
+            {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+          </button>
+          {/* speed */}
+          <div className="relative shrink-0">
+            <button type="button" onClick={() => setSpeedOpen((o) => !o)} aria-label="Playback speed"
+              className="flex items-center gap-1 rounded-full px-2 py-1.5 text-xs font-bold hover:bg-white/15">
+              <Gauge className="h-4 w-4" /> {rate}×
+            </button>
+            {speedOpen && (
+              <div className="absolute bottom-10 right-0 overflow-hidden rounded-xl border border-white/10 bg-ink/95 shadow-2xl backdrop-blur">
+                {SPEEDS.map((r) => (
+                  <button key={r} type="button" onClick={() => setSpeed(r)}
+                    className={`block w-full px-4 py-2 text-left text-sm hover:bg-white/10 ${r === rate ? 'font-bold text-brand' : 'text-slate-200'}`}>
+                    {r}×{r === 1 ? ' (normal)' : ''}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button type="button" onClick={fullscreen} aria-label="Fullscreen" className="shrink-0 rounded-full p-1.5 hover:bg-white/15">
+            <Maximize className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="pointer-events-none absolute right-4 top-3 text-xs font-bold text-white/70">outbound.1propertymarket.com</div>
+      </div>
+    </div>
   );
 }
 
@@ -472,7 +596,7 @@ export default function Landing() {
           <h2 className="mt-5 text-4xl font-extrabold tracking-tight md:text-6xl">See exactly what you get</h2>
           <p className="mt-4 text-lg text-slate-600 md:text-xl">A guided tour of your workspace — leads, live AI calls, dispositions, pipelines, and results. This is the whole product, done for you.</p>
         </div>
-        <div className="reveal reveal-2 mx-auto mt-12 max-w-[1500px]"><ProductTour /></div>
+        <div className="reveal reveal-2 mx-auto mt-12 max-w-[1200px]"><WalkthroughVideo /></div>
         <div className="mt-8 text-center">
           <Link to="/register" className="btn-primary btn-glow !px-8 !py-4 text-lg">Get this for your business <ArrowRight className="h-5 w-5" /></Link>
         </div>
