@@ -255,6 +255,7 @@ async function adminOpsCall(action: string, opts: { method?: string; body?: any;
 export const adminOps = {
   tenantsList: () => adminOpsCall('tenants_list'),
   tenantDetail: (slug: string) => adminOpsCall('tenant_detail', { params: { slug } }),
+  agentBillingSet: (b: { dialer_workspace: string; agent_id: string; agent_name?: string; billing_slug: string; reattribute?: boolean }) => adminOpsCall('agent_billing_set', { method: 'POST', body: b }),
   tenantUpsert: (b: any) => adminOpsCall('tenant_upsert', { method: 'POST', body: b }),
   provisionTenant: (b: any) => adminOpsCall('provision_tenant', { method: 'POST', body: b }),
   webhooksList: () => adminOpsCall('webhooks_list'),
