@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { onboarding, AUTHORIZATION_TEXT, AUTHORIZATION_VERSION } from '../lib/onboarding';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
+import AutoChargeBar from '../components/AutoChargeBar';
 import {
   UserPlus, ShieldCheck, CreditCard, Link2, Eye, Check, X, AlertCircle, Copy,
   KeyRound, RefreshCw, FileSignature, Building2,
@@ -30,6 +31,8 @@ export default function Onboarding() {
     <div>
       <PageHead title="Accounts & Onboarding" subtitle="Create customer accounts, capture card authorization, and hand cards to Retell"
         right={<button className="btn-primary" onClick={() => setCreating(true)}><UserPlus className="h-4 w-4" /> New account</button>} />
+
+      <AutoChargeBar />
 
       <div className="card overflow-hidden">
         <table className="w-full text-sm">
