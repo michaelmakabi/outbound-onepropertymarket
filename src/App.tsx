@@ -4,6 +4,7 @@ import { WorkspaceProvider } from './lib/workspace';
 import { Spinner } from './components/ui';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import Landing from './pages/Landing';
 import Overview from './pages/Overview';
 import Workspaces from './pages/Workspaces';
 import WorkspaceDetail from './pages/WorkspaceDetail';
@@ -43,13 +44,22 @@ function Protected({ children, admin, op }: { children: JSX.Element; admin?: boo
   return <WorkspaceProvider><Layout>{children}</Layout></WorkspaceProvider>;
 }
 
+// The app's front door: logged-out visitors get the public marketing site;
+// signed-in users get their dashboard. Keeps one clean URL for the whole product.
+function RootRoute() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="grid min-h-screen place-items-center"><Spinner /></div>;
+  if (!user) return <Landing />;
+  return <Protected><Overview /></Protected>;
+}
+
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/register/complete" element={<RegisterComplete />} />
-      <Route path="/" element={<Protected><Overview /></Protected>} />
+      <Route path="/" element={<RootRoute />} />
       <Route path="/workspaces" element={<Protected op><Workspaces /></Protected>} />
       <Route path="/workspaces/:slug" element={<Protected op><WorkspaceDetail /></Protected>} />
       <Route path="/dispositions" element={<Protected><Dispositions /></Protected>} />
