@@ -239,9 +239,10 @@ const ADMINOPS_BASE =
   (import.meta as any).env?.VITE_ADMINOPS_BASE ||
   ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/admin-ops') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/admin-ops');
 
-async function adminOpsCall(action: string, opts: { method?: string; body?: any } = {}) {
+async function adminOpsCall(action: string, opts: { method?: string; body?: any; params?: Record<string, string> } = {}) {
   const url = new URL(ADMINOPS_BASE);
   url.searchParams.set('action', action);
+  for (const [k, v] of Object.entries(opts.params || {})) url.searchParams.set(k, v);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = tokenStore.get();
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -253,6 +254,7 @@ async function adminOpsCall(action: string, opts: { method?: string; body?: any 
 
 export const adminOps = {
   tenantsList: () => adminOpsCall('tenants_list'),
+  tenantDetail: (slug: string) => adminOpsCall('tenant_detail', { params: { slug } }),
   tenantUpsert: (b: any) => adminOpsCall('tenant_upsert', { method: 'POST', body: b }),
   provisionTenant: (b: any) => adminOpsCall('provision_tenant', { method: 'POST', body: b }),
   webhooksList: () => adminOpsCall('webhooks_list'),
