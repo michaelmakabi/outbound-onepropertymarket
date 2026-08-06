@@ -106,7 +106,8 @@ export const opm = {
   saveStage: (b: any) => opmCall('save_stage', { method: 'POST', body: b }),
   deleteStage: (id: number) => opmCall('delete_stage', { method: 'POST', body: { id } }),
   leads: (p: any) => opmCall('leads', { params: p }),
-  sellerContacts: (p: any = {}) => opmCall('contacts', { params: p }),
+  // Fast record-centric contacts list — served by opm-ext (parallelized; ~1s vs ~26s on `opm`).
+  sellerContacts: (p: any = {}) => opmExtCall('contacts', { params: p }),
   resolve: (phones: string[]) => opmCall('resolve', { params: { phones: phones.join(',') } }),
   placeCall: (b: any) => opmCall('place_call', { method: 'POST', body: b }),
   lead: (id: string) => opmCall('lead', { params: { id } }),
