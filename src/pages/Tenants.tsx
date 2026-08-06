@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { adminOps, workspaceStore, fmt } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
-import { Building2, Users, PhoneCall, TrendingUp, Check, X, Pencil, LogIn, KeyRound, AlertCircle, Plus, Zap, Loader2, Phone, Bot, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronRight } from 'lucide-react';
+import { Building2, Users, PhoneCall, TrendingUp, Check, X, Pencil, LogIn, KeyRound, AlertCircle, Plus, Zap, Loader2, Phone, Bot, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronRight, HelpCircle, DollarSign, Layers, ShieldCheck } from 'lucide-react';
 
 const statusColor: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700', onboarding: 'bg-amber-100 text-amber-700',
@@ -23,6 +23,7 @@ export default function Tenants() {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'leads', dir: 'desc' });
+  const [showHelp, setShowHelp] = useState(false);
 
   const load = () => adminOps.tenantsList().then((d: any) => { setTenants(d.tenants || []); setUsers(d.users || []); }).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
@@ -76,7 +77,12 @@ export default function Tenants() {
   return (
     <div>
       <PageHead title="Customers" subtitle="Every customer as one unified account — CRM, dialer, billing, and usage"
-        right={<button className="btn-primary" onClick={() => setEdit({ slug: '', display_name: '', crm_workspace: '', dialer_slug: '', billing_slug: '', owner_user_id: '', status: 'onboarding', _new: true })}><Plus className="h-4 w-4" /> New customer</button>} />
+        right={<div className="flex items-center gap-2">
+          <button className="btn-ghost" onClick={() => setShowHelp((v) => !v)}><HelpCircle className="h-4 w-4" /> How this works</button>
+          <button className="btn-primary" onClick={() => setEdit({ slug: '', display_name: '', crm_workspace: '', dialer_slug: '', billing_slug: '', owner_user_id: '', status: 'onboarding', _new: true })}><Plus className="h-4 w-4" /> New customer</button>
+        </div>} />
+
+      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <div className="card p-4"><div className="label flex items-center gap-1.5"><Building2 className="h-3.5 w-3.5" /> Customers</div><div className="mt-1 text-2xl font-bold text-ink">{tenants.length}</div><div className="text-[11px] text-slate-400">{activeN} active</div></div>
@@ -147,6 +153,46 @@ export default function Tenants() {
 
       {edit && <TenantModal t={edit} users={users} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
       {provision && <ProvisionModal t={provision} onClose={() => setProvision(null)} onDone={() => load()} />}
+    </div>
+  );
+}
+
+// Plain-language explainer of the model for super admins — what each concept is and how billing works.
+function HelpPanel({ onClose }: { onClose: () => void }) {
+  const Concept = ({ icon, title, children }: any) => (
+    <div className="rounded-xl border border-line bg-white p-4">
+      <div className="mb-1.5 flex items-center gap-2 font-bold text-ink">{icon} {title}</div>
+      <div className="text-sm text-slate-600">{children}</div>
+    </div>
+  );
+  return (
+    <div className="mb-5 rounded-2xl border border-brand/20 bg-brand-light/40 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><HelpCircle className="h-5 w-5 text-brand" /> How the model works</h3>
+        <button className="rounded-lg p-1 text-slate-400 hover:bg-white" onClick={onClose}><X className="h-5 w-5" /></button>
+      </div>
+      <p className="mb-4 max-w-3xl text-sm text-slate-600">A <span className="font-semibold text-ink">customer</span> is one paying account. Everything they use lives inside the workspace we provision for them, and all of that usage bills back to them automatically. Here's each piece:</p>
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <Concept icon={<Building2 className="h-4 w-4 text-brand" />} title="Customer">
+          The company that pays. One customer = one unified account. Create one with <span className="font-semibold">New customer</span>; everything below hangs off it.
+        </Concept>
+        <Concept icon={<Layers className="h-4 w-4 text-brand" />} title="Workspace">
+          The private space we provision for a customer. It has three roles that are usually the same ID: <span className="font-semibold">CRM</span> (their leads &amp; contacts), <span className="font-semibold">dialer</span> (the voice account that places calls &amp; holds their agents), and <span className="font-semibold">billing</span> (where usage is totaled). Legacy accounts like 1PM split these — that's why you'll see <span className="font-mono text-[11px]">crm:pitman</span> under it.
+        </Concept>
+        <Concept icon={<Bot className="h-4 w-4 text-brand" />} title="Agents">
+          The AI callers inside a customer's workspace. Whichever agent a customer uses — original or cloned — its calls belong to that customer.
+        </Concept>
+        <Concept icon={<ShieldCheck className="h-4 w-4 text-brand" />} title="Users & agent scope">
+          The people who log into a customer's account. Each user can be given access to all agents, only certain agents, or all-except some — shown plainly as “can use / cannot use” on the customer's page.
+        </Concept>
+        <Concept icon={<DollarSign className="h-4 w-4 text-brand" />} title="Billing follows the customer">
+          Every call's cost books to the customer whose workspace it ran in — automatically, no matter which agent placed it. It's <span className="font-semibold">pay-as-you-go</span>: usage is metered, marked up by the customer's multiplier, and collected on drafts. <span className="font-semibold text-ink">Nothing is ever auto-charged</span> — invoices stay drafts until you deliberately send them.
+        </Concept>
+        <Concept icon={<Zap className="h-4 w-4 text-brand" />} title="Shared voice account (rare)">
+          If two customers ever share <span className="italic">one</span> voice account, open a customer → <span className="font-semibold">Agents</span> and set each agent's “Bills to.” Only then does per-agent routing kick in; otherwise everything follows the workspace above.
+        </Concept>
+      </div>
+      <p className="mt-4 text-xs text-slate-500">Tip: click any customer row — or a Leads / Calls / Agents / Users number — to drill into that account's detail, users, agents, and activity.</p>
     </div>
   );
 }
