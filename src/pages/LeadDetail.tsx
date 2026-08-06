@@ -77,6 +77,7 @@ export default function LeadDetail() {
   const [callOpen, setCallOpen] = useState(false);
   const [callFrom, setCallFrom] = useState(DIAL_NUMBERS[0].v);
   const [callTo, setCallTo] = useState('');
+  const [callScope, setCallScope] = useState<'one' | 'primary' | 'all'>('one');
   const [calling, setCalling] = useState(false);
 
   const load = () => { setLoading(true); opm.lead(id).then(setData).finally(() => setLoading(false)); };
@@ -152,14 +153,35 @@ export default function LeadDetail() {
     setCallTo(primary ? primary.phone : '');
     setCallOpen(true);
   }
+  // Which numbers this launch will dial, honoring the scope selector. Dedup by phone,
+  // skip do-not-call. Rotating caller IDs when more than one target.
+  function callTargets(): string[] {
+    const dial = (c: any) => !c.do_not_call && String(c.phone || '').replace(/\D/g, '').length >= 10;
+    let list: any[];
+    if (callScope === 'all') list = contacts.filter(dial);
+    else if (callScope === 'primary') { const p = contacts.find((c) => c.is_primary_number) || contacts[0]; list = p && dial(p) ? [p] : []; }
+    else list = contacts.filter((c) => c.phone === callTo);
+    const seen = new Set<string>(); const out: string[] = [];
+    for (const c of list) { const t = String(c.phone).replace(/\D/g, '').slice(-10); if (t.length === 10 && !seen.has(t)) { seen.add(t); out.push(c.phone); } }
+    return out;
+  }
   async function launchCall() {
-    if (!callTo || !callFrom) return;
+    const targets = callTargets();
+    if (!targets.length || !callFrom) return;
     setCalling(true);
+    let ok = 0, fail = 0;
     try {
-      const r = await opm.placeCall({ lead_id: id, to_number: callTo, from_number: callFrom, agent_id: DIAL_AGENT.id, workspace: '1propertymarket' });
+      for (let i = 0; i < targets.length; i++) {
+        const from = targets.length > 1 ? DIAL_NUMBERS[i % DIAL_NUMBERS.length].v : callFrom;
+        try {
+          await opm.placeCall({ lead_id: id, to_number: targets[i], from_number: from, agent_id: DIAL_AGENT.id, workspace: '1propertymarket' });
+          ok++;
+        } catch { fail++; }
+        if (i < targets.length - 1) await new Promise((res) => setTimeout(res, 8000)); // non-overlapping
+      }
       setCallOpen(false);
-      setToast(r.call_id ? `AI call launched to ${fmtNum(callTo)} — Adrian is dialing now.` : 'Call request sent.');
-      setTimeout(() => setToast(''), 5000);
+      setToast(targets.length === 1 ? (ok ? `AI call launched to ${fmtNum(targets[0])} — Adrian is dialing now.` : 'Call failed.') : `Dialed ${ok}/${targets.length} number${targets.length === 1 ? '' : 's'}${fail ? ` (${fail} failed)` : ''}.`);
+      setTimeout(() => setToast(''), 6000);
       load();
     } catch (e: any) {
       setToast('Call failed: ' + (e?.message || 'error'));
@@ -342,11 +364,22 @@ export default function LeadDetail() {
                 <div className="rounded-lg border border-line bg-surface px-3 py-2 font-medium text-ink">{DIAL_AGENT.name}</div>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-500">Call this number</label>
-                <select value={callTo} onChange={(e) => setCallTo(e.target.value)} className="input w-full">
-                  {contacts.map((c) => <option key={c.contact_id} value={c.phone}>{fmtNum(c.phone)} · {c.contact_kind === 'relative' ? (c.related_name || 'relative') : 'owner'}{c.phone_verified ? ' ✓' : ''}</option>)}
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Who to dial</label>
+                <select value={callScope} onChange={(e) => setCallScope(e.target.value as any)} className="input w-full">
+                  <option value="one">Just one number</option>
+                  <option value="primary">Primary number of this record</option>
+                  <option value="all">Every number on this record ({contacts.filter((c) => !c.do_not_call && String(c.phone || '').replace(/\D/g, '').length >= 10).length})</option>
                 </select>
               </div>
+              {callScope === 'one' && (
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-500">Call this number</label>
+                  <select value={callTo} onChange={(e) => setCallTo(e.target.value)} className="input w-full">
+                    {contacts.map((c) => <option key={c.contact_id} value={c.phone}>{fmtNum(c.phone)} · {c.contact_kind === 'relative' ? (c.related_name || 'relative') : 'owner'}{c.phone_verified ? ' ✓' : ''}</option>)}
+                  </select>
+                </div>
+              )}
+              {callScope === 'all' && <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">Will place a separate AI call to each number on this record, one at a time (spaced so none overlap), rotating caller IDs.</div>}
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-500">From (caller ID)</label>
                 <select value={callFrom} onChange={(e) => setCallFrom(e.target.value)} className="input w-full">
@@ -359,7 +392,7 @@ export default function LeadDetail() {
               <button onClick={aiCallBrief} className="text-xs font-semibold text-slate-500 hover:text-brand">Copy context brief</button>
               <div className="flex gap-2">
                 <button onClick={() => setCallOpen(false)} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-surface">Cancel</button>
-                <button onClick={launchCall} disabled={calling || !callTo} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{calling ? <><Loader2 className="h-4 w-4 animate-spin" /> Dialing…</> : <><PhoneCall className="h-4 w-4" /> Launch Call</>}</button>
+                <button onClick={launchCall} disabled={calling || (callScope === 'one' && !callTo)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{calling ? <><Loader2 className="h-4 w-4 animate-spin" /> Dialing…</> : <><PhoneCall className="h-4 w-4" /> {callScope === 'all' ? 'Launch Calls' : 'Launch Call'}</>}</button>
               </div>
             </div>
           </div>
