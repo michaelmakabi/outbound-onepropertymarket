@@ -1,5 +1,5 @@
 // Client for the `onboarding` edge function (super-admin: accounts, consent,
-// card capture, encrypted vault reveal). Reuses the app's bearer token.
+// card capture, encrypted vault reveal, automatic charging). Reuses the app's bearer token.
 import { tokenStore } from './api';
 
 const BASE =
@@ -38,6 +38,10 @@ export const onboarding = {
   saveCardManual: (b: any) => callFn('save_card_manual', { method: 'POST', body: b }),
   revealCard: (vault_id: string) => callFn('reveal_card', { method: 'POST', body: { vault_id } }),
   markKeyed: (vault_id: string) => callFn('mark_keyed', { method: 'POST', body: { vault_id } }),
+  // Automatic charging (super-admin)
+  autochargeSettings: () => callFn('autocharge_settings'),
+  autochargeSet: (b: any) => callFn('autocharge_set', { method: 'POST', body: b }),
+  autochargeRunNow: () => callFn('autocharge_run', { method: 'POST' }),
 };
 
 // The canonical consent wording. Bump the version string whenever the text changes;
