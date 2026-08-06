@@ -14,4 +14,51 @@ body { margin: 0; background: #f6f8fb; color: #0b1220; font-family: Inter, syste
   .input { @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20; }
   .label { @apply text-xs font-semibold uppercase tracking-wide text-slate-500; }
   .pill { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold; }
+
+  /* ---- premium marketing surfaces ---- */
+  .glass { @apply border border-white/15 bg-white/10 backdrop-blur-xl; }
+  .glass-dark { @apply border border-white/10 bg-white/5 backdrop-blur-xl; }
+  .text-gradient {
+    background: linear-gradient(100deg, #1f6feb 0%, #5b9dff 40%, #8f6bff 70%, #1f6feb 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: gradientPan 6s linear infinite;
+  }
+  .btn-glow { position: relative; }
+  .btn-glow::after {
+    content: ''; position: absolute; inset: -2px; border-radius: inherit; z-index: -1;
+    background: linear-gradient(120deg, #1f6feb, #8f6bff, #1f6feb); background-size: 200% auto;
+    filter: blur(10px); opacity: .5; animation: gradientPan 4s linear infinite;
+  }
+}
+
+@layer utilities {
+  .animate-float { animation: floatY 7s ease-in-out infinite; }
+  .animate-float-slow { animation: floatY 11s ease-in-out infinite; }
+  .animate-aurora { animation: aurora 18s ease-in-out infinite; }
+  .animate-aurora-2 { animation: aurora 24s ease-in-out infinite reverse; }
+  .animate-shimmer { background-size: 200% 100%; animation: shimmer 2.2s linear infinite; }
+  .animate-marquee { animation: marquee 30s linear infinite; }
+  .animate-rise { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; }
+  .perspective { perspective: 1400px; }
+  .preserve-3d { transform-style: preserve-3d; }
+  /* scroll-reveal: hidden until .is-visible is added by the IntersectionObserver */
+  .reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  .reveal.is-visible { opacity: 1; transform: none; }
+  .reveal-2 { transition-delay: .1s; } .reveal-3 { transition-delay: .2s; } .reveal-4 { transition-delay: .3s; } .reveal-5 { transition-delay: .4s; }
+}
+
+@keyframes floatY { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-16px); } }
+@keyframes aurora {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33% { transform: translate(6%, -4%) scale(1.15); }
+  66% { transform: translate(-5%, 5%) scale(.92); }
+}
+@keyframes gradientPan { to { background-position: 200% center; } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .animate-float,.animate-float-slow,.animate-aurora,.animate-aurora-2,.animate-shimmer,.animate-marquee,.text-gradient { animation: none !important; }
+  .reveal { opacity: 1 !important; transform: none !important; }
 }
