@@ -39,9 +39,9 @@ export default function Login() {
       <div className="flex items-center justify-center bg-white px-5 py-10">
         <div className="w-full max-w-sm">
           <Link to="/" className="mb-6 inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-ink"><ArrowLeft className="h-4 w-4" /> Back to home</Link>
-          <div className="mb-6 lg:hidden">
-            <img src={LOGO_FULL} alt="1PropertyMarket" className="h-10 w-auto object-contain" />
-          </div>
+          <Link to="/" className="mb-6 inline-block lg:hidden">
+            <img src={LOGO_FULL} alt="1PropertyMarket — home" className="h-10 w-auto object-contain" />
+          </Link>
           <h1 className="text-2xl font-extrabold text-ink">Sign in</h1>
           <p className="mt-1 text-sm text-slate-500">Welcome back — let's get to work.</p>
 
@@ -74,10 +74,10 @@ export function BrandPanel({ heading, sub, points }: { heading: React.ReactNode;
         <div className="animate-aurora-2 absolute -right-10 bottom-0 h-96 w-96 rounded-full bg-[#8f6bff]/30 blur-[120px]" />
         <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
       </div>
-      <div className="relative flex items-center gap-2.5">
-        <img src={LOGO_FULL} alt="1PropertyMarket" className="h-9 w-auto object-contain" />
+      <Link to="/" className="relative flex items-center gap-2.5 transition hover:opacity-90" title="Back to homepage">
+        <img src={LOGO_FULL} alt="1PropertyMarket — home" className="h-9 w-auto object-contain" />
         <span className="text-sm font-extrabold tracking-tight">1PropertyMarket <span className="text-brand">Outbound</span></span>
-      </div>
+      </Link>
       <div className="relative">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold text-white/90 backdrop-blur"><Sparkles className="h-3.5 w-3.5 text-brand" /> Done-for-you AI calling</span>
         <h2 className="mt-4 text-4xl font-extrabold leading-tight">{heading}</h2>
