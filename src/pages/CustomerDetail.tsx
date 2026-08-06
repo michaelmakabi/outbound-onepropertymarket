@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { adminOps, workspaceStore, fmt } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Spinner } from '../components/ui';
-import { ArrowLeft, Building2, Users, PhoneCall, Bot, KeyRound, AlertCircle, LogIn, Check, Ban, ShieldCheck, Crown, Layers, TrendingUp, DollarSign } from 'lucide-react';
+import { ArrowLeft, Building2, Users, PhoneCall, Bot, KeyRound, AlertCircle, LogIn, Check, Ban, ShieldCheck, Crown, Layers, TrendingUp, DollarSign, Loader2 } from 'lucide-react';
 
 const statusColor: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700', onboarding: 'bg-amber-100 text-amber-700',
@@ -21,7 +21,8 @@ export default function CustomerDetail() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
-  useEffect(() => { setLoading(true); adminOps.tenantDetail(slug).then(setD).catch((e) => setErr(e?.message || 'Failed to load')).finally(() => setLoading(false)); }, [slug]);
+  const load = () => { adminOps.tenantDetail(slug).then(setD).catch((e) => setErr(e?.message || 'Failed to load')).finally(() => setLoading(false)); };
+  useEffect(() => { setLoading(true); load(); }, [slug]);
 
   if (user?.role !== 'super_admin') return <div className="py-16 text-center text-slate-400">Customers are restricted to super admins.</div>;
   if (loading) return <Spinner />;
@@ -59,7 +60,7 @@ export default function CustomerDetail() {
 
       {tab === 'overview' && <Overview d={d} />}
       {tab === 'users' && <UsersTab d={d} />}
-      {tab === 'agents' && <AgentsTab d={d} />}
+      {tab === 'agents' && <AgentsTab d={d} onReload={load} />}
       {tab === 'activity' && <ActivityTab d={d} />}
     </div>
   );
@@ -152,24 +153,55 @@ function UsersTab({ d }: any) {
   );
 }
 
-function AgentsTab({ d }: any) {
+function AgentsTab({ d, onReload }: any) {
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState('');
   if (!d.agents.length) return <div className="card p-8 text-center text-sm text-slate-400">No agents connected in this customer's workspaces yet.</div>;
+
+  const customers = d.customers || [];
+  const shared = d.agents.some((a: any) => !a.bills_here);
+
+  const assign = async (a: any, billing_slug: string) => {
+    if (billing_slug === a.billing_slug) return;
+    setMsg(''); setBusy(a.agent_id);
+    try {
+      const r: any = await adminOps.agentBillingSet({ dialer_workspace: a.workspace, agent_id: a.agent_id, agent_name: a.agent_name, billing_slug, reattribute: true });
+      const owner = customers.find((c: any) => c.billing_slug === billing_slug)?.display_name || billing_slug;
+      setMsg(`Moved “${a.agent_name}” → ${owner}. Re-attributed ${r.reattributed} unbilled event(s).`);
+      onReload && onReload();
+    } catch (e: any) { setMsg(e?.message || 'Assignment failed'); } finally { setBusy(''); }
+  };
+
   return (
-    <div className="card overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
-          <tr><th className="px-4 py-2.5">Agent</th><th className="px-3 py-2.5">Workspace</th><th className="px-3 py-2.5 text-right">Calls</th></tr>
-        </thead>
-        <tbody>
-          {d.agents.map((a: any) => (
-            <tr key={a.agent_id} className="border-t border-line hover:bg-surface">
-              <td className="px-4 py-2.5"><div className="font-semibold text-ink">{a.agent_name}</div><div className="font-mono text-[11px] text-slate-400">{a.agent_id}</div></td>
-              <td className="px-3 py-2.5 font-mono text-[11px] text-slate-500">{a.workspace}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-ink">{fmt.int(a.calls)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      <p className="text-xs text-slate-500">Each agent's call costs bill to the customer set here. When two customers share one voice workspace, assign each agent to whoever it works for — costs (and any future invoice) route accordingly. Only unbilled usage is re-attributed; invoiced usage never moves.</p>
+      {shared && <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">Some agents in this account bill to a different customer — those rows are highlighted below.</div>}
+      {msg && <div className="rounded-lg bg-brand-light/40 px-3 py-2 text-xs text-brand">{msg}</div>}
+      <div className="card overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr><th className="px-4 py-2.5">Agent</th><th className="px-3 py-2.5">Workspace</th><th className="px-3 py-2.5 text-right">Calls</th><th className="px-3 py-2.5 text-right">Hard cost</th><th className="px-3 py-2.5">Bills to</th></tr>
+          </thead>
+          <tbody>
+            {d.agents.map((a: any) => (
+              <tr key={a.agent_id} className={`border-t border-line hover:bg-surface ${!a.bills_here ? 'bg-amber-50/50' : ''}`}>
+                <td className="px-4 py-2.5"><div className="font-semibold text-ink">{a.agent_name}</div><div className="font-mono text-[11px] text-slate-400">{a.agent_id}</div></td>
+                <td className="px-3 py-2.5 font-mono text-[11px] text-slate-500">{a.workspace}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-ink">{fmt.int(a.calls)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">{fmt.money(a.hard_cost || 0)}</td>
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <select className="input !py-1 !text-xs max-w-[190px]" value={a.billing_slug} disabled={busy === a.agent_id} onChange={(e) => assign(a, e.target.value)}>
+                      {customers.map((c: any) => <option key={c.billing_slug} value={c.billing_slug}>{c.display_name}</option>)}
+                    </select>
+                    {busy === a.agent_id ? <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" /> : a.billing_mapped ? <span title="Explicitly assigned" className="text-[10px] font-semibold text-brand">set</span> : <span title="Default owner" className="text-[10px] text-slate-300">auto</span>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
