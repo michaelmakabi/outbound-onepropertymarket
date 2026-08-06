@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { opm } from '../lib/api';
-import { LoadingBlock, EmptyState } from '../components/dash';
+import { LoadingBlock, EmptyState, AudioPlayer } from '../components/dash';
+import { humanizeDisposition, dispositionColor } from '../lib/format';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
   Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check, X, Loader2, History,
+  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing,
 } from 'lucide-react';
 
 const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) · OUTBOUND' };
@@ -22,6 +24,7 @@ function fmtNum(n: string) {
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : n;
 }
 const money = (n: any) => (n ? `$${Number(n).toLocaleString('en-US')}` : '—');
+const durLabel = (s: any) => { const n = Math.round(Number(s) || 0); return `${Math.floor(n / 60)}m ${n % 60}s`; };
 
 function cleanNote(raw: string): string {
   if (!raw) return '';
@@ -80,9 +83,35 @@ export default function LeadDetail() {
   const [callScope, setCallScope] = useState<'one' | 'primary' | 'all'>('one');
   const [calling, setCalling] = useState(false);
 
+  // Full call history (incl. transcripts) for this record's numbers.
+  const [leadCalls, setLeadCalls] = useState<any[]>([]);
+  const [callsLoading, setCallsLoading] = useState(true);
+  const [openTx, setOpenTx] = useState<Set<string>>(new Set());
+  // CRM structure for the inline Move editor + custom-field schema.
+  const [pipelines, setPipelines] = useState<any[]>([]);
+  const [customFields, setCustomFields] = useState<any[]>([]);
+  // Inline Move (pipeline/stage) editor.
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [mp, setMp] = useState<any>('');
+  const [ms, setMs] = useState<any>('');
+  const [moving, setMoving] = useState(false);
+  // Tag composer.
+  const [tagInput, setTagInput] = useState('');
+  // Custom-field draft + save state.
+  const [customDraft, setCustomDraft] = useState<Record<string, any>>({});
+  const [savingCustom, setSavingCustom] = useState(false);
+
   const load = () => { setLoading(true); opm.lead(id).then(setData).finally(() => setLoading(false)); };
+  const loadCalls = () => { setCallsLoading(true); opm.leadCalls(id).then((d) => setLeadCalls(d.calls || [])).catch(() => setLeadCalls([])).finally(() => setCallsLoading(false)); };
   useEffect(load, [id]);
+  useEffect(loadCalls, [id]);
   useEffect(() => { if (!ids.length) opm.leads({}).then((d) => setIds((d.leads || []).map((l: any) => l.lead_id))).catch(() => {}); }, []);
+  useEffect(() => {
+    opm.pipelines().then((d) => setPipelines(d.pipelines || [])).catch(() => {});
+    opm.customFields().then((d) => setCustomFields((d.fields || []).filter((f: any) => f.entity === 'lead'))).catch(() => {});
+  }, []);
+  // Seed the custom-field draft from the record once its data arrives / when we switch records.
+  useEffect(() => { setCustomDraft({ ...((data?.lead?.custom) || {}) }); setMoveOpen(false); }, [data?.lead?.lead_id]);
 
   const idx = ids.indexOf(id);
   const prevId = idx > 0 ? ids[idx - 1] : null;
@@ -102,17 +131,51 @@ export default function LeadDetail() {
   const lead = data?.lead;
   const contacts: any[] = data?.contacts || [];
   const rawNotes: any[] = data?.notes || [];
-  const calls: any[] = data?.calls || [];
   // newest first
   const notes = useMemo(() => [...rawNotes].sort((a, b) => noteTime(b) - noteTime(a)), [rawNotes]);
+  const sortedCalls = useMemo(() => [...leadCalls].sort((a, b) => Number(b.start_timestamp || 0) - Number(a.start_timestamp || 0)), [leadCalls]);
   const owners = contacts.filter((c) => c.contact_kind !== 'relative');
   const relatives = contacts.filter((c) => c.contact_kind === 'relative');
   const parcel = lead?.parcel || {};
+  const tags: string[] = Array.isArray(lead?.tags) ? lead.tags : [];
 
   async function patch(contact_id: string, b: any) {
     setData((d: any) => ({ ...d, contacts: d.contacts.map((c: any) => c.contact_id === contact_id ? { ...c, ...b } : (b.is_primary_number ? { ...c, is_primary_number: false } : c)) }));
     await opm.updateContact({ contact_id, lead_id: id, ...b }).catch(() => load());
   }
+  // Optimistically patch the lead record and persist via updateLead; reload on failure.
+  async function saveLead(p: Record<string, any>) {
+    setData((d: any) => (d ? { ...d, lead: { ...d.lead, ...p } } : d));
+    await opm.updateLead({ lead_id: id, ...p }).catch(() => load());
+  }
+  function addTag() {
+    const t = tagInput.trim();
+    if (!t || tags.includes(t)) { setTagInput(''); return; }
+    saveLead({ tags: [...tags, t] });
+    setTagInput('');
+  }
+  const removeTag = (t: string) => saveLead({ tags: tags.filter((x) => x !== t) });
+  async function saveCustom() {
+    setSavingCustom(true);
+    await saveLead({ custom: customDraft });
+    setSavingCustom(false);
+    setToast('Custom fields saved.');
+    setTimeout(() => setToast(''), 3000);
+  }
+  function openMove() {
+    setMp(lead?.pipeline_id ?? '');
+    setMs(lead?.stage_id ?? '');
+    setMoveOpen(true);
+  }
+  async function doMove() {
+    if (!mp || !ms) return;
+    setMoving(true);
+    try { await opm.moveLead({ lead_id: id, pipeline_id: mp, stage_id: ms }); setMoveOpen(false); load(); }
+    catch (e: any) { setToast('Move failed: ' + (e?.message || 'error')); setTimeout(() => setToast(''), 4000); }
+    finally { setMoving(false); }
+  }
+  const toggleTx = (cid: string) => setOpenTx((s) => { const n = new Set(s); n.has(cid) ? n.delete(cid) : n.add(cid); return n; });
+
   async function saveActivity() {
     const srcMap: Record<string, string> = { note: 'manual', email: 'email', text: 'text', call: 'call' };
     let text = body.trim();
@@ -182,7 +245,7 @@ export default function LeadDetail() {
       setCallOpen(false);
       setToast(targets.length === 1 ? (ok ? `AI call launched to ${fmtNum(targets[0])} — Adrian is dialing now.` : 'Call failed.') : `Dialed ${ok}/${targets.length} number${targets.length === 1 ? '' : 's'}${fail ? ` (${fail} failed)` : ''}.`);
       setTimeout(() => setToast(''), 6000);
-      load();
+      load(); loadCalls();
     } catch (e: any) {
       setToast('Call failed: ' + (e?.message || 'error'));
       setTimeout(() => setToast(''), 6000);
@@ -195,10 +258,11 @@ export default function LeadDetail() {
   const initials = (lead.name || '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('');
   const verifiedN = contacts.filter((c) => c.phone_verified).length;
   const parcelEntries = Object.entries(parcel).filter(([k, v]) => k !== 'is related' && k !== 'lat long' && v !== '' && v != null);
+  const movePipeline = pipelines.find((p) => String(p.id) === String(mp));
   const TABS = [
     { k: 'activity', label: 'Activity', n: notes.length },
     { k: 'notes', label: 'Notes', n: null },
-    { k: 'calls', label: 'Calls', n: calls.length },
+    { k: 'calls', label: 'Calls', n: leadCalls.length },
     { k: 'property', label: 'Property & Details', n: null },
   ] as const;
   const activityList = tab === 'notes' ? notes.filter((n) => n.source !== 'call') : notes;
@@ -222,7 +286,7 @@ export default function LeadDetail() {
           <div className="min-w-0">
             <div className="truncate text-lg font-bold leading-tight text-ink">{lead.name}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-2">
-              <span className="pill bg-brand/10 text-brand">{lead.stage_name || lead.crm_stage || '—'}</span>
+              <StagePill name={lead.stage_name || lead.crm_stage} color={lead.stage_color} />
               <span className="text-xs text-slate-400">{lead.pipeline_name || 'Pitman Seller Pipeline'}</span>
             </div>
           </div>
@@ -232,7 +296,7 @@ export default function LeadDetail() {
             <Stat icon={DollarSign} label="Our Value" value={money(lead.deal_price)} />
             <Stat icon={GitBranch} label="Source" value={lead.lead_source || '—'} />
             <Stat icon={User} label="Assigned" value={lead.assigned_to || '—'} />
-            <Stat icon={Phone} label="Numbers" value={`${contacts.length} · ${verifiedN}✓`} />
+            <Stat icon={PhoneCall} label="Calls" value={`${leadCalls.length} · ${contacts.length}#`} />
           </div>
           <button onClick={openCallModal} title="Launch a live AI voice call to this lead" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white transition hover:brightness-125"><Bot className="h-4 w-4" /> AI Call</button>
         </div>
@@ -256,14 +320,109 @@ export default function LeadDetail() {
           )}
 
           <Card title="Details">
+            {/* Pipeline / Stage + inline Move editor */}
+            <div className="border-b border-dashed border-line py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="shrink-0 text-slate-500">Pipeline / Stage</span>
+                <button onClick={() => (moveOpen ? setMoveOpen(false) : openMove())} className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline">
+                  <GitBranch className="h-3 w-3" /> {moveOpen ? 'Close' : 'Move'}
+                </button>
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <StagePill name={lead.stage_name || lead.crm_stage} color={lead.stage_color} />
+                <span className="text-xs text-slate-400">{lead.pipeline_name || '—'}</span>
+              </div>
+              {moveOpen && (
+                <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface/60 p-2.5">
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Pipeline</label>
+                    <select value={mp} onChange={(e) => { setMp(e.target.value); const p = pipelines.find((x) => String(x.id) === e.target.value); setMs(p?.stages?.[0]?.id ?? ''); }} className="input w-full text-sm">
+                      {pipelines.length === 0 && <option value="">Loading…</option>}
+                      {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Stage</label>
+                    <select value={ms} onChange={(e) => setMs(e.target.value)} className="input w-full text-sm">
+                      {(movePipeline?.stages || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setMoveOpen(false)} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-white">Cancel</button>
+                    <button onClick={doMove} disabled={moving || !mp || !ms} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
+                      {moving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Tags */}
+            <div className="border-b border-dashed border-line py-2">
+              <div className="mb-1.5 flex items-center gap-1.5 text-slate-500"><Tag className="h-3 w-3" /> Tags</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {tags.length === 0 && <span className="text-xs text-slate-400">No tags</span>}
+                {tags.map((t) => (
+                  <span key={t} className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs font-semibold text-brand">
+                    {t}
+                    <button onClick={() => removeTag(t)} title="Remove tag" className="text-brand/60 hover:text-brand"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+              <div className="mt-1.5 flex items-center gap-1">
+                <input
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
+                  placeholder="Add tag + Enter"
+                  className="input h-8 w-full text-xs"
+                />
+                <button onClick={addTag} disabled={!tagInput.trim()} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line text-slate-500 transition hover:border-brand hover:text-brand disabled:opacity-40"><Plus className="h-4 w-4" /></button>
+              </div>
+            </div>
+
+            {/* Editable core rows */}
             <dl>
-              <Row k="Stage" v={<span className="pill bg-brand/10 text-brand">{lead.stage_name || lead.crm_stage || '—'}</span>} />
-              <Row k="Pipeline" v={lead.pipeline_name || '—'} />
-              <Row k="Assigned" v={lead.assigned_to || '—'} />
-              <Row k="Our Value" v={money(lead.deal_price)} />
+              <EditRow k="Our Value" type="number" value={lead.deal_price} display={money(lead.deal_price)} onSave={(v) => saveLead({ deal_price: v })} />
+              <EditRow k="Assigned" value={lead.assigned_to} onSave={(v) => saveLead({ assigned_to: v })} />
+              <EditRow k="Source" value={lead.lead_source} onSave={(v) => saveLead({ lead_source: v })} />
               <Row k="Property" v={lead.property_ref || '—'} />
-              <Row k="Source" v={lead.lead_source || '—'} />
             </dl>
+
+            {/* Custom fields */}
+            {customFields.length > 0 && (
+              <div className="mt-2 border-t border-line pt-2">
+                <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Custom Fields</div>
+                <div className="space-y-2">
+                  {customFields.map((f) => (
+                    <div key={f.id} className="flex items-center justify-between gap-3 text-sm">
+                      <label className="shrink-0 text-slate-500">{f.label}</label>
+                      {f.field_type === 'bool' ? (
+                        <input type="checkbox" checked={!!customDraft[f.field_key]} onChange={(e) => setCustomDraft((d) => ({ ...d, [f.field_key]: e.target.checked }))} className="h-4 w-4 accent-[#1f6feb]" />
+                      ) : f.field_type === 'select' ? (
+                        <select value={customDraft[f.field_key] ?? ''} onChange={(e) => setCustomDraft((d) => ({ ...d, [f.field_key]: e.target.value }))} className="input h-8 w-40 text-xs">
+                          <option value="">—</option>
+                          {(Array.isArray(f.options) ? f.options : String(f.options || '').split(',').map((s) => s.trim()).filter(Boolean)).map((o: string) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          type={f.field_type === 'number' ? 'number' : f.field_type === 'date' ? 'date' : 'text'}
+                          value={customDraft[f.field_key] ?? ''}
+                          onChange={(e) => setCustomDraft((d) => ({ ...d, [f.field_key]: e.target.value }))}
+                          className="input h-8 w-40 text-right text-xs"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <button onClick={saveCustom} disabled={savingCustom} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
+                    {savingCustom ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save custom fields
+                  </button>
+                </div>
+              </div>
+            )}
+
             <button onClick={() => setTab('property')} className="mt-2 text-xs font-semibold text-brand hover:underline">View all property & parcel data →</button>
           </Card>
         </div>
@@ -321,13 +480,47 @@ export default function LeadDetail() {
                   </dl>
                 )
               ) : tab === 'calls' ? (
-                calls.length === 0 ? <EmptyState text="No dialer calls matched to this lead's numbers yet." /> :
-                <ol className="space-y-3">{calls.map((c) => (
-                  <li key={c.call_id} className="rounded-xl border border-line p-3">
-                    <div className="flex items-center justify-between text-sm"><span className="font-semibold text-ink">{c.disposition || 'Call'}</span><span className="font-mono text-xs text-slate-400">{fmtNum(c.to_number || '')}</span></div>
-                    {c.call_summary && <div className="mt-1 text-sm text-slate-600">{c.call_summary}</div>}
-                    {c.recording_url && <audio controls src={c.recording_url} className="mt-2 h-8 w-full" />}
-                  </li>))}</ol>
+                callsLoading ? <LoadingBlock label="Loading call history…" /> :
+                sortedCalls.length === 0 ? <EmptyState text="No dialer calls matched to this record's numbers yet." /> :
+                <ol className="space-y-3">{sortedCalls.map((c) => {
+                  const open = openTx.has(c.call_id);
+                  const inbound = String(c.direction || '').toLowerCase().startsWith('in');
+                  const color = dispositionColor(c.disposition || '');
+                  return (
+                    <li key={c.call_id} className="rounded-xl border border-line p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${inbound ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>
+                            {inbound ? <PhoneIncoming className="h-3 w-3" /> : <PhoneOutgoing className="h-3 w-3" />}{inbound ? 'Inbound' : 'Outbound'}
+                          </span>
+                          <span className="text-xs font-semibold text-ink">{c.start_timestamp ? new Date(Number(c.start_timestamp)).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</span>
+                        </div>
+                        {c.disposition && (
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: `${color}1a`, color }}>{humanizeDisposition(c.disposition)}</span>
+                            {c.disposition_source && <span className="text-[10px] uppercase tracking-wide text-slate-400">{c.disposition_source}</span>}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                        {c.agent_name && <span className="font-medium text-slate-600">{c.agent_name}</span>}
+                        <span>{durLabel(c.duration_seconds)}</span>
+                        {c.user_sentiment && <span className="rounded-full bg-surface px-2 py-0.5 font-semibold text-slate-600">{c.user_sentiment}</span>}
+                        {(inbound ? c.from_number : c.to_number) && <span className="font-mono text-slate-400">{fmtNum(inbound ? c.from_number : c.to_number)}</span>}
+                      </div>
+                      {c.call_summary && <div className="mt-2 text-sm leading-relaxed text-slate-700">{c.call_summary}</div>}
+                      {c.recording_url && <div className="mt-2"><AudioPlayer src={c.recording_url} /></div>}
+                      {c.transcript && (
+                        <div className="mt-2">
+                          <button onClick={() => toggleTx(c.call_id)} className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline">
+                            <FileText className="h-3.5 w-3.5" /> {open ? 'Hide transcript' : 'Show transcript'} <ChevronDown className={`h-3.5 w-3.5 transition ${open ? 'rotate-180' : ''}`} />
+                          </button>
+                          {open && <div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg bg-surface p-3 text-xs leading-relaxed text-slate-700">{c.transcript}</div>}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}</ol>
               ) : (
                 activityList.length === 0 ? <EmptyState text="No activity yet — add a note, log a call, or record an email/text above." /> :
                 <ol className="space-y-3">{activityList.map((n) => {
@@ -402,6 +595,11 @@ export default function LeadDetail() {
   );
 }
 
+function StagePill({ name, color }: { name?: string; color?: string }) {
+  if (!color) return <span className="pill bg-brand/10 text-brand">{name || '—'}</span>;
+  return <span className="pill" style={{ backgroundColor: `${color}1a`, color }}>{name || '—'}</span>;
+}
+
 function Stat({ icon: Icon, label, value }: { icon: any; label: string; value: any }) {
   return (
     <div className="rounded-xl border border-line bg-surface/50 px-3 py-2">
@@ -424,6 +622,34 @@ function Card({ title, count, children }: { title: string; count?: number; child
 
 function Row({ k, v }: { k: string; v: any }) {
   return <div className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2 text-sm last:border-0"><span className="shrink-0 text-slate-500">{k}</span><span className="truncate text-right font-medium text-ink">{v}</span></div>;
+}
+
+// Inline-editable Details row: click the pencil to edit, Enter/✓ to save, Esc/✗ to cancel.
+function EditRow({ k, value, type = 'text', display, onSave }: { k: string; value: any; type?: 'text' | 'number'; display?: any; onSave: (v: any) => void | Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [v, setV] = useState<any>(value ?? '');
+  useEffect(() => { setV(value ?? ''); }, [value]);
+  const commit = () => { setEditing(false); onSave(type === 'number' ? (v === '' ? null : Number(v)) : v); };
+  const cancel = () => { setEditing(false); setV(value ?? ''); };
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-dashed border-line py-2 text-sm last:border-0">
+      <span className="shrink-0 text-slate-500">{k}</span>
+      {editing ? (
+        <span className="flex items-center gap-1">
+          <input autoFocus type={type} value={v} onChange={(e) => setV(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel(); }}
+            className="input h-8 w-32 text-right text-sm" />
+          <button onClick={commit} className="rounded p-1 text-emerald-600 hover:bg-emerald-50"><Check className="h-3.5 w-3.5" /></button>
+          <button onClick={cancel} className="rounded p-1 text-slate-400 hover:bg-surface"><X className="h-3.5 w-3.5" /></button>
+        </span>
+      ) : (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-right font-medium text-ink">{display ?? (value || '—')}</span>
+          <button onClick={() => setEditing(true)} title={`Edit ${k}`} className="shrink-0 rounded p-1 text-slate-300 transition hover:text-brand"><Pencil className="h-3 w-3" /></button>
+        </span>
+      )}
+    </div>
+  );
 }
 
 function PhoneRow({ c, onPatch, showRel }: { c: any; onPatch: (id: string, b: any) => void; showRel?: boolean }) {
