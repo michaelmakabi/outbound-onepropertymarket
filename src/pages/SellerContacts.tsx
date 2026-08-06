@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { opm } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
@@ -10,7 +10,7 @@ import {
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
 } from '../components/dash';
 import { num } from '../lib/format';
-import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, Layers, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { Contact, PhoneCall, BadgeCheck, Search, X, Download, ChevronLeft, ChevronRight, Smartphone, Phone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, Layers, SlidersHorizontal, Trash2, History } from 'lucide-react';
 
 const PAGE_KEY = 'opm-contacts';
 const PAGE_SIZE = 50;
@@ -386,7 +386,7 @@ export default function SellerContacts() {
                       {r.contact_kind === 'relative' && r.related_name && <div className="text-[10px] text-slate-400">{r.relation_type || 'relative'}</div>}
                       {Array.isArray(r.alt_names) && r.alt_names.length > 0 && <div className="text-[10px] text-violet-500">also: {r.alt_names.join(', ')}</div>}
                     </td>}
-                    {isVisible('phone') && <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-brand">{fmtNum(r.phone)}</td>}
+                    {isVisible('phone') && <td className="whitespace-nowrap px-3 py-2.5"><span className="inline-flex items-center gap-1.5"><span className="font-mono text-xs text-brand">{fmtNum(r.phone)}</span><Link to={`/contacts/${encodeURIComponent(String(r.phone).replace(/\D/g, '').slice(-10))}`} onClick={(e) => e.stopPropagation()} title="View this number's full call history" className="text-slate-300 transition hover:text-brand"><History className="h-3.5 w-3.5" /></Link></span></td>}
                     {isVisible('channel') && <td className="px-3 py-2.5"><span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.phone_channel === 'mobile' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{r.phone_channel === 'mobile' ? <Smartphone className="h-3 w-3" /> : <Phone className="h-3 w-3" />}{r.phone_channel || 'other'}</span></td>}
                     {isVisible('verified') && <td className="px-3 py-2.5">{r.phone_verified ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600"><BadgeCheck className="h-3.5 w-3.5" />yes</span> : <span className="text-xs text-slate-300">—</span>}</td>}
                     {isVisible('kind') && <td className="px-3 py-2.5"><span className={`pill ${r.contact_kind === 'relative' ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700'}`}>{r.contact_kind === 'relative' ? 'Relationship' : 'Owner'}</span></td>}
