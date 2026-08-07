@@ -326,10 +326,10 @@ export default function SellerContacts() {
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <PageHeader title="Contacts" description="Every seller record — its property, dialable numbers, pipeline and deal, in one place" showDate={false} />
         {canImport && (
-          <div className="mt-1 flex shrink-0 items-center gap-2">
+          <div className="mt-1 flex shrink-0 flex-wrap items-center gap-2">
             <button className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={() => setShowFields(true)}>
               <SlidersHorizontal className="h-4 w-4" /> Custom fields
             </button>
@@ -373,9 +373,9 @@ export default function SellerContacts() {
             <option value="">Any number status</option><option value="yes">Has verified number</option><option value="no">No verified number</option>
           </select>
           <MultiSelect options={allTags} value={tagFilter} onChange={setTagFilter} placeholder="All tags" width={180} />
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, property, address, phone, source…" className="input w-[300px] pl-8" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, property, address, phone, source…" className="input w-full sm:w-[300px] pl-8" />
           </div>
           {hasFilters && <button className="btn-ghost !py-1.5" onClick={() => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setSearch(''); }}><X className="h-3.5 w-3.5" /> Clear</button>}
         </div>
@@ -394,7 +394,7 @@ export default function SellerContacts() {
 
       {callModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => !running && setCallModal(false)}>
-          <div className="w-full max-w-lg rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><PhoneOutgoing className="h-5 w-5 text-brand" /> Launch AI calls</h3>
               {!running && <button onClick={() => setCallModal(false)} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-4 w-4" /></button>}
@@ -412,7 +412,7 @@ export default function SellerContacts() {
                   </select>
                 </label>
                 <div className="mb-3 text-xs text-slate-400">A record can hold several phone numbers. Choose whether to reach just the primary line or every number on it.</div>
-                <div className="mb-4 grid grid-cols-2 gap-3">
+                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="text-xs font-semibold text-slate-500">Caller ID
                     <select value={callFrom} onChange={(e) => setCallFrom(e.target.value)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
                       <option value="rotate">Rotate all {DIAL_NUMBERS.length} numbers</option>
@@ -555,7 +555,7 @@ function AddContactModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   );
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
-      <div className="card w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between"><h3 className="flex items-center gap-2 text-lg font-bold text-ink"><Plus className="h-5 w-5 text-brand" /> Add contact</h3><button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button></div>
         {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
         <div className="space-y-3">
