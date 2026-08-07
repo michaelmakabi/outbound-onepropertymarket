@@ -339,7 +339,7 @@ function SetupStep({ campaign, pool, agents, workspaces, onSaved }: { campaign: 
   return (
     <div className="flex flex-col gap-5">
       <SectionCard title="Workspace" description="Scope this campaign to a workspace (label + organization). Optional — leave global if it spans all.">
-        <select className="input w-auto min-w-[240px]" value={workspace} onChange={(e) => setWorkspace(e.target.value)}>
+        <select className="input w-full sm:w-auto sm:min-w-[240px]" value={workspace} onChange={(e) => setWorkspace(e.target.value)}>
           <option value="">Global (no specific workspace)</option>
           {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
         </select>
@@ -520,7 +520,7 @@ function LaunchStep({ campaign }: { campaign: any }) {
 
       <SectionCard title="Right-person resolution" description="When a call reaches the actual owner, confirm that number — its siblings (relatives, tenants, old numbers) are retired so the dialer stops calling them.">
         <div className="flex flex-wrap items-center gap-2">
-          <input className="input w-[220px]" value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} placeholder="+1 confirmed owner number" />
+          <input className="input w-full sm:w-[220px]" value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} placeholder="+1 confirmed owner number" />
           <button className="btn-ghost" disabled={resolving || !ownerPhone.trim()} onClick={confirmOwner}>{resolving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Confirm as the owner</button>
         </div>
         {resolveMsg && <div className="mt-2 text-sm text-slate-600">{resolveMsg}</div>}
@@ -536,7 +536,7 @@ function LaunchStep({ campaign }: { campaign: any }) {
 
       <SectionCard title="Test the agent" description="Place a single live call to a number you control (a real call will be made)">
         <div className="flex flex-wrap gap-2">
-          <input className="input w-[220px]" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder="+1 your own number" />
+          <input className="input w-full sm:w-[220px]" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder="+1 your own number" />
           <button className="btn-ghost" disabled={testing || !testPhone.trim()} onClick={runTest}>{testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />} Test call</button>
         </div>
         {testMsg && <div className="mt-2 text-sm text-slate-600">{testMsg}</div>}
@@ -544,7 +544,7 @@ function LaunchStep({ campaign }: { campaign: any }) {
 
       {confirm && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setConfirm(false)}>
-          <div className="card w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center gap-2 text-lg font-bold text-ink"><AlertTriangle className="h-5 w-5 text-amber-500" /> Launch campaign</div>
             <p className="mb-4 text-sm text-slate-600">This tags <b>{num(callable)}</b> verified, callable leads for the dialer. Adrian will place <b>real outbound calls</b> during your calling window, respecting the {pool.reduce((s: number, p: any) => s + p.cap, 0)}-dial daily cap. Suppressed/invalid numbers are never dialed.</p>
             {msg && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{msg}</div>}
