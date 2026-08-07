@@ -546,7 +546,7 @@ export default function LeadDetail() {
 
       {callOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setCallOpen(false)}>
-          <div className="w-full max-w-md rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2 text-base font-bold text-ink"><Bot className="h-5 w-5 text-brand" /> Launch AI Call</div>
               <button onClick={() => setCallOpen(false)} className="rounded p-1 text-slate-400 hover:text-ink"><X className="h-4 w-4" /></button>
