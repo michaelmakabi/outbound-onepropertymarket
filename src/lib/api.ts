@@ -215,7 +215,8 @@ export const billing = {
   generateInvoice: (workspace_slug: string) => billingCall('generate_invoice', { body: { workspace_slug } }),
   // Public self-serve signup (no auth). register returns a Stripe Checkout URL for card capture;
   // completeRegistration provisions the account after the card is saved and logs the user in.
-  register: (b: { name: string; email: string; company?: string; password: string }) => billingCall('register', { body: b }),
+  register: (b: { name: string; email: string; company?: string; password: string; agreement_accepted: boolean; signature_name: string }) => billingCall('register', { body: b }),
+  terms: () => billingGet('terms'),
   completeRegistration: (token: string, session_id?: string) => billingCall('complete_registration', { body: { token, session_id } }),
   // Customer self-serve account portal (any authenticated user; scoped to their own tenant).
   myAccount: () => billingGet('my_account'),
