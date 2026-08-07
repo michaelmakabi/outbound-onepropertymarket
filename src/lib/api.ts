@@ -136,6 +136,8 @@ export const opm = {
   // Record detail: full call history (incl. transcript) + edit a lead's record fields.
   leadCalls: (lead_id: string) => opmExtCall('lead_calls', { params: { lead_id } }),
   updateLead: (b: { lead_id: string; [k: string]: any }) => opmExtCall('update_lead', { method: 'POST', body: b }),
+  // Add or edit a phone number on an existing lead (owner/staff).
+  saveNumber: (b: { lead_id: string; contact_id?: string; phone?: string; [k: string]: any }) => opmExtCall('save_number', { method: 'POST', body: b }),
   // Rich per-pipeline lead list (created/updated dates, attempts) for table/grid/date-range views.
   pipelineLeads: (pipeline_id: number | string) => opmExtCall('pipeline_leads', { params: { pipeline_id } }),
   backfillCallContacts: (workspace: string, commit: boolean) => opmExtCall('backfill_call_contacts', { method: 'POST', params: { workspace: '' }, body: { workspace, commit } }),
