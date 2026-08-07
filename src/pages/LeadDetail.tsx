@@ -6,7 +6,7 @@ import { humanizeDisposition, dispositionColor } from '../lib/format';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
   Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check, X, Loader2, History,
-  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing,
+  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing, Trash2, Home,
 } from 'lucide-react';
 
 const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) · OUTBOUND' };
@@ -100,6 +100,13 @@ export default function LeadDetail() {
   // Custom-field draft + save state.
   const [customDraft, setCustomDraft] = useState<Record<string, any>>({});
   const [savingCustom, setSavingCustom] = useState(false);
+  // Full lead editing: name, address, background, and add-a-number.
+  const [editName, setEditName] = useState(false);
+  const [nameVal, setNameVal] = useState('');
+  const [addr, setAddr] = useState<{ Street: string; City: string; State: string; Zip: string }>({ Street: '', City: '', State: '', Zip: '' });
+  const [bg, setBg] = useState('');
+  const [addNumOpen, setAddNumOpen] = useState(false);
+  const [newNum, setNewNum] = useState<{ phone: string; phone_label: string; contact_kind: string; related_name: string }>({ phone: '', phone_label: 'primary', contact_kind: 'owner', related_name: '' });
 
   const load = () => { setLoading(true); opm.lead(id).then(setData).finally(() => setLoading(false)); };
   const loadCalls = () => { setCallsLoading(true); opm.leadCalls(id).then((d) => setLeadCalls(d.calls || [])).catch(() => setLeadCalls([])).finally(() => setCallsLoading(false)); };
@@ -111,7 +118,15 @@ export default function LeadDetail() {
     opm.customFields().then((d) => setCustomFields((d.fields || []).filter((f: any) => f.entity === 'lead'))).catch(() => {});
   }, []);
   // Seed the custom-field draft from the record once its data arrives / when we switch records.
-  useEffect(() => { setCustomDraft({ ...((data?.lead?.custom) || {}) }); setMoveOpen(false); }, [data?.lead?.lead_id]);
+  useEffect(() => {
+    const L = data?.lead;
+    setCustomDraft({ ...((L?.custom) || {}) });
+    const a = (Array.isArray(L?.addresses) && L.addresses[0]) || {};
+    setAddr({ Street: a.Street || '', City: a.City || '', State: a.State || '', Zip: a.Zip || '' });
+    setBg(L?.background || '');
+    setNameVal(L?.name || '');
+    setMoveOpen(false); setEditName(false); setAddNumOpen(false);
+  }, [data?.lead?.lead_id]);
 
   const idx = ids.indexOf(id);
   const prevId = idx > 0 ? ids[idx - 1] : null;
@@ -155,6 +170,21 @@ export default function LeadDetail() {
     setTagInput('');
   }
   const removeTag = (t: string) => saveLead({ tags: tags.filter((x) => x !== t) });
+  const saveName = () => { const v = nameVal.trim(); setEditName(false); if (v && v !== lead?.name) saveLead({ name: v }); };
+  const saveAddr = () => { saveLead({ addresses: [addr] }); setToast('Address saved.'); setTimeout(() => setToast(''), 2500); };
+  const saveBg = () => { saveLead({ background: bg }); setToast('Background saved.'); setTimeout(() => setToast(''), 2500); };
+  async function addNumber() {
+    const digits = newNum.phone.replace(/\D/g, '').slice(-10);
+    if (digits.length !== 10) { setToast('Enter a valid 10-digit number.'); setTimeout(() => setToast(''), 3000); return; }
+    await opm.saveNumber({ lead_id: id, phone: digits, phone_label: newNum.phone_label, contact_kind: newNum.contact_kind, related_name: newNum.related_name }).catch(() => {});
+    setNewNum({ phone: '', phone_label: 'primary', contact_kind: 'owner', related_name: '' }); setAddNumOpen(false); load();
+  }
+  const saveNumberEdit = async (contact_id: string, b: any) => { await opm.saveNumber({ lead_id: id, contact_id, ...b }).catch(() => {}); load(); };
+  async function deleteNumber(contact_id: string) {
+    if (!confirm('Delete this phone number from the lead?')) return;
+    setData((d: any) => ({ ...d, contacts: d.contacts.filter((c: any) => c.contact_id !== contact_id) }));
+    await opm.deleteContacts([contact_id]).catch(() => load());
+  }
   async function saveCustom() {
     setSavingCustom(true);
     await saveLead({ custom: customDraft });
@@ -284,7 +314,20 @@ export default function LeadDetail() {
         <div className="flex items-center gap-3">
           <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand/10 text-base font-extrabold text-brand">{initials}</div>
           <div className="min-w-0">
-            <div className="truncate text-lg font-bold leading-tight text-ink">{lead.name}</div>
+            {editName ? (
+              <div className="flex items-center gap-1">
+                <input autoFocus value={nameVal} onChange={(e) => setNameVal(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') { setEditName(false); setNameVal(lead.name || ''); } }}
+                  className="input h-8 w-full max-w-xs text-base font-bold" />
+                <button onClick={saveName} className="rounded p-1 text-emerald-600 hover:bg-emerald-50"><Check className="h-4 w-4" /></button>
+                <button onClick={() => { setEditName(false); setNameVal(lead.name || ''); }} className="rounded p-1 text-slate-400 hover:bg-surface"><X className="h-4 w-4" /></button>
+              </div>
+            ) : (
+              <div className="group flex items-center gap-1.5">
+                <div className="truncate text-lg font-bold leading-tight text-ink">{lead.name}</div>
+                <button onClick={() => { setNameVal(lead.name || ''); setEditName(true); }} title="Edit name" className="shrink-0 rounded p-1 text-slate-300 transition hover:text-brand"><Pencil className="h-3.5 w-3.5" /></button>
+              </div>
+            )}
             <div className="mt-0.5 flex flex-wrap items-center gap-2">
               <StagePill name={lead.stage_name || lead.crm_stage} color={lead.stage_color} />
               <span className="text-xs text-slate-400">{lead.pipeline_name || 'Pitman Seller Pipeline'}</span>
@@ -308,14 +351,28 @@ export default function LeadDetail() {
         {/* LEFT column — dialing essentials only */}
         <div className="space-y-4">
           <Card title="Phone Numbers" count={owners.length}>
-            <div className="space-y-2">{owners.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} />)}</div>
-            {lead.emails?.[0]?.email && <div className="mt-3 flex items-center gap-1.5 text-sm text-brand"><Mail className="h-3.5 w-3.5" /> {lead.emails[0].email}</div>}
-            {lead.addresses?.[0] && <div className="mt-1 text-xs text-slate-500">{lead.addresses[0].Street}, {lead.addresses[0].City} {lead.addresses[0].State} {lead.addresses[0].Zip}</div>}
+            <div className="space-y-2">{owners.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} onSave={saveNumberEdit} onDelete={deleteNumber} />)}</div>
+            {addNumOpen ? (
+              <div className="mt-2 space-y-1.5 rounded-lg border border-line bg-surface/60 p-2">
+                <input value={newNum.phone} onChange={(e) => setNewNum((n) => ({ ...n, phone: e.target.value }))} placeholder="Phone number" className="input h-8 w-full text-xs" />
+                <div className="flex gap-1.5">
+                  <input value={newNum.phone_label} onChange={(e) => setNewNum((n) => ({ ...n, phone_label: e.target.value }))} placeholder="Label" className="input h-8 flex-1 text-xs" />
+                  <select value={newNum.contact_kind} onChange={(e) => setNewNum((n) => ({ ...n, contact_kind: e.target.value }))} className="input h-8 flex-1 text-xs"><option value="owner">Owner</option><option value="relative">Relative</option></select>
+                </div>
+                {newNum.contact_kind === 'relative' && <input value={newNum.related_name} onChange={(e) => setNewNum((n) => ({ ...n, related_name: e.target.value }))} placeholder="Related person's name" className="input h-8 w-full text-xs" />}
+                <div className="flex justify-end gap-1">
+                  <button onClick={() => setAddNumOpen(false)} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-white">Cancel</button>
+                  <button onClick={addNumber} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:brightness-110"><Plus className="h-3.5 w-3.5" /> Add</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setAddNumOpen(true)} className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line py-1.5 text-xs font-semibold text-slate-500 transition hover:border-brand hover:text-brand"><Plus className="h-3.5 w-3.5" /> Add number</button>
+            )}
           </Card>
 
           {relatives.length > 0 && (
             <Card title="Relationships" count={relatives.length}>
-              <div className="space-y-2">{relatives.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} showRel />)}</div>
+              <div className="space-y-2">{relatives.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} onSave={saveNumberEdit} onDelete={deleteNumber} showRel />)}</div>
             </Card>
           )}
 
@@ -384,10 +441,35 @@ export default function LeadDetail() {
             {/* Editable core rows */}
             <dl>
               <EditRow k="Our Value" type="number" value={lead.deal_price} display={money(lead.deal_price)} onSave={(v) => saveLead({ deal_price: v })} />
+              <EditRow k="Listing price" type="number" value={lead.listing_price} display={money(lead.listing_price)} onSave={(v) => saveLead({ listing_price: v })} />
               <EditRow k="Assigned" value={lead.assigned_to} onSave={(v) => saveLead({ assigned_to: v })} />
               <EditRow k="Source" value={lead.lead_source} onSave={(v) => saveLead({ lead_source: v })} />
-              <Row k="Property" v={lead.property_ref || '—'} />
+              <EditRow k="Property ref" value={lead.property_ref} onSave={(v) => saveLead({ property_ref: v })} />
+              <EditRow k="Email" value={lead.emails?.[0]?.email || lead.emails?.[0] || ''} onSave={(v) => saveLead({ emails: v ? [v] : [] })} />
             </dl>
+
+            {/* Property address (structured) */}
+            <div className="mt-2 border-t border-line pt-2">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Home className="h-3 w-3" /> Property address</div>
+              <input value={addr.Street} onChange={(e) => setAddr((a) => ({ ...a, Street: e.target.value }))} placeholder="Street" className="input h-8 w-full text-xs" />
+              <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                <input value={addr.City} onChange={(e) => setAddr((a) => ({ ...a, City: e.target.value }))} placeholder="City" className="input h-8 text-xs" />
+                <input value={addr.State} onChange={(e) => setAddr((a) => ({ ...a, State: e.target.value }))} placeholder="State" className="input h-8 text-xs" />
+                <input value={addr.Zip} onChange={(e) => setAddr((a) => ({ ...a, Zip: e.target.value }))} placeholder="Zip" className="input h-8 text-xs" />
+              </div>
+              <div className="mt-1.5 flex justify-end">
+                <button onClick={saveAddr} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:brightness-110"><Save className="h-3.5 w-3.5" /> Save address</button>
+              </div>
+            </div>
+
+            {/* Background */}
+            <div className="mt-2 border-t border-line pt-2">
+              <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Background</div>
+              <textarea value={bg} onChange={(e) => setBg(e.target.value)} rows={3} placeholder="Notes about this lead…" className="input w-full text-xs" />
+              <div className="mt-1.5 flex justify-end">
+                <button onClick={saveBg} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:brightness-110"><Save className="h-3.5 w-3.5" /> Save background</button>
+              </div>
+            </div>
 
             {/* Custom fields */}
             {customFields.length > 0 && (
@@ -652,24 +734,49 @@ function EditRow({ k, value, type = 'text', display, onSave }: { k: string; valu
   );
 }
 
-function PhoneRow({ c, onPatch, showRel }: { c: any; onPatch: (id: string, b: any) => void; showRel?: boolean }) {
+function PhoneRow({ c, onPatch, onSave, onDelete, showRel }: { c: any; onPatch: (id: string, b: any) => void; onSave: (id: string, b: any) => void | Promise<void>; onDelete: (id: string) => void; showRel?: boolean }) {
   const isMobile = c.phone_channel === 'mobile';
+  const [edit, setEdit] = useState(false);
+  const [ph, setPh] = useState(String(c.phone || '').replace(/\D/g, '').slice(-10));
+  const [label, setLabel] = useState(c.phone_label || '');
+  const [rel, setRel] = useState(c.related_name || '');
+  const openEdit = () => { setPh(String(c.phone || '').replace(/\D/g, '').slice(-10)); setLabel(c.phone_label || ''); setRel(c.related_name || ''); setEdit(true); };
+  const save = () => { onSave(c.contact_id, { phone: ph, phone_label: label, ...(showRel ? { related_name: rel } : {}) }); setEdit(false); };
   return (
     <div className={`rounded-xl border p-2.5 transition ${c.is_primary_number ? 'border-brand bg-brand/5' : 'border-line hover:border-slate-300'}`}>
-      <div className="flex items-center justify-between gap-2">
-        <a href={`tel:${c.phone}`} className="font-mono text-sm font-semibold text-brand hover:underline">{fmtNum(c.phone)}</a>
-        <div className="flex items-center gap-0.5">
-          <Link to={`/contacts/${encodeURIComponent(String(c.phone).replace(/\D/g, '').slice(-10))}`} title="View this number's full call history" className="rounded-md p-1 text-slate-300 transition hover:text-brand"><History className="h-4 w-4" /></Link>
-          <button title={c.phone_verified ? 'Verified — click to unverify' : 'Mark verified'} onClick={() => onPatch(c.contact_id, { phone_verified: !c.phone_verified })} className={`rounded-md p-1 transition ${c.phone_verified ? 'text-emerald-600' : 'text-slate-300 hover:text-slate-500'}`}><BadgeCheck className="h-4 w-4" /></button>
-          <button title="Set as primary number" onClick={() => onPatch(c.contact_id, { is_primary_number: true })} className={`rounded-md p-1 transition ${c.is_primary_number ? 'text-amber-500' : 'text-slate-300 hover:text-slate-500'}`}><Star className={`h-4 w-4 ${c.is_primary_number ? 'fill-amber-400' : ''}`} /></button>
+      {edit ? (
+        <div className="space-y-1.5">
+          <input value={ph} onChange={(e) => setPh(e.target.value)} placeholder="Phone number" className="input h-8 w-full text-xs" />
+          <div className="flex gap-1.5">
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label" className="input h-8 flex-1 text-xs" />
+            {showRel && <input value={rel} onChange={(e) => setRel(e.target.value)} placeholder="Related name" className="input h-8 flex-1 text-xs" />}
+          </div>
+          <div className="flex justify-end gap-1">
+            <button onClick={() => setEdit(false)} className="rounded p-1 text-slate-400 hover:bg-surface"><X className="h-3.5 w-3.5" /></button>
+            <button onClick={save} className="rounded p-1 text-emerald-600 hover:bg-emerald-50"><Check className="h-3.5 w-3.5" /></button>
+          </div>
         </div>
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${isMobile ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{isMobile ? <Smartphone className="h-3 w-3" /> : <Phone className="h-3 w-3" />}{c.phone_channel || 'other'}</span>
-        {c.phone_verified && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">✓ verified</span>}
-        {c.is_primary_number && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">★ primary</span>}
-        {showRel && c.related_name && <span className="text-slate-500">{c.related_name}{c.relation_type ? ` · ${c.relation_type}` : ''}</span>}
-      </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <a href={`tel:${c.phone}`} className="font-mono text-sm font-semibold text-brand hover:underline">{fmtNum(c.phone)}</a>
+            <div className="flex items-center gap-0.5">
+              <Link to={`/contacts/${encodeURIComponent(String(c.phone).replace(/\D/g, '').slice(-10))}`} title="View this number's full call history" className="rounded-md p-1 text-slate-300 transition hover:text-brand"><History className="h-4 w-4" /></Link>
+              <button title={c.phone_verified ? 'Verified — click to unverify' : 'Mark verified'} onClick={() => onPatch(c.contact_id, { phone_verified: !c.phone_verified })} className={`rounded-md p-1 transition ${c.phone_verified ? 'text-emerald-600' : 'text-slate-300 hover:text-slate-500'}`}><BadgeCheck className="h-4 w-4" /></button>
+              <button title="Set as primary number" onClick={() => onPatch(c.contact_id, { is_primary_number: true })} className={`rounded-md p-1 transition ${c.is_primary_number ? 'text-amber-500' : 'text-slate-300 hover:text-slate-500'}`}><Star className={`h-4 w-4 ${c.is_primary_number ? 'fill-amber-400' : ''}`} /></button>
+              <button title="Edit number" onClick={openEdit} className="rounded-md p-1 text-slate-300 transition hover:text-brand"><Pencil className="h-4 w-4" /></button>
+              <button title="Delete number" onClick={() => onDelete(c.contact_id)} className="rounded-md p-1 text-slate-300 transition hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
+            </div>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${isMobile ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{isMobile ? <Smartphone className="h-3 w-3" /> : <Phone className="h-3 w-3" />}{c.phone_channel || 'other'}</span>
+            {c.phone_label && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{c.phone_label}</span>}
+            {c.phone_verified && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">✓ verified</span>}
+            {c.is_primary_number && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">★ primary</span>}
+            {showRel && c.related_name && <span className="text-slate-500">{c.related_name}{c.relation_type ? ` · ${c.relation_type}` : ''}</span>}
+          </div>
+        </>
+      )}
     </div>
   );
 }
