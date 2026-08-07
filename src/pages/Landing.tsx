@@ -513,13 +513,13 @@ export default function Landing() {
   const resetTilt = () => { if (tiltRef.current) tiltRef.current.style.transform = 'rotateX(0) rotateY(0)'; };
 
   return (
-    <div className="min-h-screen bg-white text-ink">
+    <div className="min-h-screen overflow-x-clip bg-white text-ink">
       {/* Nav */}
       <header className="sticky top-0 z-40 border-b border-line/70 bg-white/80 backdrop-blur-xl">
-        <div className={`${WRAP} flex items-center justify-between py-4`}>
-          <Link to="/" className="flex items-center gap-3">
-            <img src={LOGO_FULL} alt="1PropertyMarket" className="h-10 w-auto object-contain" />
-            <span className="text-xl font-extrabold tracking-tight">1PropertyMarket <span className="text-brand">Outbound</span></span>
+        <div className={`${WRAP} flex items-center justify-between gap-2 py-4`}>
+          <Link to="/" className="flex min-w-0 items-center gap-2.5">
+            <img src={LOGO_FULL} alt="1PropertyMarket" className="h-8 w-auto shrink-0 object-contain sm:h-10" />
+            <span className="truncate text-base font-extrabold tracking-tight sm:text-xl"><span className="hidden sm:inline">1PropertyMarket </span><span className="text-brand">Outbound</span></span>
           </Link>
           <nav className="hidden items-center gap-9 text-base font-semibold text-slate-500 lg:flex">
             <a href="#talk" className="text-brand hover:text-brand-dark">Talk to our AI</a>
@@ -528,9 +528,9 @@ export default function Landing() {
             <a href="#features" className="hover:text-ink">Features</a>
             <a href="#who" className="hover:text-ink">Who it's for</a>
           </nav>
-          <div className="flex items-center gap-3">
-            <Link to="/login" className="btn-ghost !py-2 !px-4 text-base">Sign in</Link>
-            <Link to="/register" className="btn-primary btn-glow !py-2 !px-5 text-base">Start free <ArrowRight className="h-5 w-5" /></Link>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <Link to="/login" className="btn-ghost hidden !py-2 !px-4 text-base sm:inline-flex">Sign in</Link>
+            <Link to="/register" className="btn-primary btn-glow !py-2 !px-3 text-sm sm:!px-5 sm:text-base">Start free <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5" /></Link>
           </div>
         </div>
       </header>
@@ -546,7 +546,7 @@ export default function Landing() {
         <div className={`${WRAP} relative pb-24 pt-16 md:pt-24`}>
           <div className="mx-auto max-w-[1200px] text-center">
             <span className="animate-rise inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-1.5 text-sm font-bold text-white/90 backdrop-blur"><Sparkles className="h-4 w-4 text-brand" /> Done-for-you outbound AI voice calling</span>
-            <h1 className="animate-rise mt-6 text-6xl font-extrabold leading-[1.02] tracking-tight md:text-8xl">
+            <h1 className="animate-rise mt-6 text-5xl font-extrabold leading-[1.05] tracking-tight sm:text-6xl sm:leading-[1.02] md:text-8xl">
               Your outbound calls,<br /><span className="text-gradient">handled by AI.</span>
             </h1>
             <p className="animate-rise mx-auto mt-7 max-w-[900px] text-xl text-slate-300 md:text-2xl">
