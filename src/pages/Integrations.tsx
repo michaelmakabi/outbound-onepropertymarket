@@ -39,7 +39,7 @@ export default function Integrations() {
 
       {/* ---------------- Webhooks ---------------- */}
       <div className="mb-8">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="flex items-center gap-2 text-base font-bold text-ink"><Webhook className="h-4 w-4 text-brand" /> Webhooks</h2>
           <button className="btn-primary" onClick={() => setEditing({ workspace: wh.tenants[0] || '', url: '', secret: '', events: ['call.completed'], active: true, description: '' })}><Plus className="h-4 w-4" /> Add webhook</button>
         </div>
@@ -82,7 +82,7 @@ export default function Integrations() {
         {wh.deliveries.length > 0 && (
           <div className="card mt-4 overflow-hidden">
             <div className="border-b border-line px-4 py-2 text-xs font-bold uppercase tracking-wide text-slate-500">Recent deliveries</div>
-            <div className="max-h-64 overflow-y-auto">
+            <div className="max-h-64 overflow-auto">
               <table className="w-full text-xs">
                 <tbody>
                   {wh.deliveries.map((d: any) => (
@@ -107,6 +107,7 @@ export default function Integrations() {
         <h2 className="mb-3 flex items-center gap-2 text-base font-bold text-ink"><Radio className="h-4 w-4 text-brand" /> Dialer routing</h2>
         <p className="mb-3 text-xs text-slate-500">Which Retell dialer key + agent each CRM tenant uses when placing AI calls. Tenants without a mapping fall back to the 1PropertyMarket dialer.</p>
         <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
               <tr><th className="px-4 py-2.5">CRM tenant</th><th className="px-3 py-2.5">Dialer key</th><th className="px-3 py-2.5">Agent ID</th><th className="px-3 py-2.5">Caller IDs</th><th className="px-3 py-2.5"></th></tr>
@@ -118,6 +119,7 @@ export default function Integrations() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -174,7 +176,7 @@ function WebhookModal({ wh, tenants, onClose, onSaved }: any) {
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
-      <div className="card w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="card w-full max-w-md max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-bold text-ink">{wh.id ? 'Edit webhook' : 'Add webhook'}</h3><button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button></div>
         {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
         <div className="space-y-3">
