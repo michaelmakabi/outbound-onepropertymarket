@@ -53,7 +53,7 @@ function DispoCostList({ rows }: { rows: any[] }) {
 function ProductTable({ rows }: { rows: any[] }) {
   if (!rows.length) return <EmptyState text="No cost data." />;
   return (
-    <div className="max-h-[320px] overflow-y-auto">
+    <div className="max-h-[320px] overflow-x-auto overflow-y-auto">
       <table className="w-full text-sm">
         <thead className="sticky top-0 bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
           <tr><th className="px-3 py-2 font-semibold">Product</th><th className="px-3 py-2 font-semibold">Category</th><th className="px-3 py-2 text-right font-semibold">Cost</th><th className="px-3 py-2 text-right font-semibold">%</th></tr>
