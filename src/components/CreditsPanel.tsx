@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { credits } from '../lib/credits';
-import { Wallet, RefreshCw, Plus, Gauge, Play, FlagOff, AlertCircle } from 'lucide-react';
+import { Wallet, RefreshCw, Plus, Gauge, Play, FlagOff, AlertCircle, RotateCcw } from 'lucide-react';
 
 // Prepaid-credits (SaaS mode) management for one account. Rendered inside the
 // Onboarding account drawer. All money-moving actions are admin-initiated with a confirm.
+// Every card charge adds a 3% processing fee automatically (server-side).
 const ENGINES = [
   { v: 'prepaid_credits', label: 'Prepaid credits (SaaS)', hint: 'Customer prepays credits; usage debits them; card charged only to top up.' },
-  { v: 'arrears_sweep', label: 'Arrears sweep', hint: 'Usage accrues; card charged in arrears by the daily auto-charge sweep.' },
-  { v: 'split_margin', label: 'Split (margin only)', hint: 'Card lives in Retell (Retell charges cost); 1PM charges margin only.' },
+  { v: 'direct_subscription', label: 'Direct retail + subscription', hint: 'Retell bills the customer for usage directly; 1PM charges only a service/subscription fee (see the Subscriptions section below).' },
+  { v: 'arrears_sweep', label: 'Arrears sweep (legacy)', hint: 'Usage accrues; card charged in arrears by the daily auto-charge sweep.' },
 ];
 
 export default function CreditsPanel({ slug }: { slug: string }) {
@@ -58,18 +59,30 @@ export default function CreditsPanel({ slug }: { slug: string }) {
     if (!v) return;
     const amount = Number(v);
     if (!(amount > 0)) { setErr('Enter a positive amount.'); return; }
-    if (!window.confirm(`Charge the card on file $${amount.toFixed(2)} and add ${amount} credits?`)) return;
+    if (!window.confirm(`Charge the card on file $${amount.toFixed(2)} plus a 3% processing fee, and add ${amount} credits?`)) return;
     setBusy(true); setErr('');
-    try { const r = await credits.topup({ workspace_slug: slug, amount }); alert(`Charged $${amount.toFixed(2)} · new balance ${r.balance} credits.`); load(); }
+    try { const r = await credits.topup({ workspace_slug: slug, amount }); alert(`Charged $${r.base} + $${r.fee} fee = $${r.total} · balance ${r.balance} credits.`); load(); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   const grant = async () => {
-    const v = window.prompt('Add/remove credits WITHOUT charging a card (e.g. 25 to comp, -10 to correct):', '');
+    const v = window.prompt('Add/remove credits WITHOUT charging a card (e.g. 25 to comp/discount, -10 to charge more):', '');
     if (!v) return;
     const g = Number(v);
     if (!g) return;
     setBusy(true); setErr('');
     try { await credits.configSet({ workspace_slug: slug, grant_credits: g, grant_note: 'admin manual adjustment' }); load(); }
+    catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const refund = async () => {
+    const inv = window.prompt('Stripe invoice ID to refund against (from the ledger / Stripe, starts with in_):', '');
+    if (!inv) return;
+    const v = window.prompt('Refund amount ($):', '');
+    const amount = Number(v);
+    if (!(amount > 0)) { setErr('Enter a positive amount.'); return; }
+    const removeCred = window.confirm('Also DEDUCT this amount from the credit balance?\nOK = yes (typical when refunding a credit top-up)\nCancel = no (money-only refund).');
+    if (!window.confirm(`Refund $${amount.toFixed(2)} to the customer's card${removeCred ? ` and remove ${amount} credits` : ''}?`)) return;
+    setBusy(true); setErr('');
+    try { const r = await credits.refund({ workspace_slug: slug, invoice_id: inv, amount, remove_credits: removeCred }); alert(`Refunded $${amount.toFixed(2)} · ${r.refund_id}`); load(); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   const runDebit = async () => {
@@ -87,7 +100,6 @@ export default function CreditsPanel({ slug }: { slug: string }) {
 
   return (
     <div className="space-y-4">
-      {/* Balance + pending */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-line p-3">
           <div className="label flex items-center gap-1"><Wallet className="h-3.5 w-3.5" /> Credit balance</div>
@@ -106,13 +118,13 @@ export default function CreditsPanel({ slug }: { slug: string }) {
         </div>
       </div>
 
-      {/* Config */}
       <div className="rounded-xl border border-line p-4">
         <div className="mb-3 inline-flex items-center gap-1.5 font-bold text-ink"><Gauge className="h-4 w-4" /> Billing engine & pricing</div>
         <div className="mb-3">
           <label className="label mb-1 block">Engine</label>
           <select className="input" value={form.billing_engine} onChange={(e) => setForm({ ...form, billing_engine: e.target.value })}>
             {ENGINES.map((en) => <option key={en.v} value={en.v}>{en.label}</option>)}
+            {!ENGINES.some((en) => en.v === form.billing_engine) && <option value={form.billing_engine}>{form.billing_engine}</option>}
           </select>
           <div className="mt-1 text-xs text-slate-400">{ENGINES.find((e) => e.v === form.billing_engine)?.hint}</div>
         </div>
@@ -141,22 +153,21 @@ export default function CreditsPanel({ slug }: { slug: string }) {
         </div>
         {form.refill_mode === 'auto' && (
           <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> Auto-refill charges the card on file automatically. It only fires while the master auto-charge toggle (top of this page) is ON.
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> Auto-refill charges the card on file automatically (plus 3% processing fee). It only fires while the master auto-charge toggle (top of this page) is ON.
           </div>
         )}
         <button className="btn-primary mt-3" disabled={busy} onClick={saveConfig}>{busy ? 'Saving…' : 'Save billing settings'}</button>
       </div>
 
-      {/* Actions */}
       <div className="flex flex-wrap gap-2">
         <button className="btn-ghost" disabled={busy} onClick={topUp}><Plus className="h-4 w-4" /> Charge card & add credits</button>
         <button className="btn-ghost" disabled={busy} onClick={grant}><Wallet className="h-4 w-4" /> Adjust credits (no charge)</button>
+        <button className="btn-ghost" disabled={busy} onClick={refund}><RotateCcw className="h-4 w-4" /> Refund</button>
         <button className="btn-ghost" disabled={busy} onClick={runDebit}><Play className="h-4 w-4" /> Debit usage now</button>
         <button className="btn-ghost" disabled={busy || !pend.events} onClick={baseline}><FlagOff className="h-4 w-4" /> Start from now ({pend.events})</button>
         <button className="btn-ghost" disabled={busy} onClick={load}><RefreshCw className="h-4 w-4" /> Refresh</button>
       </div>
 
-      {/* Ledger */}
       <div className="rounded-xl border border-line">
         <div className="border-b border-line px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Credit ledger</div>
         {(d.ledger || []).length === 0 ? <div className="px-4 py-6 text-center text-sm text-slate-400">No credit activity yet.</div> : (
