@@ -107,7 +107,7 @@ export default function Campaigns() {
 
       {creating && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setCreating(false)}>
-          <div className="card w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="card w-full max-w-sm max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 text-lg font-bold text-ink">New campaign</h3>
             <label className="label mb-1 block">Campaign name</label>
             <input autoFocus className="input mb-3" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Miami Off-Market — March" onKeyDown={(e) => e.key === 'Enter' && create()} />
