@@ -1,15 +1,19 @@
 // One Property Market — Outbound: customer onboarding + card authorization + billing.
-// Super-admin only (except autocharge_run / credits_debit_run, which the guarded cron
-// calls with a secret key).
+// Super-admin only (except autocharge_run / credits_debit_run / subscription_run, which
+// the guarded cron calls with a secret key).
 // Card storage: full card + CVV AES-GCM encrypted (CARD_ENC_KEY), kept on file under the
 // customer's signed authorization + mutual-responsibility consent.
 //
 // Billing engines (per account, billing_workspaces.billing_engine):
-//   arrears_sweep   — usage accrues; card charged in arrears by autocharge_run (default).
-//   prepaid_credits — SaaS mode: customer prepays credits ($1 = 1 credit); usage debits
-//                     credits at (Retell hard_cost x per-account multiplier); card charged
-//                     only to top up (manual or auto-refill). Handled by credits_debit_run.
-//   split_margin    — card lives in Retell (Retell charges cost); 1PM charges margin only.
+//   prepaid_credits     — SaaS mode: customer prepays credits ($1 = 1 credit); usage debits
+//                         credits at (Retell hard_cost x per-account multiplier); card charged
+//                         only to top up (manual or auto-refill). Handled by credits_debit_run.
+//   direct_subscription — Direct retail + subscription: Retell charges the customer for usage
+//                         directly; 1PM charges only a service/subscription fee (subscription_run).
+//   arrears_sweep       — legacy: usage accrues; card charged in arrears by autocharge_run.
+//   split_margin        — legacy: excluded from all usage sweeps.
+//
+// Every 1PM Stripe charge adds a separate 3% card-processing-fee line item (PROCESSING_FEE_RATE).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const APP_BASE = Deno.env.get('APP_BASE_URL') || 'https://outbound.1propertymarket.com';
@@ -24,6 +28,8 @@ const json = (b, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sb = () => createClient(Deno.env.get('SUPABASE_URL'), SVC);
 const round4 = (n) => Math.round(Number(n) * 10000) / 10000;
+// Merchant card-processing fee added as a separate line item to EVERY 1PM Stripe charge.
+const PROCESSING_FEE_RATE = 0.03;
 
 async function getUser(client, req) {
   const auth = req.headers.get('authorization') || '';
@@ -86,22 +92,27 @@ async function ensureStripeCustomer(client, slug, email) {
   await client.from('billing_workspaces').update({ stripe_customer_id: cust.id, updated_at: new Date().toISOString() }).eq('workspace_slug', slug);
   return cust.id;
 }
-// Charge the default card on file for a one-off amount (used by credit top-ups / refills).
-// Returns { ok, invoice_id?, error? }. Never throws.
-async function chargeCardOnFile(client, bw, amountDollars, description) {
+// Charge the default card on file for a base amount PLUS a 3% processing-fee line item.
+// `description` labels the base line. Returns { ok, invoice_id?, base?, fee?, total?, error? }.
+// Pass opts.kind for invoice metadata. Never throws.
+async function chargeCardOnFile(client, bw, amountDollars, description, opts = {}) {
   try {
-    const cents = Math.round(Number(amountDollars) * 100);
+    const base = round4(amountDollars);
+    const fee = opts.noFee ? 0 : round4(base * PROCESSING_FEE_RATE);
+    const baseCents = Math.round(base * 100);
+    const feeCents = Math.round(fee * 100);
     if (!bw?.stripe_customer_id) return { ok: false, error: 'no_customer' };
-    if (cents < 50) return { ok: false, error: 'below_stripe_minimum' };
+    if (baseCents + feeCents < 50) return { ok: false, error: 'below_stripe_minimum' };
     let pm = null;
     try { const cust = await stripe(`customers/${bw.stripe_customer_id}`, 'GET'); pm = cust?.invoice_settings?.default_payment_method; } catch (_e) { /* below */ }
     if (!pm) return { ok: false, error: 'no_card_on_file' };
-    await stripe('invoiceitems', 'POST', { customer: bw.stripe_customer_id, amount: String(cents), currency: 'usd', description });
-    const inv = await stripe('invoices', 'POST', { customer: bw.stripe_customer_id, collection_method: 'charge_automatically', auto_advance: 'false', 'metadata[workspace_slug]': bw.workspace_slug, 'metadata[kind]': 'credit_topup' });
+    await stripe('invoiceitems', 'POST', { customer: bw.stripe_customer_id, amount: String(baseCents), currency: 'usd', description });
+    if (feeCents > 0) await stripe('invoiceitems', 'POST', { customer: bw.stripe_customer_id, amount: String(feeCents), currency: 'usd', description: 'Card processing fee (3%)' });
+    const inv = await stripe('invoices', 'POST', { customer: bw.stripe_customer_id, collection_method: 'charge_automatically', auto_advance: 'false', 'metadata[workspace_slug]': bw.workspace_slug, 'metadata[kind]': opts.kind || 'charge', 'metadata[base]': String(base), 'metadata[fee]': String(fee) });
     const fin = await stripe(`invoices/${inv.id}/finalize`, 'POST');
     let paid = fin;
     if (fin.status !== 'paid') { try { paid = await stripe(`invoices/${inv.id}/pay`, 'POST'); } catch (e) { return { ok: false, error: String(e?.message ?? e), invoice_id: inv.id }; } }
-    if (paid.status === 'paid') return { ok: true, invoice_id: paid.id };
+    if (paid.status === 'paid') return { ok: true, invoice_id: paid.id, base, fee, total: round4(base + fee) };
     return { ok: false, error: paid.status || 'unpaid', invoice_id: paid.id };
   } catch (e) { return { ok: false, error: String(e?.message ?? e) }; }
 }
@@ -145,7 +156,7 @@ async function autochargeRun(client, url, req) {
     client.from('autocharge_log').insert({ workspace_slug: bw.workspace_slug, amount, events, stripe_invoice_id: invId, local_invoice_id: localId, status, detail }).then(() => {}, () => {});
 
   // Only arrears-sweep accounts. Prepaid-credit accounts bill through credits_debit_run,
-  // and split-margin accounts are charged by Retell directly — never sweep them here.
+  // and direct_subscription / split accounts never sweep usage here.
   const { data: bws } = await client.from('billing_workspaces').select('*').eq('status', 'active').eq('billing_engine', 'arrears_sweep');
   const results = [];
   for (const bw of bws || []) {
@@ -166,6 +177,8 @@ async function autochargeRun(client, url, req) {
     const localId = crypto.randomUUID();
     try {
       await stripe('invoiceitems', 'POST', { customer: bw.stripe_customer_id, amount: String(Math.round(amount * 100)), currency: 'usd', description: `${bw.display_name || bw.workspace_slug} — AI calling usage (${unbilled.length} events)` });
+      const feeCents = Math.round(amount * PROCESSING_FEE_RATE * 100);
+      if (feeCents > 0) await stripe('invoiceitems', 'POST', { customer: bw.stripe_customer_id, amount: String(feeCents), currency: 'usd', description: 'Card processing fee (3%)' });
       const inv = await stripe('invoices', 'POST', { customer: bw.stripe_customer_id, collection_method: 'charge_automatically', auto_advance: 'false', 'metadata[workspace_slug]': bw.workspace_slug, 'metadata[local_invoice_id]': localId });
       const fin = await stripe(`invoices/${inv.id}/finalize`, 'POST');
       let paid = fin;
@@ -238,18 +251,50 @@ async function creditsDebitRun(client, url, req) {
       else if (!stripeKey()) refill = { skipped: 'no_stripe_key', would_charge: amt };
       else if (dry) refill = { would_charge: amt };
       else {
-        const r = await chargeCardOnFile(client, bw, amt, `${bw.display_name || bw.workspace_slug} — automatic credit top-up`);
+        const r = await chargeCardOnFile(client, bw, amt, `${bw.display_name || bw.workspace_slug} — automatic credit top-up`, { kind: 'credit_topup' });
         if (r.ok) {
           balance = round4(balance + amt);
-          await client.from('credit_ledger').insert({ workspace_slug: bw.workspace_slug, delta: amt, reason: 'topup', source_ref: r.invoice_id, balance_after: balance, meta: { auto: true } });
+          await client.from('credit_ledger').insert({ workspace_slug: bw.workspace_slug, delta: amt, reason: 'topup', source_ref: r.invoice_id, balance_after: balance, meta: { auto: true, fee: r.fee } });
           await client.from('credit_wallets').update({ balance_credits: balance, last_refill_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('workspace_slug', bw.workspace_slug);
-          refill = { charged: amt, invoice: r.invoice_id };
+          refill = { charged: amt, fee: r.fee, invoice: r.invoice_id };
         } else refill = { error: r.error, would_charge: amt };
       }
     }
     results.push({ ws: bw.workspace_slug, events: unbilled.length, hard_cost: round4(hard), multiplier: mult, debited, balance, refill });
   }
   return json({ ok: true, ran: true, dry_run: dry, via: viaCron ? 'cron' : 'manual', results });
+}
+
+// ---------------- Subscription / service-fee sweep (Direct retail + subscription) ----------------
+// Charges due recurring subscription fees (card on file, +3% fee). Gated behind the master
+// auto-charge toggle so nothing recurs while it is off. One-time fees are charged on demand.
+function addMonth(iso) { const d = iso ? new Date(iso) : new Date(); d.setMonth(d.getMonth() + 1); return d.toISOString(); }
+async function subscriptionRun(client, url, req) {
+  const key = url.searchParams.get('key');
+  const { data: st } = await client.from('billing_settings').select('*').eq('id', 1).maybeSingle();
+  const viaCron = !!(key && st && key === st.cron_secret);
+  if (!viaCron) {
+    const u = await getUser(client, req);
+    if (!u || u.role !== 'super_admin') return json({ error: 'unauthorized' }, 401);
+  }
+  if (!st?.auto_charge_enabled) return json({ ok: true, ran: false, reason: 'auto_charge_disabled' });
+  if (!stripeKey()) return json({ ok: false, ran: false, reason: 'no_stripe_key' });
+  const nowIso = new Date().toISOString();
+  const { data: subs } = await client.from('account_subscriptions').select('*').eq('status', 'active').eq('interval', 'monthly').lte('next_charge_at', nowIso);
+  const results = [];
+  for (const sub of subs || []) {
+    const { data: bw } = await client.from('billing_workspaces').select('*').eq('workspace_slug', sub.workspace_slug).maybeSingle();
+    if (!bw || bw.status !== 'active') { results.push({ sub: sub.id, status: 'skipped_inactive_account' }); continue; }
+    const r = await chargeCardOnFile(client, bw, sub.amount, `${bw.display_name || bw.workspace_slug} — ${sub.label} (subscription)`, { kind: 'subscription' });
+    if (r.ok) {
+      await client.from('account_subscriptions').update({ last_charged_at: nowIso, next_charge_at: addMonth(nowIso) }).eq('id', sub.id);
+      results.push({ sub: sub.id, ws: sub.workspace_slug, status: 'charged', base: r.base, fee: r.fee, invoice: r.invoice_id });
+    } else {
+      results.push({ sub: sub.id, ws: sub.workspace_slug, status: 'failed', detail: r.error });
+    }
+  }
+  const charged = results.filter((r) => r.status === 'charged');
+  return json({ ok: true, ran: true, via: viaCron ? 'cron' : 'manual', charged_count: charged.length, results });
 }
 
 // ---------------- handler ----------------
@@ -263,6 +308,7 @@ Deno.serve(async (req) => {
   try {
     if (action === 'autocharge_run') return await autochargeRun(client, url, req);
     if (action === 'credits_debit_run') return await creditsDebitRun(client, url, req);
+    if (action === 'subscription_run') return await subscriptionRun(client, url, req);
 
     const user = await getUser(client, req);
     if (!user) return json({ error: 'unauthorized' }, 401);
@@ -307,7 +353,7 @@ Deno.serve(async (req) => {
       const slug = body.workspace_slug;
       if (!slug) return json({ error: 'workspace required' }, 400);
       const wsPatch = { updated_at: new Date().toISOString() };
-      if (['prepaid_credits', 'arrears_sweep', 'split_margin'].includes(body.billing_engine)) wsPatch.billing_engine = body.billing_engine;
+      if (['prepaid_credits', 'arrears_sweep', 'split_margin', 'direct_subscription'].includes(body.billing_engine)) wsPatch.billing_engine = body.billing_engine;
       if (body.multiplier != null && Number(body.multiplier) >= 0.1 && Number(body.multiplier) <= 100) wsPatch.default_multiplier = Number(body.multiplier);
       if (Object.keys(wsPatch).length > 1) await client.from('billing_workspaces').update(wsPatch).eq('workspace_slug', slug);
       await getOrCreateWallet(client, slug);
@@ -332,14 +378,14 @@ Deno.serve(async (req) => {
       const { data: bw } = await client.from('billing_workspaces').select('*').eq('workspace_slug', slug).maybeSingle();
       if (!bw) return json({ error: 'account not found' }, 404);
       if (!stripeKey()) return json({ error: 'Stripe is not configured.' }, 400);
-      const r = await chargeCardOnFile(client, bw, amount, `${bw.display_name || slug} — credit top-up`);
+      const r = await chargeCardOnFile(client, bw, amount, `${bw.display_name || slug} — credit top-up`, { kind: 'credit_topup' });
       if (!r.ok) return json({ error: `Charge failed: ${r.error}`, detail: r.error }, 400);
       const w = await getOrCreateWallet(client, slug);
       const bal = round4(Number(w.balance_credits || 0) + amount);
-      await client.from('credit_ledger').insert({ workspace_slug: slug, delta: amount, reason: 'topup', source_ref: r.invoice_id, balance_after: bal, created_by: user.id, meta: { manual: true } });
+      await client.from('credit_ledger').insert({ workspace_slug: slug, delta: amount, reason: 'topup', source_ref: r.invoice_id, balance_after: bal, created_by: user.id, meta: { manual: true, fee: r.fee } });
       await client.from('credit_wallets').update({ balance_credits: bal, last_refill_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('workspace_slug', slug);
-      await audit(client, user, 'credits_topup', `${slug} · $${amount} · ${r.invoice_id}`);
-      return json({ ok: true, invoice_id: r.invoice_id, balance: bal });
+      await audit(client, user, 'credits_topup', `${slug} · $${amount} + $${r.fee} fee · ${r.invoice_id}`);
+      return json({ ok: true, invoice_id: r.invoice_id, balance: bal, base: r.base, fee: r.fee, total: r.total });
     }
     if (action === 'credits_debit_now') {
       const slug = body.workspace_slug;
@@ -359,6 +405,104 @@ Deno.serve(async (req) => {
       for (let i = 0; i < ids.length; i += 500) await client.from('cost_ledger').update({ billed_invoice_id: marker }).in('id', ids.slice(i, i + 500));
       await audit(client, user, 'credits_baseline', `${slug} · settled ${ids.length} historical events (no charge)`);
       return json({ ok: true, settled_events: ids.length, marker });
+    }
+    if (action === 'refund') {
+      // Refund money to the customer's card via Stripe. Optionally remove matching credits.
+      const slug = body.workspace_slug;
+      const amount = Number(body.amount);
+      if (!slug || !(amount > 0)) return json({ error: 'workspace and a positive amount are required.' }, 400);
+      if (!stripeKey()) return json({ error: 'Stripe is not configured.' }, 400);
+      let pi = body.payment_intent;
+      if (!pi && body.invoice_id) { try { const inv = await stripe(`invoices/${body.invoice_id}`, 'GET'); pi = inv.payment_intent; } catch (e) { return json({ error: `Could not load invoice: ${String(e?.message ?? e)}` }, 400); } }
+      if (!pi) return json({ error: 'Provide the Stripe invoice_id or payment_intent to refund against.' }, 400);
+      let refund;
+      try { refund = await stripe('refunds', 'POST', { payment_intent: String(pi), amount: String(Math.round(amount * 100)) }); }
+      catch (e) { return json({ error: `Refund failed: ${String(e?.message ?? e)}` }, 400); }
+      if (body.remove_credits) {
+        const w = await getOrCreateWallet(client, slug);
+        const bal = round4(Number(w.balance_credits || 0) - amount);
+        await client.from('credit_ledger').insert({ workspace_slug: slug, delta: -amount, reason: 'refund', source_ref: refund.id, balance_after: bal, created_by: user.id, meta: { payment_intent: pi } });
+        await client.from('credit_wallets').update({ balance_credits: bal, updated_at: new Date().toISOString() }).eq('workspace_slug', slug);
+      }
+      await audit(client, user, 'refund', `${slug} · $${amount} · ${refund.id}${body.remove_credits ? ' · credits removed' : ''}`);
+      return json({ ok: true, refund_id: refund.id, amount, credits_removed: !!body.remove_credits });
+    }
+
+    // ---- Subscriptions / service fees (Direct retail + subscription) ----
+    if (action === 'subscriptions') {
+      const slug = str('slug') || body.slug;
+      if (!slug) return json({ error: 'slug required' }, 400);
+      const [{ data: subs }, { data: plans }] = await Promise.all([
+        client.from('account_subscriptions').select('*').eq('workspace_slug', slug).order('created_at', { ascending: false }),
+        client.from('billing_plans').select('*').eq('active', true).order('created_at', { ascending: false }),
+      ]);
+      return json({ subscriptions: subs || [], plans: plans || [] });
+    }
+    if (action === 'subscription_set') {
+      const slug = body.workspace_slug;
+      const label = String(body.label || '').trim();
+      const amount = Number(body.amount);
+      const interval = ['one_time', 'monthly'].includes(body.interval) ? body.interval : 'monthly';
+      if (!slug || !label || !(amount > 0)) return json({ error: 'workspace, label, and a positive amount are required.' }, 400);
+      const row = {
+        workspace_slug: slug, plan_id: body.plan_id || null, label, amount, interval,
+        status: ['active', 'paused', 'canceled'].includes(body.status) ? body.status : 'active',
+        created_by: user.id,
+      };
+      if (interval === 'monthly' && !body.id) row.next_charge_at = addMonth(null);
+      let res;
+      if (body.id) res = await client.from('account_subscriptions').update(row).eq('id', body.id).select('*').maybeSingle();
+      else res = await client.from('account_subscriptions').insert(row).select('*').maybeSingle();
+      if (res.error) return json({ error: res.error.message }, 400);
+      await audit(client, user, 'subscription_set', `${slug} · ${label} · $${amount}/${interval}`);
+      return json({ ok: true, subscription: res.data });
+    }
+    if (action === 'subscription_delete') {
+      if (!body.id) return json({ error: 'id required' }, 400);
+      await client.from('account_subscriptions').update({ status: 'canceled' }).eq('id', body.id);
+      await audit(client, user, 'subscription_canceled', `${body.id}`);
+      return json({ ok: true });
+    }
+    if (action === 'subscription_charge_now') {
+      const { data: sub } = await client.from('account_subscriptions').select('*').eq('id', body.id).maybeSingle();
+      if (!sub) return json({ error: 'subscription not found' }, 404);
+      const { data: bw } = await client.from('billing_workspaces').select('*').eq('workspace_slug', sub.workspace_slug).maybeSingle();
+      if (!bw) return json({ error: 'account not found' }, 404);
+      if (!stripeKey()) return json({ error: 'Stripe is not configured.' }, 400);
+      const r = await chargeCardOnFile(client, bw, sub.amount, `${bw.display_name || sub.workspace_slug} — ${sub.label} (subscription)`, { kind: 'subscription' });
+      if (!r.ok) return json({ error: `Charge failed: ${r.error}` }, 400);
+      const nowIso = new Date().toISOString();
+      const patch = { last_charged_at: nowIso };
+      if (sub.interval === 'monthly') patch.next_charge_at = addMonth(nowIso);
+      else patch.status = 'canceled';
+      await client.from('account_subscriptions').update(patch).eq('id', sub.id);
+      await audit(client, user, 'subscription_charged', `${sub.workspace_slug} · ${sub.label} · $${r.base}+${r.fee} fee · ${r.invoice_id}`);
+      return json({ ok: true, invoice_id: r.invoice_id, base: r.base, fee: r.fee, total: r.total });
+    }
+    if (action === 'plans') {
+      const { data: plans } = await client.from('billing_plans').select('*').order('created_at', { ascending: false });
+      return json({ plans: plans || [] });
+    }
+    if (action === 'plan_create') {
+      const name = String(body.name || '').trim();
+      const amount = Number(body.amount);
+      const interval = ['one_time', 'monthly'].includes(body.interval) ? body.interval : 'monthly';
+      if (!name || !(amount > 0)) return json({ error: 'name and a positive amount are required.' }, 400);
+      const { data, error } = await client.from('billing_plans').insert({ name, amount, interval, created_by: user.id }).select('*').maybeSingle();
+      if (error) return json({ error: error.message }, 400);
+      await audit(client, user, 'plan_created', `${name} · $${amount}/${interval}`);
+      return json({ ok: true, plan: data });
+    }
+    if (action === 'plan_apply') {
+      const slug = body.workspace_slug;
+      const { data: plan } = await client.from('billing_plans').select('*').eq('id', body.plan_id).maybeSingle();
+      if (!slug || !plan) return json({ error: 'workspace and a valid plan_id are required.' }, 400);
+      const row = { workspace_slug: slug, plan_id: plan.id, label: plan.name, amount: plan.amount, interval: plan.interval, status: 'active', created_by: user.id };
+      if (plan.interval === 'monthly') row.next_charge_at = addMonth(null);
+      const { data, error } = await client.from('account_subscriptions').insert(row).select('*').maybeSingle();
+      if (error) return json({ error: error.message }, 400);
+      await audit(client, user, 'plan_applied', `${slug} · ${plan.name}`);
+      return json({ ok: true, subscription: data });
     }
 
     if (action === 'accounts') {
@@ -407,7 +551,7 @@ Deno.serve(async (req) => {
         workspace_slug: slug,
         display_name: body.display_name || slug,
         billing_mode: ['margin_split', 'full_retail', 'live_metered'].includes(body.billing_mode) ? body.billing_mode : 'full_retail',
-        billing_engine: ['prepaid_credits', 'arrears_sweep', 'split_margin'].includes(body.billing_engine) ? body.billing_engine : 'arrears_sweep',
+        billing_engine: ['prepaid_credits', 'arrears_sweep', 'split_margin', 'direct_subscription'].includes(body.billing_engine) ? body.billing_engine : 'arrears_sweep',
         default_multiplier: Number(body.default_multiplier) >= 0.1 && Number(body.default_multiplier) <= 100 ? Number(body.default_multiplier) : 1.0,
         status: 'onboarding',
       });

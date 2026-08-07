@@ -4,9 +4,10 @@ import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
 import AutoChargeBar from '../components/AutoChargeBar';
 import CreditsPanel from '../components/CreditsPanel';
+import SubscriptionsPanel from '../components/SubscriptionsPanel';
 import {
   UserPlus, ShieldCheck, CreditCard, Link2, Eye, Check, X, AlertCircle, Copy,
-  KeyRound, RefreshCw, FileSignature, Building2,
+  KeyRound, RefreshCw, FileSignature, Building2, Repeat,
 } from 'lucide-react';
 
 const COMPANY = '1PropertyMarket';
@@ -95,7 +96,7 @@ function NewAccountModal({ onClose, onDone }: { onClose: () => void; onDone: () 
       <Field label="Display name"><input className="input" value={form.display_name} placeholder="Acme Realty" onChange={(e) => setForm({ ...form, display_name: e.target.value })} /></Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Billing engine"><select className="input" value={form.billing_engine} onChange={(e) => setForm({ ...form, billing_engine: e.target.value })}>
-          <option value="prepaid_credits">Prepaid credits (SaaS)</option><option value="arrears_sweep">Arrears sweep</option><option value="split_margin">Split (margin only)</option></select></Field>
+          <option value="prepaid_credits">Prepaid credits (SaaS)</option><option value="direct_subscription">Direct retail + subscription</option><option value="arrears_sweep">Arrears sweep (legacy)</option></select></Field>
         <Field label="Multiplier (× Retell cost)"><input className="input" type="number" step="0.1" min="0.1" max="100" value={form.default_multiplier} onChange={(e) => setForm({ ...form, default_multiplier: e.target.value })} /></Field>
       </div>
       <button className="btn-primary w-full" disabled={busy || !form.workspace_slug} onClick={submit}>{busy ? 'Creating…' : 'Create account'}</button>
@@ -179,6 +180,15 @@ function AccountDrawer({ slug, onClose }: { slug: string; onClose: () => void })
                 <span className="inline-flex items-center gap-1.5 font-bold text-ink"><CreditCard className="h-4 w-4" /> Billing & credits</span>
               </div>
               <CreditsPanel slug={slug} />
+            </div>
+
+            {/* Step 5 — Subscriptions & service fees */}
+            <div className="mb-4 rounded-xl border border-line p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-600">5</span>
+                <span className="inline-flex items-center gap-1.5 font-bold text-ink"><Repeat className="h-4 w-4" /> Subscriptions & service fees</span>
+              </div>
+              <SubscriptionsPanel slug={slug} />
             </div>
           </>
         )}
