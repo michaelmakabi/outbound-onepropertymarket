@@ -32,10 +32,10 @@ function Leaderboard({ rows }: { rows: AgentRow[] }) {
   if (!rows.length) return <EmptyState text="No agent activity in this range." />;
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-          <input value={t.search} onChange={(e) => t.setSearch(e.target.value)} placeholder="Search agents…" className="input w-[240px] pl-8" />
+          <input value={t.search} onChange={(e) => t.setSearch(e.target.value)} placeholder="Search agents…" className="input w-full pl-8 sm:w-[240px]" />
         </div>
         <ColumnToggleMenu columns={AGENT_COLUMNS} isVisible={t.isVisible} onToggle={t.toggle} />
       </div>
