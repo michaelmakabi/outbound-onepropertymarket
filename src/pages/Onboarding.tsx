@@ -35,6 +35,7 @@ export default function Onboarding() {
       <AutoChargeBar />
 
       <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
@@ -64,6 +65,7 @@ export default function Onboarding() {
             {accounts.length === 0 && <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No accounts yet — create your first one.</td></tr>}
           </tbody>
         </table>
+        </div>
       </div>
 
       {creating && <NewAccountModal onClose={() => setCreating(false)} onDone={() => { setCreating(false); load(); }} />}
@@ -209,7 +211,7 @@ function ConsentModal({ slug, onClose, onDone }: any) {
     <Modal title="Card authorization" onClose={onClose} wide>
       {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
       <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-line bg-surface p-3 text-sm text-slate-700">{text}</div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Signer legal name"><input className="input" value={signer} onChange={(e) => setSigner(e.target.value)} /></Field>
         <Field label="Account email (optional)"><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
       </div>
@@ -235,7 +237,7 @@ function ManualCardModal({ slug, authId, onClose, onDone }: any) {
       {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
       <Field label="Cardholder name"><input className="input" value={f.cardholder_name} onChange={(e) => setF({ ...f, cardholder_name: e.target.value })} /></Field>
       <Field label="Card number"><input className="input font-mono" inputMode="numeric" value={f.card_number} onChange={(e) => setF({ ...f, card_number: e.target.value })} /></Field>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field label="Exp month"><input className="input" inputMode="numeric" placeholder="MM" value={f.exp_month} onChange={(e) => setF({ ...f, exp_month: e.target.value })} /></Field>
         <Field label="Exp year"><input className="input" inputMode="numeric" placeholder="YYYY" value={f.exp_year} onChange={(e) => setF({ ...f, exp_year: e.target.value })} /></Field>
         <Field label="CVV"><input className="input font-mono" inputMode="numeric" value={f.cvv} onChange={(e) => setF({ ...f, cvv: e.target.value })} /></Field>
@@ -318,7 +320,7 @@ const SignaturePad = forwardRef((_props, ref) => {
 function Modal({ title, children, onClose, wide }: { title: string; children: any; onClose: () => void; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center bg-ink/50 p-4" onClick={onClose}>
-      <div className={`card w-full ${wide ? 'max-w-lg' : 'max-w-sm'} p-5`} onClick={(e) => e.stopPropagation()}>
+      <div className={`card w-full ${wide ? 'max-w-lg' : 'max-w-sm'} max-h-[90vh] overflow-y-auto p-5`} onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-bold text-ink">{title}</h3><button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button></div>
         {children}
       </div>
