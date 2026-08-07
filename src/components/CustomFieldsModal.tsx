@@ -39,7 +39,7 @@ export default function CustomFieldsModal({ onClose, onChanged }: { onClose: () 
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
-      <div className="card w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="card max-h-[90vh] w-full max-w-lg overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="text-lg font-bold text-ink">Custom fields</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button>
