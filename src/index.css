@@ -4,7 +4,9 @@
 
 :root { color-scheme: light; }
 * { min-width: 0; }
-body { margin: 0; background: #f6f8fb; color: #0b1220; font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+html, body { width: 100%; max-width: 100%; overflow-x: clip; overscroll-behavior-x: none; }
+body { margin: 0; background: #f6f8fb; color: #0b1220; font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; text-size-adjust: 100%; -webkit-text-size-adjust: 100%; }
+#root { width: 100%; max-width: 100%; overflow-x: clip; }
 
 @layer components {
   .card { @apply bg-white rounded-xl border border-line shadow-sm; }
