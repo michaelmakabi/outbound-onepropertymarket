@@ -204,7 +204,7 @@ export default function TestAI() {
       {/* Confirm modal */}
       {confirmOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => !placing && setConfirmOpen(false)}>
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center gap-2"><PhoneOutgoing className="h-5 w-5 text-brand" /><h3 className="text-base font-bold text-ink">Place this test call?</h3></div>
             <div className="rounded-xl border border-line bg-surface p-3 text-sm">
               <div className="flex justify-between py-0.5"><span className="text-slate-500">Agent</span><span className="font-semibold text-ink">{agentName}</span></div>
