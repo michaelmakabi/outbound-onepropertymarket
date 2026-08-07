@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { StageIcon } from '../lib/statusIcons';
+import SmartLists from '../components/SmartLists';
 import type { Dispatch, SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { opm } from '../lib/api';
@@ -8,7 +9,7 @@ import { num, usd } from '../lib/format';
 import { useWorkspace } from '../lib/workspace';
 import {
   Plus, Trash2, GripVertical, LayoutGrid, Table as TableIcon, Columns3,
-  Search, Calendar, Phone, MapPin, Layers, TrendingUp, Target, Activity, Pencil, X, DollarSign,
+  Search, Calendar, Phone, MapPin, Layers, TrendingUp, Target, Activity, Pencil, X, DollarSign, Filter, Check,
 } from 'lucide-react';
 
 type Stage = { id: number; name: string; color: string; sort_order: number; leadCount: number; valueSum?: number; icon?: string | null };
@@ -74,6 +75,13 @@ export default function Pipelines() {
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [dateMenu, setDateMenu] = useState(false);
+  // Filters (stage / value / source / assigned) + saved smart-list config.
+  const [stageFilter, setStageFilter] = useState<number[]>([]);
+  const [valueMin, setValueMin] = useState('');
+  const [valueMax, setValueMax] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [assignedFilter, setAssignedFilter] = useState('');
+  const [filterMenu, setFilterMenu] = useState(false);
 
   // drag state
   const [dragId, setDragId] = useState<string | null>(null);
@@ -90,6 +98,30 @@ export default function Pipelines() {
   useEffect(() => { setLoading(true); loadPipelines(); /* eslint-disable-next-line */ }, [activeWorkspace]);
 
   const current = pipelines.find((p) => p.id === active) || null;
+  // Distinct source / assigned values for the filter dropdowns.
+  const sourceOptions = useMemo(() => [...new Set(leads.map((l) => l.lead_source).filter(Boolean) as string[])].sort(), [leads]);
+  const assignedOptions = useMemo(() => [...new Set(leads.map((l) => l.assigned_to).filter(Boolean) as string[])].sort(), [leads]);
+  const activeFilterCount = (stageFilter.length ? 1 : 0) + (valueMin || valueMax ? 1 : 0) + (sourceFilter ? 1 : 0) + (assignedFilter ? 1 : 0);
+  const clearFilters = () => { setStageFilter([]); setValueMin(''); setValueMax(''); setSourceFilter(''); setAssignedFilter(''); };
+  // Saved smart-list config: stages stored by NAME so a view is portable across pipelines that share stage names.
+  const currentCfg = {
+    view, search, sortKey, sortDir, preset, basis, customStart, customEnd,
+    stageNames: stageFilter.map((id) => (current?.stages || []).find((s) => s.id === id)?.name).filter(Boolean) as string[],
+    valueMin, valueMax, sourceFilter, assignedFilter,
+  };
+  const applyCfg = (c: any) => {
+    if (!c) return;
+    if (c.view) setView(c.view);
+    setSearch(c.search || '');
+    if (c.sortKey) setSortKey(c.sortKey);
+    if (c.sortDir) setSortDir(c.sortDir);
+    if (c.preset) setPreset(c.preset);
+    if (c.basis) setBasis(c.basis);
+    setCustomStart(c.customStart || ''); setCustomEnd(c.customEnd || '');
+    setStageFilter((Array.isArray(c.stageNames) ? c.stageNames : []).map((n: string) => (current?.stages || []).find((s) => s.name === n)?.id).filter((x: any) => x != null) as number[]);
+    setValueMin(c.valueMin || ''); setValueMax(c.valueMax || '');
+    setSourceFilter(c.sourceFilter || ''); setAssignedFilter(c.assignedFilter || '');
+  };
 
   // Load leads whenever the selected pipeline changes.
   useEffect(() => {
@@ -149,6 +181,9 @@ export default function Pipelines() {
   // ---- filtered leads (search + date range) ----
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const vMin = valueMin.trim() === '' ? null : Number(valueMin);
+    const vMax = valueMax.trim() === '' ? null : Number(valueMax);
+    const stageSet = stageFilter.length ? new Set(stageFilter) : null;
     return leads.filter((l) => {
       if (q) {
         const hay = [l.name, l.property_ref, l.phone, l.lead_source, l.assigned_to]
@@ -161,9 +196,14 @@ export default function Pipelines() {
         if (range.start != null && ms < range.start) return false;
         if (range.end != null && ms > range.end) return false;
       }
+      if (stageSet && !(l.stage_id != null && stageSet.has(l.stage_id))) return false;
+      if (vMin != null && (l.deal_price || 0) < vMin) return false;
+      if (vMax != null && (l.deal_price || 0) > vMax) return false;
+      if (sourceFilter && String(l.lead_source || '') !== sourceFilter) return false;
+      if (assignedFilter && String(l.assigned_to || '') !== assignedFilter) return false;
       return true;
     });
-  }, [leads, search, range, basis]);
+  }, [leads, search, range, basis, stageFilter, valueMin, valueMax, sourceFilter, assignedFilter]);
 
   // ---- sorted (table/grid) ----
   const sorted = useMemo(() => {
@@ -351,6 +391,56 @@ export default function Pipelines() {
                 </div>
               )}
             </div>
+
+            {/* Filters (stage / value / source / assigned) */}
+            <div className="relative">
+              <button onClick={() => setFilterMenu((o) => !o)}
+                className={cx('inline-flex items-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-semibold',
+                  activeFilterCount ? 'border-brand text-brand' : 'border-line bg-white text-slate-600 hover:border-brand')}>
+                <Filter className="h-4 w-4" /> Filters{activeFilterCount ? <span className="rounded-full bg-brand px-1.5 text-xs text-white">{activeFilterCount}</span> : null}
+              </button>
+              {filterMenu && (
+                <div className="absolute left-0 z-40 mt-1 w-80 rounded-xl border border-line bg-white p-3 shadow-xl">
+                  <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Stage</div>
+                  <div className="mb-3 max-h-40 space-y-0.5 overflow-y-auto">
+                    {(current?.stages || []).map((s) => {
+                      const on = stageFilter.includes(s.id);
+                      return (
+                        <button key={s.id} onClick={() => setStageFilter((f) => on ? f.filter((x) => x !== s.id) : [...f, s.id])}
+                          className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-surface">
+                          <span className={cx('flex h-4 w-4 items-center justify-center rounded border', on ? 'border-brand bg-brand text-white' : 'border-slate-300')}>{on && <Check className="h-3 w-3" />}</span>
+                          <StageIcon name={s.icon} color={s.color} className="h-3.5 w-3.5" />
+                          <span className="truncate">{s.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Deal value</div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <input value={valueMin} onChange={(e) => setValueMin(e.target.value)} type="number" placeholder="Min $" className="input h-8 flex-1 text-xs" />
+                    <span className="text-slate-400">–</span>
+                    <input value={valueMax} onChange={(e) => setValueMax(e.target.value)} type="number" placeholder="Max $" className="input h-8 flex-1 text-xs" />
+                  </div>
+                  <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Source</div>
+                  <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="input mb-3 h-8 w-full text-xs">
+                    <option value="">Any source</option>
+                    {sourceOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Assigned to</div>
+                  <select value={assignedFilter} onChange={(e) => setAssignedFilter(e.target.value)} className="input h-8 w-full text-xs">
+                    <option value="">Anyone</option>
+                    {assignedOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                  <div className="mt-3 flex items-center justify-between border-t border-line pt-2">
+                    <button onClick={clearFilters} className="text-xs font-semibold text-slate-500 hover:text-ink">Clear all</button>
+                    <button onClick={() => setFilterMenu(false)} className="rounded-lg bg-brand px-3 py-1 text-xs font-semibold text-white hover:brightness-110">Done</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Shareable saved views */}
+            <SmartLists page="pipeline" current={currentCfg} onApply={applyCfg} />
 
             <span className="ml-auto text-sm text-slate-500">
               {leadsLoading ? 'Loading leads…' : <><span className="font-bold text-ink">{num(activeDateCount)}</span> of {num(leads.length)} leads</>}
