@@ -107,7 +107,7 @@ export default function PromptStudio() {
           {mode === 'enhance' && (
             <div className="mt-3">
               <label className="label mb-1 block">Existing agent prompt</label>
-              <textarea value={existingPrompt} onChange={(e) => setExistingPrompt(e.target.value)} rows={6} className="input font-mono text-xs" placeholder="Paste the current agent system prompt here…" />
+              <textarea value={existingPrompt} onChange={(e) => setExistingPrompt(e.target.value)} rows={6} className="input w-full font-mono text-xs" placeholder="Paste the current agent system prompt here…" />
             </div>
           )}
           <div className="mt-3">
@@ -140,7 +140,7 @@ export default function PromptStudio() {
               <button className="btn-ghost !py-1" onClick={copy}>{copied ? <><Check className="h-3.5 w-3.5" /> Copied</> : <><Copy className="h-3.5 w-3.5" /> Copy</>}</button>
               <button className="btn-ghost !py-1" onClick={() => saveBlob(new Blob([result.prompt], { type: 'text/plain' }), 'agent-prompt.txt')}><Download className="h-3.5 w-3.5" /> .txt</button>
             </div>}>
-            <textarea readOnly value={result.prompt} rows={16} className="input font-mono text-xs" />
+            <textarea readOnly value={result.prompt} rows={16} className="input w-full font-mono text-xs" />
           </SectionCard>
         </div>
       )}
