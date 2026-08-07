@@ -55,9 +55,9 @@ export default function Contacts() {
             <option value="spend">Highest spend</option>
           </select>
         </div>}>
-        <div className="relative mb-3">
+        <div className="relative mb-3 w-full sm:w-auto">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search phone number…" className="input w-[280px] pl-8" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search phone number…" className="input w-full sm:w-[280px] pl-8" />
         </div>
         {loading ? <LoadingBlock /> : rows.length === 0 ? <EmptyState text="No contacts in this range." /> : (
           <div className="overflow-x-auto">
