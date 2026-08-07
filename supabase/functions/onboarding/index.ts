@@ -1,31 +1,26 @@
-// One Property Market — Outbound: customer onboarding + card authorization.
-// Super-admin only. Custom bearer-token auth (same sessions model as /api).
-//
-// Card storage: the full card + CVV are AES-GCM encrypted in the edge function
-// (key = CARD_ENC_KEY, a base64 32-byte secret) and kept on file for the life of
-// the account under the customer's signed authorization + mutual-responsibility
-// consent (attorney-approved). Only ciphertext lands in card_vault.
-//
-// Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (auto), CARD_ENC_KEY (base64 32B),
-//      STRIPE_SECRET_KEY (or STRIPE_KEY / STRIPE), APP_BASE_URL (optional).
+// One Property Market — Outbound: customer onboarding + card authorization + auto-charging.
+// Super-admin only (except autocharge_run, which the guarded cron calls with a secret key).
+// Card storage: full card + CVV AES-GCM encrypted (CARD_ENC_KEY), kept on file under the
+// customer's signed authorization + mutual-responsibility consent.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const APP_BASE = Deno.env.get('APP_BASE_URL') || 'https://outbound.1propertymarket.com';
+const SVC = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
 };
-const json = (b: unknown, status = 200) =>
+const json = (b, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
-const sb = () => createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+const sb = () => createClient(Deno.env.get('SUPABASE_URL'), SVC);
 
-// ---------------- auth (mirrors /api) ----------------
-async function getUser(client: any, req: Request) {
+async function getUser(client, req) {
   const auth = req.headers.get('authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
+  if (token === SVC) return { id: 0, role: 'super_admin', name: 'service' };
   const { data: s } = await client.from('sessions').select('user_id, expires_at').eq('token', token).maybeSingle();
   if (!s || new Date(s.expires_at).getTime() < Date.now()) return null;
   const { data: u } = await client.from('users').select('id, name, username, role, disabled').eq('id', s.user_id).maybeSingle();
@@ -33,24 +28,24 @@ async function getUser(client: any, req: Request) {
   return u;
 }
 
-// ---------------- AES-GCM encryption (app-held key) ----------------
-function b64ToBytes(b64: string): Uint8Array { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
-function bytesToB64(bytes: Uint8Array): string { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); }
-async function encKey(): Promise<CryptoKey> {
+// ---------------- AES-GCM encryption ----------------
+function b64ToBytes(b64) { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+function bytesToB64(bytes) { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); }
+async function encKey() {
   const raw = Deno.env.get('CARD_ENC_KEY') || '';
   if (!raw) throw new Error('CARD_ENC_KEY secret is not set — cannot store card data.');
   const keyBytes = b64ToBytes(raw);
   if (keyBytes.length !== 32) throw new Error('CARD_ENC_KEY must be a base64-encoded 32-byte key.');
   return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
-async function encrypt(plain: string): Promise<string> {
+async function encrypt(plain) {
   const key = await encKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plain)));
   const out = new Uint8Array(iv.length + ct.length); out.set(iv, 0); out.set(ct, iv.length);
   return bytesToB64(out);
 }
-async function decrypt(b64: string): Promise<string> {
+async function decrypt(b64) {
   const key = await encKey();
   const all = b64ToBytes(b64);
   const iv = all.slice(0, 12); const ct = all.slice(12);
@@ -58,11 +53,11 @@ async function decrypt(b64: string): Promise<string> {
   return new TextDecoder().decode(pt);
 }
 
-// ---------------- Stripe (form-encoded REST) ----------------
-function stripeKey(): string {
+// ---------------- Stripe ----------------
+function stripeKey() {
   return Deno.env.get('STRIPE_SECRET_KEY') || Deno.env.get('STRIPE_KEY') || Deno.env.get('STRIPE') || '';
 }
-async function stripe(path: string, method = 'POST', form?: Record<string, string>) {
+async function stripe(path, method = 'POST', form) {
   const key = stripeKey();
   if (!key) throw new Error('Stripe secret key is not configured.');
   const body = form ? new URLSearchParams(form).toString() : undefined;
@@ -75,17 +70,75 @@ async function stripe(path: string, method = 'POST', form?: Record<string, strin
   if (!res.ok) throw new Error(data?.error?.message || `Stripe error (${res.status})`);
   return data;
 }
-
-async function ensureStripeCustomer(client: any, slug: string, email?: string): Promise<string> {
+async function ensureStripeCustomer(client, slug, email) {
   const { data: ws } = await client.from('billing_workspaces').select('stripe_customer_id, display_name').eq('workspace_slug', slug).maybeSingle();
   if (ws?.stripe_customer_id) return ws.stripe_customer_id;
   const cust = await stripe('customers', 'POST', { name: ws?.display_name || slug, ...(email ? { email } : {}), 'metadata[workspace_slug]': slug });
   await client.from('billing_workspaces').update({ stripe_customer_id: cust.id, updated_at: new Date().toISOString() }).eq('workspace_slug', slug);
   return cust.id;
 }
-
-function audit(client: any, user: any, action: string, detail: string) {
+function audit(client, user, action, detail) {
   return client.from('billing_audit_log').insert({ actor_user_id: user.id, action, entity_type: 'onboarding', detail: { note: detail } }).then(() => {}, () => {});
+}
+
+// ---------------- Automatic charging ----------------
+async function autochargeRun(client, url, req) {
+  const key = url.searchParams.get('key');
+  const { data: st } = await client.from('billing_settings').select('*').eq('id', 1).maybeSingle();
+  const viaCron = !!(key && st && key === st.cron_secret);
+  if (!viaCron) {
+    const u = await getUser(client, req);
+    if (!u || u.role !== 'super_admin') return json({ error: 'unauthorized' }, 401);
+  }
+  if (!st) return json({ ok: true, ran: false, reason: 'no_settings' });
+  if (!st.auto_charge_enabled) return json({ ok: true, ran: false, reason: 'auto_charge_disabled' });
+  if (!stripeKey()) return json({ ok: false, ran: false, reason: 'no_stripe_key' });
+
+  const minAmt = Number(st.min_charge_amount || 1);
+  const cooldownMs = Number(st.cooldown_hours || 20) * 3600000;
+  const log = (bw, amount, events, invId, localId, status, detail) =>
+    client.from('autocharge_log').insert({ workspace_slug: bw.workspace_slug, amount, events, stripe_invoice_id: invId, local_invoice_id: localId, status, detail }).then(() => {}, () => {});
+
+  const { data: bws } = await client.from('billing_workspaces').select('*').eq('status', 'active');
+  const results = [];
+  for (const bw of bws || []) {
+    if (!bw.stripe_customer_id) { results.push({ ws: bw.workspace_slug, status: 'skipped_no_customer' }); continue; }
+    const { data: last } = await client.from('autocharge_log').select('created_at').eq('workspace_slug', bw.workspace_slug).eq('status', 'charged').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (last && (Date.now() - new Date(last.created_at).getTime()) < cooldownMs) { results.push({ ws: bw.workspace_slug, status: 'skipped_cooldown' }); continue; }
+    const unbilled = [];
+    for (let f = 0; ; f += 1000) {
+      const { data } = await client.from('cost_ledger').select('id,billable_amount').eq('workspace_slug', bw.workspace_slug).is('billed_invoice_id', null).gt('billable_amount', 0).range(f, f + 999);
+      unbilled.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    const amount = Math.round(unbilled.reduce((s, r) => s + Number(r.billable_amount || 0), 0) * 100) / 100;
+    if (amount < minAmt || Math.round(amount * 100) < 50) { results.push({ ws: bw.workspace_slug, status: 'skipped_below_min', amount }); continue; }
+    let pm = null;
+    try { const cust = await stripe(`customers/${bw.stripe_customer_id}`, 'GET'); pm = cust?.invoice_settings?.default_payment_method; } catch (_e) { /* below */ }
+    if (!pm) { await log(bw, amount, unbilled.length, null, null, 'skipped_no_card', null); results.push({ ws: bw.workspace_slug, status: 'skipped_no_card', amount }); continue; }
+    const localId = crypto.randomUUID();
+    try {
+      await stripe('invoiceitems', 'POST', { customer: bw.stripe_customer_id, amount: String(Math.round(amount * 100)), currency: 'usd', description: `${bw.display_name || bw.workspace_slug} — AI calling usage (${unbilled.length} events)` });
+      const inv = await stripe('invoices', 'POST', { customer: bw.stripe_customer_id, collection_method: 'charge_automatically', auto_advance: 'false', 'metadata[workspace_slug]': bw.workspace_slug, 'metadata[local_invoice_id]': localId });
+      const fin = await stripe(`invoices/${inv.id}/finalize`, 'POST');
+      let paid = fin;
+      if (fin.status !== 'paid') { try { paid = await stripe(`invoices/${inv.id}/pay`, 'POST'); } catch (e) { paid = { id: inv.id, status: 'payment_failed', _err: String(e?.message ?? e) }; } }
+      if (paid.status === 'paid') {
+        const ids = unbilled.map((r) => r.id);
+        for (let i = 0; i < ids.length; i += 500) await client.from('cost_ledger').update({ billed_invoice_id: localId }).in('id', ids.slice(i, i + 500));
+        await log(bw, amount, unbilled.length, paid.id, localId, 'charged', null);
+        results.push({ ws: bw.workspace_slug, status: 'charged', amount, invoice: paid.id });
+      } else {
+        await log(bw, amount, unbilled.length, paid.id, null, 'failed', paid._err || paid.status);
+        results.push({ ws: bw.workspace_slug, status: 'failed', amount, detail: paid._err || paid.status });
+      }
+    } catch (e) {
+      await log(bw, amount, unbilled.length, null, null, 'failed', String(e?.message ?? e));
+      results.push({ ws: bw.workspace_slug, status: 'failed', amount, detail: String(e?.message ?? e) });
+    }
+  }
+  const charged = results.filter((r) => r.status === 'charged');
+  return json({ ok: true, ran: true, via: viaCron ? 'cron' : 'manual', charged_count: charged.length, charged_total: Math.round(charged.reduce((s, r) => s + (r.amount || 0), 0) * 100) / 100, results });
 }
 
 // ---------------- handler ----------------
@@ -94,26 +147,43 @@ Deno.serve(async (req) => {
   const client = sb();
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || '';
-  const str = (k: string) => { const v = url.searchParams.get(k); return v == null || v === '' ? null : v; };
+  const str = (k) => { const v = url.searchParams.get(k); return v == null || v === '' ? null : v; };
 
   try {
+    if (action === 'autocharge_run') return await autochargeRun(client, url, req);
+
     const user = await getUser(client, req);
     if (!user) return json({ error: 'unauthorized' }, 401);
     if (user.role !== 'super_admin') return json({ error: 'Onboarding is restricted to super admins.' }, 403);
 
     const body = (req.method === 'POST' || req.method === 'PATCH') ? await req.json().catch(() => ({})) : {};
 
-    // ---- list accounts (with onboarding status) ----
+    if (action === 'autocharge_settings') {
+      const { data: st } = await client.from('billing_settings').select('auto_charge_enabled, min_charge_amount, cooldown_hours, updated_at').eq('id', 1).maybeSingle();
+      const { data: recent } = await client.from('autocharge_log').select('workspace_slug, amount, status, stripe_invoice_id, created_at').order('created_at', { ascending: false }).limit(25);
+      return json({ settings: st || { auto_charge_enabled: false, min_charge_amount: 1, cooldown_hours: 20 }, recent: recent || [] });
+    }
+    if (action === 'autocharge_set') {
+      const patch = { updated_by: user.id, updated_at: new Date().toISOString() };
+      if (typeof body.auto_charge_enabled === 'boolean') patch.auto_charge_enabled = body.auto_charge_enabled;
+      if (body.min_charge_amount != null && Number(body.min_charge_amount) >= 0.5) patch.min_charge_amount = Number(body.min_charge_amount);
+      if (body.cooldown_hours != null && Number(body.cooldown_hours) >= 0) patch.cooldown_hours = Math.round(Number(body.cooldown_hours));
+      const { error } = await client.from('billing_settings').update(patch).eq('id', 1);
+      if (error) return json({ error: error.message }, 400);
+      await audit(client, user, 'autocharge_settings_changed', JSON.stringify(patch));
+      return json({ ok: true });
+    }
+
     if (action === 'accounts') {
       const { data: accounts } = await client.from('billing_workspaces').select('*').order('created_at', { ascending: false });
-      const slugs = (accounts || []).map((a: any) => a.workspace_slug);
+      const slugs = (accounts || []).map((a) => a.workspace_slug);
       const [{ data: auths }, { data: pms }] = await Promise.all([
         client.from('card_authorizations').select('workspace_slug, signer_name, signed_at, revoked_at').in('workspace_slug', slugs.length ? slugs : ['']),
         client.from('payment_methods').select('workspace_slug, brand, last4, added_via').in('workspace_slug', slugs.length ? slugs : ['']),
       ]);
-      const authBy: Record<string, any> = {}; for (const a of (auths || [])) if (!a.revoked_at) authBy[a.workspace_slug] = a;
-      const pmBy: Record<string, any> = {}; for (const p of (pms || [])) pmBy[p.workspace_slug] = p;
-      const rows = (accounts || []).map((a: any) => ({
+      const authBy = {}; for (const a of (auths || [])) if (!a.revoked_at) authBy[a.workspace_slug] = a;
+      const pmBy = {}; for (const p of (pms || [])) pmBy[p.workspace_slug] = p;
+      const rows = (accounts || []).map((a) => ({
         ...a,
         has_authorization: !!authBy[a.workspace_slug],
         authorization: authBy[a.workspace_slug] || null,
@@ -122,7 +192,6 @@ Deno.serve(async (req) => {
       return json({ accounts: rows });
     }
 
-    // ---- account detail ----
     if (action === 'account') {
       const slug = str('slug') || body.slug;
       if (!slug) return json({ error: 'slug required' }, 400);
@@ -133,11 +202,10 @@ Deno.serve(async (req) => {
         client.from('card_vault').select('id, payment_method_id, exp_month, exp_year, cvv_ciphertext, keyed_into_retell_at, last_revealed_at, created_at').eq('workspace_slug', slug),
         client.from('workspaces').select('slug, api_key').eq('slug', slug).maybeSingle(),
       ]);
-      const vaultSafe = (vault || []).map((v: any) => ({ id: v.id, payment_method_id: v.payment_method_id, exp_month: v.exp_month, exp_year: v.exp_year, has_cvv: !!v.cvv_ciphertext, keyed_into_retell_at: v.keyed_into_retell_at, last_revealed_at: v.last_revealed_at }));
+      const vaultSafe = (vault || []).map((v) => ({ id: v.id, payment_method_id: v.payment_method_id, exp_month: v.exp_month, exp_year: v.exp_year, has_cvv: !!v.cvv_ciphertext, keyed_into_retell_at: v.keyed_into_retell_at, last_revealed_at: v.last_revealed_at }));
       return json({ workspace: ws, authorization: auth, payment_methods: pms || [], vault: vaultSafe, retell_connected: !!retell?.api_key });
     }
 
-    // ---- create account (tenant) ----
     if (action === 'create_account') {
       const slug = String(body.workspace_slug || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
       if (!slug) return json({ error: 'A workspace slug is required (letters, numbers, - and _).' }, 400);
@@ -155,7 +223,6 @@ Deno.serve(async (req) => {
       return json({ ok: true, workspace_slug: slug });
     }
 
-    // ---- save signed authorization / consent ----
     if (action === 'save_authorization') {
       const slug = body.workspace_slug;
       if (!slug || !body.signer_name || !body.authorization_text_snapshot) return json({ error: 'workspace, signer name, and consent text are required.' }, 400);
@@ -176,7 +243,6 @@ Deno.serve(async (req) => {
       return json({ ok: true, authorization_id: data.id });
     }
 
-    // ---- Stripe SetupIntent link (hosted Checkout in setup mode) ----
     if (action === 'setup_link') {
       const slug = body.workspace_slug;
       if (!slug) return json({ error: 'workspace required' }, 400);
@@ -191,7 +257,6 @@ Deno.serve(async (req) => {
       return json({ ok: true, url: session.url, customer });
     }
 
-    // ---- pull the card the customer saved via the Stripe link into payment_methods ----
     if (action === 'sync_stripe_card') {
       const slug = body.workspace_slug;
       const { data: ws } = await client.from('billing_workspaces').select('stripe_customer_id').eq('workspace_slug', slug).maybeSingle();
@@ -208,7 +273,6 @@ Deno.serve(async (req) => {
       return json({ ok: true, found: true, brand: pm.card?.brand, last4: pm.card?.last4 });
     }
 
-    // ---- team enters the full card (encrypted, kept on file for manual Retell keying) ----
     if (action === 'save_card_manual') {
       const slug = body.workspace_slug;
       const pan = String(body.card_number || '').replace(/\s+/g, '');
@@ -233,7 +297,6 @@ Deno.serve(async (req) => {
       return json({ ok: true, payment_method_id: pm.id, brand, last4: pan.slice(-4) });
     }
 
-    // ---- full-card reveal (to key into Retell); audited ----
     if (action === 'reveal_card') {
       const vaultId = body.vault_id;
       if (!vaultId) return json({ error: 'vault_id required' }, 400);
@@ -246,7 +309,6 @@ Deno.serve(async (req) => {
       return json({ ok: true, card_number: pan, cvv, exp_month: v.exp_month, exp_year: v.exp_year, cvv_available: !!cvv });
     }
 
-    // ---- mark that the card has been keyed into Retell ----
     if (action === 'mark_keyed') {
       const vaultId = body.vault_id;
       if (!vaultId) return json({ error: 'vault_id required' }, 400);
@@ -257,6 +319,6 @@ Deno.serve(async (req) => {
 
     return json({ error: 'unknown action' }, 404);
   } catch (e) {
-    return json({ error: String((e as any)?.message ?? e) }, 500);
+    return json({ error: String(e?.message ?? e) }, 500);
   }
 });
