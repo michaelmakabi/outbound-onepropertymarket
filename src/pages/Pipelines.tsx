@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { StageIcon } from '../lib/statusIcons';
 import type { Dispatch, SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { opm } from '../lib/api';
@@ -7,10 +8,10 @@ import { num, usd } from '../lib/format';
 import { useWorkspace } from '../lib/workspace';
 import {
   Plus, Trash2, GripVertical, LayoutGrid, Table as TableIcon, Columns3,
-  Search, Calendar, Phone, MapPin, Layers, TrendingUp, Target, Activity, Pencil, X,
+  Search, Calendar, Phone, MapPin, Layers, TrendingUp, Target, Activity, Pencil, X, DollarSign,
 } from 'lucide-react';
 
-type Stage = { id: number; name: string; color: string; sort_order: number; leadCount: number; valueSum?: number };
+type Stage = { id: number; name: string; color: string; sort_order: number; leadCount: number; valueSum?: number; icon?: string | null };
 type Pipeline = { id: number; name: string; workspace?: string; sort_order?: number; stages: Stage[] };
 type Lead = {
   lead_id: string; name: string; stage_id: number | null; pipeline_id: number;
@@ -231,7 +232,10 @@ export default function Pipelines() {
       posCount = filtered.filter((l) => (l.attempts || 0) > 0 || l.last_disposition).length;
       posLabel = 'Contacted';
     }
-    return { total, value, avgAttempts, posCount, posLabel };
+    const withDeal = filtered.filter((l) => (l.deal_price || 0) > 0).length;
+    const avgDeal = withDeal ? value / withDeal : 0;
+    const reachable = filtered.filter((l) => l.phone && String(l.phone).trim() !== '' && String(l.phone) !== '—').length;
+    return { total, value, avgAttempts, posCount, posLabel, avgDeal, reachable };
   }, [filtered, current]);
 
   const activeDateCount = range ? filtered.length : filtered.length;
@@ -260,46 +264,48 @@ export default function Pipelines() {
       {!current ? <EmptyState text="No pipeline selected." /> : (
         <>
           {/* KPI row */}
-          <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <KpiCard label="Leads" value={num(kpis.total)} sub={range ? `in ${PRESET_LABEL[preset].toLowerCase()}` : 'in pipeline'} icon={Layers} accent="blue" />
             <KpiCard label="Pipeline value" value={usd(kpis.value)} sub="sum of deal price" icon={TrendingUp} accent="green" />
+            <KpiCard label="Avg deal" value={kpis.avgDeal ? usd(kpis.avgDeal) : '—'} sub="per priced lead" icon={DollarSign} accent="green" />
             <KpiCard label={kpis.posLabel} value={num(kpis.posCount)} sub="leads" icon={Target} accent="amber" />
+            <KpiCard label="Reachable" value={num(kpis.reachable)} sub="have a phone" icon={Phone} accent="blue" />
             <KpiCard label="Avg attempts" value={kpis.avgAttempts.toFixed(1)} sub="per lead" icon={Activity} accent="default" />
           </div>
 
           {/* toolbar */}
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {/* view toggle */}
-            <div className="inline-flex items-center rounded-lg border border-line bg-white p-0.5">
+            <div className="inline-flex items-center rounded-lg border border-line bg-white p-1">
               {([['board', 'Board', Columns3], ['table', 'Table', TableIcon], ['grid', 'Grid', LayoutGrid]] as [ViewMode, string, any][]).map(([m, label, Icon]) => (
                 <button key={m} onClick={() => setView(m)}
-                  className={cx('inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition',
+                  className={cx('inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-semibold transition',
                     view === m ? 'bg-brand text-white' : 'text-slate-600 hover:bg-surface')}>
-                  <Icon className="h-3.5 w-3.5" /> {label}
+                  <Icon className="h-4 w-4" /> {label}
                 </button>
               ))}
             </div>
 
             {/* search */}
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+            <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, property, phone, source…"
-                className="w-64 rounded-lg border border-line bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-brand" />
+                className="w-full rounded-lg border border-line bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-brand" />
             </div>
 
             {/* sort (table/grid) */}
             {view !== 'board' && (
-              <div className="inline-flex items-center gap-1">
+              <div className="inline-flex items-center gap-1.5">
                 <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}
-                  className="rounded-lg border border-line bg-white px-2 py-2 text-sm outline-none">
+                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-medium outline-none focus:border-brand">
                   <option value="name">Name</option>
                   <option value="deal_price">Deal price</option>
                   <option value="attempts">Attempts</option>
                   <option value="created">Added date</option>
                   <option value="updated">Updated date</option>
                 </select>
-                <button onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
-                  className="rounded-lg border border-line bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 hover:border-brand">
+                <button onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))} title={sortDir === 'desc' ? 'Descending' : 'Ascending'}
+                  className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm font-semibold text-slate-600 hover:border-brand">
                   {sortDir === 'desc' ? '↓' : '↑'}
                 </button>
               </div>
@@ -308,7 +314,7 @@ export default function Pipelines() {
             {/* date range */}
             <div className="relative">
               <button onClick={() => setDateMenu((o) => !o)}
-                className={cx('inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold',
+                className={cx('inline-flex items-center gap-1.5 rounded-lg border px-3 py-2.5 text-sm font-semibold',
                   range ? 'border-brand text-brand' : 'border-line bg-white text-slate-600 hover:border-brand')}>
                 <Calendar className="h-4 w-4" /> {PRESET_LABEL[preset]}
                 <span className="text-[10px] font-normal text-slate-400">· {basis === 'added' ? 'Added' : 'Updated'}</span>
@@ -380,7 +386,7 @@ function StagePill({ stage }: { stage?: Stage }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold"
       style={{ background: `${stage.color}1a`, color: stage.color }}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: stage.color }} /> {stage.name}
+      <StageIcon name={stage.icon} color={stage.color} className="h-3.5 w-3.5" /> {stage.name}
     </span>
   );
 }
@@ -426,11 +432,11 @@ function BoardView({
             onDragOver={(e) => { e.preventDefault(); setDragOver(s.id); }}
             onDragLeave={() => setDragOver((cur) => (cur === s.id ? null : cur))}
             onDrop={(e) => { e.preventDefault(); if (dragId) moveTo(s.id, dragId); setDragId(null); setDragOver(null); }}
-            className={cx('w-72 flex-none rounded-xl border bg-surface', dragOver === s.id ? 'border-brand ring-2 ring-brand/20' : 'border-line')}>
+            className={cx('w-64 flex-none rounded-xl border bg-surface', dragOver === s.id ? 'border-brand ring-2 ring-brand/20' : 'border-line')}>
             <div className="border-b border-line px-3 py-2" style={{ borderTopColor: s.color, borderTopWidth: 3 }}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: s.color }} />
+                  <StageIcon name={s.icon} color={s.color} className="h-4 w-4 shrink-0" />
                   <button onClick={() => onRenameStage(s)} className="truncate text-sm font-bold text-ink hover:text-brand" title={s.name}>{s.name}</button>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -484,8 +490,8 @@ function TableView({
   openRecord: (id: string) => void; sortKey: SortKey; sortDir: 'asc' | 'desc';
   onSort: (k: SortKey) => void; onMove: (stageId: number, leadId: string) => void; leadsLoading: boolean;
 }) {
-  const head = (label: string, key?: SortKey, align?: 'right') => (
-    <th className={cx('px-3 py-2.5 font-semibold whitespace-nowrap', align === 'right' && 'text-right')}>
+  const head = (label: string, key?: SortKey, align?: 'right', cls?: string) => (
+    <th className={cx('px-3 py-2.5 font-semibold whitespace-nowrap', align === 'right' && 'text-right', cls)}>
       {key ? (
         <button onClick={() => onSort(key)} className={cx('inline-flex items-center gap-1 hover:text-ink', sortKey === key ? 'text-ink' : 'text-slate-500')}>
           {label}{sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
@@ -498,19 +504,19 @@ function TableView({
   return (
     <SectionCard title="Leads" description={`${num(rows.length)} shown`} className="overflow-hidden !p-0">
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="border-b border-line bg-surface text-xs uppercase tracking-wide text-slate-500">
             <tr>
               {head('Name', 'name')}
               {head('Stage')}
-              {head('Phone')}
-              {head('Property')}
+              {head('Phone', undefined, undefined, 'hidden sm:table-cell')}
+              {head('Property', undefined, undefined, 'hidden md:table-cell')}
               {head('Deal Price', 'deal_price', 'right')}
-              {head('Attempts', 'attempts', 'right')}
-              {head('Source')}
-              {head('Assigned')}
-              {head('Added', 'created')}
-              {head('Updated', 'updated')}
+              {head('Attempts', 'attempts', 'right', 'hidden lg:table-cell')}
+              {head('Source', undefined, undefined, 'hidden xl:table-cell')}
+              {head('Assigned', undefined, undefined, 'hidden xl:table-cell')}
+              {head('Added', 'created', undefined, 'hidden lg:table-cell')}
+              {head('Updated', 'updated', undefined, 'hidden md:table-cell')}
             </tr>
           </thead>
           <tbody>
@@ -519,19 +525,19 @@ function TableView({
                 <td className="px-3 py-2 font-semibold text-ink">{l.name}</td>
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   <select value={l.stage_id ?? ''} onChange={(e) => onMove(Number(e.target.value), l.lead_id)}
-                    className="max-w-[150px] rounded border border-line bg-white px-1.5 py-1 text-xs">
+                    className="w-full min-w-[150px] max-w-[210px] rounded-md border border-line bg-white px-2 py-1.5 text-xs font-medium outline-none focus:border-brand">
                     {l.stage_id == null && <option value="">—</option>}
                     {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </td>
-                <td className="px-3 py-2 text-slate-600">{l.phone || '—'}</td>
-                <td className="px-3 py-2 max-w-[180px] truncate text-slate-600" title={l.property_ref || ''}>{l.property_ref || '—'}</td>
+                <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">{l.phone || '—'}</td>
+                <td className="hidden max-w-[200px] truncate px-3 py-2 text-slate-600 md:table-cell" title={l.property_ref || ''}>{l.property_ref || '—'}</td>
                 <td className="px-3 py-2 text-right font-semibold tabular-nums text-emerald-600">{l.deal_price ? usd(l.deal_price) : '—'}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">{l.attempts || 0}</td>
-                <td className="px-3 py-2 text-slate-600">{l.lead_source || '—'}</td>
-                <td className="px-3 py-2 text-slate-600">{l.assigned_to || '—'}</td>
-                <td className="px-3 py-2 whitespace-nowrap text-slate-500">{fmtDate(addedMs(l))}</td>
-                <td className="px-3 py-2 whitespace-nowrap text-slate-500">{fmtDate(updatedMs(l))}</td>
+                <td className="hidden px-3 py-2 text-right tabular-nums text-slate-600 lg:table-cell">{l.attempts || 0}</td>
+                <td className="hidden px-3 py-2 text-slate-600 xl:table-cell">{l.lead_source || '—'}</td>
+                <td className="hidden px-3 py-2 text-slate-600 xl:table-cell">{l.assigned_to || '—'}</td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-slate-500 lg:table-cell">{fmtDate(addedMs(l))}</td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-slate-500 md:table-cell">{fmtDate(updatedMs(l))}</td>
               </tr>
             ))}
           </tbody>
