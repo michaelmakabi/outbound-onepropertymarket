@@ -138,9 +138,9 @@ export default function Leads() {
             {stages.map((s: any) => <option key={s.id} value={s.id}>{s.name} ({s.leadCount})</option>)}
           </select>
           <MultiSelect options={allTags} value={tagFilter} onChange={setTagFilter} placeholder="All tags" width={200} />
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, address, source, tags…" className="input w-[280px] pl-8" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, address, source, tags…" className="input w-full sm:w-[280px] pl-8" />
           </div>
           {hasFilters && <button className="btn-ghost !py-1.5" onClick={() => { setPipelineId(''); setStageId(''); setTagFilter([]); setSearch(''); }}><X className="h-3.5 w-3.5" /> Clear</button>}
         </div>
