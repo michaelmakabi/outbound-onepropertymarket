@@ -89,11 +89,13 @@ function DashboardPreview() {
   return (
     <WindowChrome title="1PropertyMarket Outbound — live" rec>
       <div className="bg-surface p-5">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-3 sm:gap-4">
           {[{ l: 'Calls today', v: 1284, i: <PhoneCall className="h-4 w-4" /> }, { l: 'Connected', v: 63, s: '%', i: <TrendingUp className="h-4 w-4" /> }, { l: 'Booked', v: 47, i: <CheckCircle2 className="h-4 w-4" /> }].map((s) => (
-            <div key={s.l} className="rounded-xl border border-line bg-white p-4">
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{s.i}{s.l}</div>
-              <div className="mt-1 text-3xl font-extrabold text-ink"><Counter to={s.v} suffix={s.s || ''} /></div>
+            <div key={s.l} className="flex flex-col rounded-xl border border-line bg-white p-3 sm:p-4">
+              <div className="flex items-start gap-1.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-slate-400 sm:text-xs">
+                <span className="mt-px shrink-0">{s.i}</span><span className="min-w-0">{s.l}</span>
+              </div>
+              <div className="mt-auto pt-2 text-2xl font-extrabold leading-none tracking-tight text-ink tabular-nums sm:text-3xl"><Counter to={s.v} suffix={s.s || ''} /></div>
             </div>
           ))}
         </div>
