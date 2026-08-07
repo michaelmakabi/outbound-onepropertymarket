@@ -1,4 +1,5 @@
 // Rich formatting + color helpers (ported from retell-command-center, adapted to the OPM light theme).
+import { statusColor, statusIconName } from './statuses';
 
 export function usd(n: number, opts?: { precise?: boolean }): string {
   if (!isFinite(n)) return '$0.00';
@@ -55,8 +56,15 @@ export function humanizeDisposition(d: string | null): string {
   return d.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Lucide icon name for a disposition when it maps to a standard status, else null. */
+export function dispositionIconName(d: string | null): string | null {
+  return statusIconName(d || '');
+}
+
 /** Stable color for a disposition by semantic meaning (hex, light theme). */
 export function dispositionColor(d: string): string {
+  const canon = statusColor(d);           // prefer the canonical 20-status catalog
+  if (canon) return canon;
   const k = (d || '').toLowerCase();
   if (k.includes('spam')) return '#b91c1c'; // dark red
   if (k.includes('appointment') || k.includes('booked') || k.includes('job_captured') || k.includes('captured') || k.includes('transfer') || k.includes('interested') && !k.includes('not_interested'))
