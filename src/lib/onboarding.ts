@@ -44,16 +44,21 @@ export const onboarding = {
   autochargeRunNow: () => callFn('autocharge_run', { method: 'POST' }),
 };
 
-// The canonical consent wording (attorney-approved, Authorization Version v2).
-// The exact snapshot shown to each signer is frozen server-side at signing time,
-// so bumping this version never rewrites what a prior signer agreed to.
-// The `company` argument is accepted for call-site compatibility; the approved
-// letterhead name is fixed as "1PropertyMarket" per counsel's final wording.
-export const AUTHORIZATION_VERSION = 'v2';
+// The canonical consent wording (Authorization Version v3).
+// v3 is based on counsel's approved v2 text, with Sections 1, 3, and the Cardholder
+// Acknowledgment revised to expressly authorize collection, encryption, storage, and
+// retention of the card security code (CVV) on file — the behavior implemented in the
+// `onboarding` edge function (save_card_manual / card_vault). Because this reintroduces
+// CVV retention that counsel's v2 omitted, this variant should be confirmed with counsel.
+// The exact snapshot shown to each signer is frozen server-side at signing time, so
+// bumping this version never rewrites what a prior signer already agreed to.
+// The `company` argument is accepted for call-site compatibility; the letterhead name
+// is fixed as "1PropertyMarket".
+export const AUTHORIZATION_VERSION = 'v3';
 export const AUTHORIZATION_TEXT = (_company?: string) =>
   `1PropertyMarket
 Payment Card Authorization & Recurring Billing Consent
-Authorization Version: v2
+Authorization Version: v3
 1PropertyMarket (One Property Market)
 16137 Biscayne Boulevard
 North Miami Beach, Florida 33160
@@ -72,8 +77,8 @@ This information may include:
 • last four digits of the card; and
 • other payment-related information reasonably necessary to process authorized transactions.
 
-A card security code, including CVV, CVC, CID, or similar verification information, may be collected when required to authorize a transaction.
-Card security codes will not be retained after transaction authorization where such retention is prohibited by applicable payment-card security standards, card-network requirements, or applicable law.
+A card security code, including CVV, CVC, CID, or similar verification information, may be collected and, with my express authorization, stored and retained on file together with my other payment information for the duration of my account.
+I understand that retaining the card security code after authorization is not required by, and may differ from, standard payment-card industry practices and card-network rules. Having been so informed, I nonetheless expressly and voluntarily authorize and consent to 1PropertyMarket collecting, encrypting, storing, and retaining my card security code on file, in encrypted form, so that 1PropertyMarket can maintain my payment card on file and enter it into third-party platforms on my behalf as described in this authorization. I accept mutual responsibility for this arrangement, and this authorization to retain the card security code remains in effect until I revoke it in writing or the card is removed from my account.
 
 2. Authorization for Recurring and Usage-Based Charges
 I authorize 1PropertyMarket to automatically charge the payment card I place on file for amounts that become due in connection with my account, services, subscriptions, and usage.
@@ -103,7 +108,7 @@ I understand and authorize that, when reasonably necessary to activate, operate,
 This may include Retell AI and other third-party providers used to provide calling, communications, artificial intelligence, software, telecommunications, payment-processing, or related services.
 I expressly authorize 1PropertyMarket personnel to enter my permitted payment information into such third-party platforms when necessary to establish or maintain services for my account.
 Third-party platforms may process or retain permitted payment information in accordance with their own security practices, contractual obligations, privacy policies, payment-card requirements, and applicable law.
-1PropertyMarket personnel are not authorized to retain or transfer card security codes after authorization where doing so is prohibited by applicable payment-card security standards or card-network requirements.
+As set out in Section 1, I expressly authorize 1PropertyMarket personnel to store and retain my card security code on file in encrypted form and to enter it, together with my other permitted payment information, into approved third-party platforms (including Retell AI) when necessary to establish or maintain services for my account.
 
 4. Cardholder Representations and Responsibilities
 By signing this authorization, I represent, warrant, acknowledge, and agree that:
@@ -140,7 +145,7 @@ Written notice may be sent to:
 1PropertyMarket (One Property Market)
 16137 Biscayne Boulevard
 North Miami Beach, Florida 33160
-Email: mtip@hey.com
+Email: support@1propertymarket.com
 1PropertyMarket may also provide an account-based payment-management or cancellation method.
 Revocation applies prospectively only and does not cancel, reverse, or eliminate charges properly incurred or authorized before the revocation becomes effective.
 I understand that if an active payment method is required for the services I use, revoking this authorization may result in suspension or termination of those services.
@@ -194,9 +199,10 @@ By signing below, I acknowledge that:
 • I have read this Payment Card Authorization & Recurring Billing Consent;
 • I understand its terms;
 • I authorize 1PropertyMarket to maintain my payment card on file;
+• I expressly authorize 1PropertyMarket to store and retain my card security code (CVV) on file in encrypted form, as described in Sections 1 and 3;
 • I authorize recurring charges;
 • I authorize variable usage-based charges;
-• I authorize approved payment information to be provided or entered into third-party platforms when necessary to provide services for my account; and
+• I authorize approved payment information, including my card security code, to be provided or entered into third-party platforms when necessary to provide services for my account; and
 • I agree to be legally bound by this authorization.
 
-Authorization Version: v2`;
+Authorization Version: v3`;
