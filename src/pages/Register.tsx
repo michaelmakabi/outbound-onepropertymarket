@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { billing } from '../lib/api';
-import { Loader2, ShieldCheck, CreditCard, ArrowLeft } from 'lucide-react';
+import { Loader2, ShieldCheck, CreditCard, ArrowLeft, FileText } from 'lucide-react';
 import { LOGO_FULL } from '../lib/logo';
 import { BrandPanel } from './Login';
 
@@ -9,14 +9,30 @@ export default function Register() {
   const [params] = useSearchParams();
   const cancelled = params.get('cancelled') === '1';
   const [form, setForm] = useState({ name: '', company: '', email: '', password: '' });
+  const [terms, setTerms] = useState<{ version: string; text: string } | null>(null);
+  const [agreed, setAgreed] = useState(false);
+  const [signature, setSignature] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    billing.terms().then((t: any) => setTerms({ version: t.version, text: t.text })).catch(() => {});
+  }, []);
+
+  const canSubmit =
+    !!form.name.trim() && !!form.email.trim() && form.password.length >= 8 &&
+    agreed && signature.trim().length >= 2 && !busy;
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(''); setBusy(true);
+    setError('');
+    if (!agreed || signature.trim().length < 2) {
+      setError('Please read and accept the agreement, and type your full legal name to sign.');
+      return;
+    }
+    setBusy(true);
     try {
-      const r = await billing.register(form);
+      const r = await billing.register({ ...form, agreement_accepted: true, signature_name: signature.trim() });
       // Hand off to Stripe's hosted, PCI-compliant page to capture the card.
       window.location.assign(r.checkout_url);
     } catch (err: any) {
@@ -58,8 +74,27 @@ export default function Register() {
             <label className="label">Password</label>
             <input className="input mt-1 mb-4" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="At least 8 characters" autoComplete="new-password" required minLength={8} />
 
-            <button className="btn-primary btn-glow w-full !py-2.5" disabled={busy || !form.name || !form.email || form.password.length < 8}>
-              {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Starting secure checkout…</> : <><CreditCard className="h-4 w-4" /> Continue to add payment</>}
+            {/* Payment authorization + release of liability + calling-compliance agreement (required) */}
+            <div className="mt-2 rounded-xl border border-line bg-surface/60 p-3">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <FileText className="h-3.5 w-3.5" /> Payment authorization &amp; terms{terms?.version ? <span className="font-mono font-normal text-slate-400"> · {terms.version}</span> : null}
+              </div>
+              <div className="max-h-44 overflow-y-auto whitespace-pre-line rounded-lg border border-line bg-white p-3 text-[11px] leading-relaxed text-slate-600">
+                {terms ? terms.text : 'Loading agreement…'}
+              </div>
+              <label className="mt-2.5 flex items-start gap-2 text-xs leading-snug text-slate-600">
+                <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[#1f6feb]" />
+                <span>I have read and agree to the Payment Authorization, Release of Liability &amp; Hold-Harmless, Indemnification, and Privacy &amp; Calling-Compliance Terms above. I am authorized to bind the Customer.</span>
+              </label>
+              <label className="mt-2.5 block">
+                <span className="label">Type your full legal name to sign</span>
+                <input className="input mt-1" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="Your full legal name" autoComplete="name" />
+              </label>
+              <p className="mt-1.5 text-[10px] leading-snug text-slate-400">Your typed name is your electronic signature (E-SIGN / UETA), recorded with the date, your IP address, and the exact terms shown.</p>
+            </div>
+
+            <button className="btn-primary btn-glow mt-5 w-full !py-2.5 disabled:cursor-not-allowed disabled:opacity-50" disabled={!canSubmit}>
+              {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Starting secure checkout…</> : <><CreditCard className="h-4 w-4" /> Agree &amp; continue to payment</>}
             </button>
 
             <div className="mt-3 flex items-start gap-2 text-[11px] text-slate-500">
