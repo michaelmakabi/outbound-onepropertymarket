@@ -214,7 +214,7 @@ function ProvisionModal({ t, onClose, onDone }: any) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
-      <div className="card w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="card w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><Zap className="h-5 w-5 text-brand" /> Provision dialer</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button>
@@ -277,7 +277,7 @@ function TenantModal({ t, users, onClose, onSaved }: any) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
-      <div className="card w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="card w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between"><h3 className="text-lg font-bold text-ink">{isNew ? 'New customer' : `Edit ${t.display_name || t.slug}`}</h3><button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button></div>
         {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
         <div className="space-y-3">
@@ -298,7 +298,7 @@ function TenantModal({ t, users, onClose, onSaved }: any) {
           ) : (
             <div className="space-y-3 rounded-lg border border-line bg-surface p-3">
               <div className="text-[11px] font-semibold text-slate-500">Advanced mapping — only needed when this customer's CRM, dialer, or billing IDs differ from the workspace ID.</div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 <label className="block"><span className="label mb-1 block">CRM</span><input className="input w-full font-mono text-[11px]" value={form.crm_workspace} onChange={(e) => setForm({ ...form, crm_workspace: e.target.value })} placeholder="= id" /></label>
                 <label className="block"><span className="label mb-1 block">Dialer</span><input className="input w-full font-mono text-[11px]" value={form.dialer_slug} onChange={(e) => setForm({ ...form, dialer_slug: e.target.value })} placeholder="= id" /></label>
                 <label className="block"><span className="label mb-1 block">Billing</span><input className="input w-full font-mono text-[11px]" value={form.billing_slug} onChange={(e) => setForm({ ...form, billing_slug: e.target.value })} placeholder="= id" /></label>
