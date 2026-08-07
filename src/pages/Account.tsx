@@ -98,6 +98,7 @@ export default function Account() {
           <div className="card overflow-hidden">
             <div className="border-b border-line px-4 py-3 text-sm font-semibold text-ink">Invoices & transactions</div>
             {w.invoices && w.invoices.length > 0 ? (
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
@@ -122,6 +123,7 @@ export default function Account() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="px-4 py-8 text-center text-sm text-slate-400">No invoices yet. Usage accrues here and is invoiced periodically.</div>
             )}
