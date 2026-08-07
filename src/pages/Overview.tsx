@@ -42,9 +42,9 @@ function WorkspaceTable({ raw }: { raw: any[] }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="relative">
+        <div className="relative flex-1 sm:flex-none">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-          <input value={t.search} onChange={(e) => t.setSearch(e.target.value)} placeholder="Search workspaces…" className="input w-[240px] pl-8" />
+          <input value={t.search} onChange={(e) => t.setSearch(e.target.value)} placeholder="Search workspaces…" className="input w-full sm:w-[240px] pl-8" />
         </div>
         <ColumnToggleMenu columns={WS_COLUMNS} isVisible={t.isVisible} onToggle={t.toggle} />
       </div>
