@@ -10,6 +10,7 @@ import { useWorkspace } from '../lib/workspace';
 import {
   Plus, Trash2, GripVertical, LayoutGrid, Table as TableIcon, Columns3,
   Search, Calendar, Phone, MapPin, Layers, TrendingUp, Target, Activity, Pencil, X, DollarSign, Filter, Check,
+  PhoneIncoming, PhoneOutgoing, Clock, Bot,
 } from 'lucide-react';
 
 type Stage = { id: number; name: string; color: string; sort_order: number; leadCount: number; valueSum?: number; icon?: string | null };
@@ -20,6 +21,7 @@ type Lead = {
   property_ref?: string | null; tags?: string[]; created_at?: string | null; updated_at?: string | null;
   date_added?: string | null; attempts?: number; last_disposition?: string | null;
   phone?: string | null; phone_count?: number;
+  last_call?: { call_id?: string; direction?: string; agent_name?: string | null; agent_id?: string | null; duration?: number; ts?: number; disposition?: string | null } | null;
 };
 
 type ViewMode = 'board' | 'table' | 'grid';
@@ -82,6 +84,13 @@ export default function Pipelines() {
   const [sourceFilter, setSourceFilter] = useState('');
   const [assignedFilter, setAssignedFilter] = useState('');
   const [filterMenu, setFilterMenu] = useState(false);
+  // Call-based filters (agent / call date / duration) + the agent list from the backend.
+  const [agentFilter, setAgentFilter] = useState('');
+  const [callStart, setCallStart] = useState('');
+  const [callEnd, setCallEnd] = useState('');
+  const [durMin, setDurMin] = useState('');
+  const [durMax, setDurMax] = useState('');
+  const [callAgents, setCallAgents] = useState<string[]>([]);
 
   // drag state
   const [dragId, setDragId] = useState<string | null>(null);
@@ -101,13 +110,13 @@ export default function Pipelines() {
   // Distinct source / assigned values for the filter dropdowns.
   const sourceOptions = useMemo(() => [...new Set(leads.map((l) => l.lead_source).filter(Boolean) as string[])].sort(), [leads]);
   const assignedOptions = useMemo(() => [...new Set(leads.map((l) => l.assigned_to).filter(Boolean) as string[])].sort(), [leads]);
-  const activeFilterCount = (stageFilter.length ? 1 : 0) + (valueMin || valueMax ? 1 : 0) + (sourceFilter ? 1 : 0) + (assignedFilter ? 1 : 0);
-  const clearFilters = () => { setStageFilter([]); setValueMin(''); setValueMax(''); setSourceFilter(''); setAssignedFilter(''); };
+  const activeFilterCount = (stageFilter.length ? 1 : 0) + (valueMin || valueMax ? 1 : 0) + (sourceFilter ? 1 : 0) + (assignedFilter ? 1 : 0) + (agentFilter ? 1 : 0) + (callStart || callEnd ? 1 : 0) + (durMin || durMax ? 1 : 0);
+  const clearFilters = () => { setStageFilter([]); setValueMin(''); setValueMax(''); setSourceFilter(''); setAssignedFilter(''); setAgentFilter(''); setCallStart(''); setCallEnd(''); setDurMin(''); setDurMax(''); };
   // Saved smart-list config: stages stored by NAME so a view is portable across pipelines that share stage names.
   const currentCfg = {
     view, search, sortKey, sortDir, preset, basis, customStart, customEnd,
     stageNames: stageFilter.map((id) => (current?.stages || []).find((s) => s.id === id)?.name).filter(Boolean) as string[],
-    valueMin, valueMax, sourceFilter, assignedFilter,
+    valueMin, valueMax, sourceFilter, assignedFilter, agentFilter, callStart, callEnd, durMin, durMax,
   };
   const applyCfg = (c: any) => {
     if (!c) return;
@@ -121,6 +130,8 @@ export default function Pipelines() {
     setStageFilter((Array.isArray(c.stageNames) ? c.stageNames : []).map((n: string) => (current?.stages || []).find((s) => s.name === n)?.id).filter((x: any) => x != null) as number[]);
     setValueMin(c.valueMin || ''); setValueMax(c.valueMax || '');
     setSourceFilter(c.sourceFilter || ''); setAssignedFilter(c.assignedFilter || '');
+    setAgentFilter(c.agentFilter || ''); setCallStart(c.callStart || ''); setCallEnd(c.callEnd || '');
+    setDurMin(c.durMin || ''); setDurMax(c.durMax || '');
   };
 
   // Load leads whenever the selected pipeline changes.
@@ -129,7 +140,7 @@ export default function Pipelines() {
     let cancelled = false;
     setLeadsLoading(true);
     opm.pipelineLeads(active)
-      .then((d: any) => { if (!cancelled) setLeads(d.leads || []); })
+      .then((d: any) => { if (!cancelled) { setLeads(d.leads || []); setCallAgents(d.agents || []); } })
       .catch(() => { if (!cancelled) setLeads([]); })
       .finally(() => { if (!cancelled) setLeadsLoading(false); });
     return () => { cancelled = true; };
@@ -184,6 +195,10 @@ export default function Pipelines() {
     const vMin = valueMin.trim() === '' ? null : Number(valueMin);
     const vMax = valueMax.trim() === '' ? null : Number(valueMax);
     const stageSet = stageFilter.length ? new Set(stageFilter) : null;
+    const cStart = callStart ? new Date(callStart + 'T00:00:00').getTime() : null;
+    const cEnd = callEnd ? new Date(callEnd + 'T23:59:59').getTime() : null;
+    const dMin = durMin.trim() === '' ? null : Number(durMin);
+    const dMax = durMax.trim() === '' ? null : Number(durMax);
     return leads.filter((l) => {
       if (q) {
         const hay = [l.name, l.property_ref, l.phone, l.lead_source, l.assigned_to]
@@ -201,9 +216,13 @@ export default function Pipelines() {
       if (vMax != null && (l.deal_price || 0) > vMax) return false;
       if (sourceFilter && String(l.lead_source || '') !== sourceFilter) return false;
       if (assignedFilter && String(l.assigned_to || '') !== assignedFilter) return false;
+      if (agentFilter && String(l.last_call?.agent_name || '') !== agentFilter) return false;
+      if (cStart != null || cEnd != null) { const t = l.last_call?.ts || null; if (t == null) return false; if (cStart != null && t < cStart) return false; if (cEnd != null && t > cEnd) return false; }
+      if (dMin != null && (l.last_call?.duration || 0) < dMin) return false;
+      if (dMax != null && (l.last_call?.duration || 0) > dMax) return false;
       return true;
     });
-  }, [leads, search, range, basis, stageFilter, valueMin, valueMax, sourceFilter, assignedFilter]);
+  }, [leads, search, range, basis, stageFilter, valueMin, valueMax, sourceFilter, assignedFilter, agentFilter, callStart, callEnd, durMin, durMax]);
 
   // ---- sorted (table/grid) ----
   const sorted = useMemo(() => {
@@ -431,6 +450,24 @@ export default function Pipelines() {
                     <option value="">Anyone</option>
                     {assignedOptions.map((a) => <option key={a} value={a}>{a}</option>)}
                   </select>
+                  <div className="my-2 border-t border-dashed border-line" />
+                  <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Last call agent</div>
+                  <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="input mb-3 h-8 w-full text-xs">
+                    <option value="">Any agent</option>
+                    {callAgents.map((a) => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                  <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Last call date</div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <input type="date" value={callStart} onChange={(e) => setCallStart(e.target.value)} className="input h-8 flex-1 text-xs" />
+                    <span className="text-slate-400">–</span>
+                    <input type="date" value={callEnd} onChange={(e) => setCallEnd(e.target.value)} className="input h-8 flex-1 text-xs" />
+                  </div>
+                  <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">Call duration (seconds)</div>
+                  <div className="flex items-center gap-2">
+                    <input value={durMin} onChange={(e) => setDurMin(e.target.value)} type="number" placeholder="Min" className="input h-8 flex-1 text-xs" />
+                    <span className="text-slate-400">–</span>
+                    <input value={durMax} onChange={(e) => setDurMax(e.target.value)} type="number" placeholder="Max" className="input h-8 flex-1 text-xs" />
+                  </div>
                   <div className="mt-3 flex items-center justify-between border-t border-line pt-2">
                     <button onClick={clearFilters} className="text-xs font-semibold text-slate-500 hover:text-ink">Clear all</button>
                     <button onClick={() => setFilterMenu(false)} className="rounded-lg bg-brand px-3 py-1 text-xs font-semibold text-white hover:brightness-110">Done</button>
@@ -498,6 +535,27 @@ function Tags({ tags }: { tags?: string[] }) {
 function fmtDate(ms: number | null): string {
   return ms ? new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '—';
 }
+function fmtDur(s?: number | null): string {
+  const n = Math.round(Number(s) || 0);
+  if (n <= 0) return '0s';
+  return n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`;
+}
+
+// Compact "last call" summary shown on pipeline cards + table (direction, when, agent, duration).
+function LastCallLine({ lc }: { lc?: Lead['last_call'] }) {
+  if (!lc) return null;
+  const inbound = lc.direction === 'inbound';
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-slate-500">
+      <span className={cx('inline-flex items-center gap-0.5 font-semibold', inbound ? 'text-emerald-600' : 'text-sky-600')}>
+        {inbound ? <PhoneIncoming className="h-3 w-3" /> : <PhoneOutgoing className="h-3 w-3" />}{inbound ? 'In' : 'Out'}
+      </span>
+      {lc.ts ? <span className="inline-flex items-center gap-0.5"><Calendar className="h-2.5 w-2.5" />{fmtDate(lc.ts)}</span> : null}
+      {lc.duration ? <span className="inline-flex items-center gap-0.5"><Clock className="h-2.5 w-2.5" />{fmtDur(lc.duration)}</span> : null}
+      {lc.agent_name ? <span className="inline-flex min-w-0 items-center gap-0.5"><Bot className="h-2.5 w-2.5 shrink-0" /><span className="truncate">{lc.agent_name}</span></span> : null}
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------------ board */
 
@@ -555,6 +613,7 @@ function BoardView({
                         {l.deal_price ? <span className="text-xs font-bold text-emerald-600">{usd(l.deal_price)}</span> : null}
                         <AttemptsBadge n={l.attempts} />
                       </div>
+                      <LastCallLine lc={l.last_call} />
                       <Tags tags={l.tags} />
                     </div>
                   </div>
@@ -605,7 +664,10 @@ function TableView({
               {head('Attempts', 'attempts', 'right', 'hidden lg:table-cell')}
               {head('Source', undefined, undefined, 'hidden xl:table-cell')}
               {head('Assigned', undefined, undefined, 'hidden xl:table-cell')}
-              {head('Added', 'created', undefined, 'hidden lg:table-cell')}
+              {head('Last call', undefined, undefined, 'hidden lg:table-cell')}
+              {head('Agent', undefined, undefined, 'hidden xl:table-cell')}
+              {head('Duration', undefined, 'right', 'hidden xl:table-cell')}
+              {head('Added', 'created', undefined, 'hidden 2xl:table-cell')}
               {head('Updated', 'updated', undefined, 'hidden md:table-cell')}
             </tr>
           </thead>
@@ -626,7 +688,17 @@ function TableView({
                 <td className="hidden px-3 py-2 text-right tabular-nums text-slate-600 lg:table-cell">{l.attempts || 0}</td>
                 <td className="hidden px-3 py-2 text-slate-600 xl:table-cell">{l.lead_source || '—'}</td>
                 <td className="hidden px-3 py-2 text-slate-600 xl:table-cell">{l.assigned_to || '—'}</td>
-                <td className="hidden whitespace-nowrap px-3 py-2 text-slate-500 lg:table-cell">{fmtDate(addedMs(l))}</td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-slate-500 lg:table-cell">
+                  {l.last_call ? (
+                    <span className="inline-flex items-center gap-1">
+                      {l.last_call.direction === 'inbound' ? <PhoneIncoming className="h-3.5 w-3.5 text-emerald-600" /> : <PhoneOutgoing className="h-3.5 w-3.5 text-sky-600" />}
+                      {fmtDate(l.last_call.ts || null)}
+                    </span>
+                  ) : '—'}
+                </td>
+                <td className="hidden max-w-[160px] truncate px-3 py-2 text-slate-600 xl:table-cell" title={l.last_call?.agent_name || ''}>{l.last_call?.agent_name || '—'}</td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-500 xl:table-cell">{l.last_call?.duration ? fmtDur(l.last_call.duration) : '—'}</td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-slate-500 2xl:table-cell">{fmtDate(addedMs(l))}</td>
                 <td className="hidden whitespace-nowrap px-3 py-2 text-slate-500 md:table-cell">{fmtDate(updatedMs(l))}</td>
               </tr>
             ))}
