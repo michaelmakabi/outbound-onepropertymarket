@@ -59,7 +59,7 @@ export default function UsersAdmin() {
       <PageHead title="Users & Access" subtitle="Create logins and scope exactly what each person can see"
         right={isSuper && <button className="btn-primary" onClick={() => setCreating(true)}><UserPlus className="h-4 w-4" /> New user</button>} />
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
@@ -96,7 +96,7 @@ export default function UsersAdmin() {
 
       <div className="card mt-6 overflow-hidden">
         <div className="flex items-center gap-2 border-b border-line px-5 py-3 text-xs font-bold uppercase tracking-wide text-slate-500"><Clock className="h-3.5 w-3.5" /> Activity log</div>
-        <div className="max-h-80 overflow-y-auto">
+        <div className="max-h-80 overflow-x-auto overflow-y-auto">
           {events.length === 0 ? <div className="px-5 py-6 text-center text-sm text-slate-400">No activity yet.</div> : (
             <table className="w-full text-sm">
               <tbody>
@@ -278,7 +278,7 @@ function AccessEditor({ user, workspaces, onClose }: { user: any; workspaces: Ws
 function Modal({ title, children, onClose, wide }: { title: string; children: any; onClose: () => void; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
-      <div className={`card w-full ${wide ? 'max-w-lg' : 'max-w-sm'} p-5`} onClick={(e) => e.stopPropagation()}>
+      <div className={`card w-full ${wide ? 'max-w-lg' : 'max-w-sm'} mx-4 max-h-[90vh] overflow-y-auto p-5`} onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-ink">{title}</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button>
