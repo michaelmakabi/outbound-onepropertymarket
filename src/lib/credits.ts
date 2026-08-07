@@ -1,5 +1,5 @@
-// Client for the prepaid-credits actions on the `onboarding` edge function (SaaS mode).
-// Self-contained so it does not touch the large consent module. Reuses the app bearer token.
+// Client for the billing actions on the `onboarding` edge function (SaaS credits,
+// subscriptions/service fees, refunds, plans). Self-contained; reuses the app bearer token.
 import { tokenStore } from './api';
 
 const BASE =
@@ -29,9 +29,21 @@ async function callFn(action: string, opts: { method?: string; params?: Record<s
 }
 
 export const credits = {
+  // Prepaid credits (SaaS)
   wallet: (slug: string) => callFn('credits_wallet', { params: { slug } }),
   configSet: (b: any) => callFn('credits_config_set', { method: 'POST', body: b }),
   topup: (b: any) => callFn('credits_topup', { method: 'POST', body: b }),
   debitNow: (workspace_slug: string) => callFn('credits_debit_now', { method: 'POST', body: { workspace_slug } }),
   baseline: (workspace_slug: string) => callFn('credits_baseline', { method: 'POST', body: { workspace_slug } }),
+  // Refunds (admin)
+  refund: (b: any) => callFn('refund', { method: 'POST', body: b }),
+  // Subscriptions / service fees (Direct retail + subscription)
+  subscriptions: (slug: string) => callFn('subscriptions', { params: { slug } }),
+  subscriptionSet: (b: any) => callFn('subscription_set', { method: 'POST', body: b }),
+  subscriptionDelete: (id: string) => callFn('subscription_delete', { method: 'POST', body: { id } }),
+  subscriptionChargeNow: (id: string) => callFn('subscription_charge_now', { method: 'POST', body: { id } }),
+  // Reusable plan templates
+  plans: () => callFn('plans'),
+  planCreate: (b: any) => callFn('plan_create', { method: 'POST', body: b }),
+  planApply: (b: any) => callFn('plan_apply', { method: 'POST', body: b }),
 };
