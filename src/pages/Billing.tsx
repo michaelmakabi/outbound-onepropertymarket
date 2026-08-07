@@ -145,7 +145,7 @@ function TenantCard({ row, onChanged }: { row: any; onChanged: () => void }) {
       </div>
 
       {/* money row */}
-      <div className="mb-4 grid grid-cols-4 gap-3 rounded-xl bg-surface px-4 py-3">
+      <div className="mb-4 grid grid-cols-2 gap-3 rounded-xl bg-surface px-4 py-3 sm:grid-cols-2 lg:grid-cols-4">
         <div><div className="label">Hard cost</div><div className="text-lg font-bold text-ink">{fmt.money(base.hard_cost || 0)}</div></div>
         <div><div className="label">Retail @ {mult}×</div><div className="text-lg font-bold text-ink">{fmt.money(previewRetail)}</div></div>
         <div><div className="label">Margin</div><div className={`text-lg font-bold ${previewMargin > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>{fmt.money(previewMargin)}</div></div>
