@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { opm } from '../lib/api';
 import { LoadingBlock, EmptyState, AudioPlayer } from '../components/dash';
-import { humanizeDisposition, dispositionColor } from '../lib/format';
+import { humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
+import { StageIcon } from '../lib/statusIcons';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
   Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check, X, Loader2, History,
@@ -579,7 +580,7 @@ export default function LeadDetail() {
                         </div>
                         {c.disposition && (
                           <span className="inline-flex items-center gap-1.5">
-                            <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: `${color}1a`, color }}>{humanizeDisposition(c.disposition)}</span>
+                            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: `${color}1a`, color }}><StageIcon name={dispositionIconName(c.disposition)} color={color} className="h-3 w-3" />{humanizeDisposition(c.disposition)}</span>
                             {c.disposition_source && <span className="text-[10px] uppercase tracking-wide text-slate-400">{c.disposition_source}</span>}
                           </span>
                         )}
