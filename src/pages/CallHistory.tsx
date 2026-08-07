@@ -8,7 +8,8 @@ import {
 } from '../components/dash';
 import AiPromptModal from '../components/AiPromptModal';
 import { bulkDownload, downloadCallMp3 } from '../lib/download';
-import { usd, secs, dateTime, humanizeDisposition, dispositionColor } from '../lib/format';
+import { usd, secs, dateTime, humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
+import { StageIcon } from '../lib/statusIcons';
 import { Search, X, ChevronLeft, ChevronRight, PhoneIncoming, PhoneOutgoing, Download, Clock, FileText, Wand2, Loader2, ArrowDownToLine } from 'lucide-react';
 
 const PAGE_SIZE = 50;
@@ -256,7 +257,7 @@ export default function CallHistory() {
                         </td>
                       ); })()}
                       {isVisible('agent') && <td className="max-w-[220px] truncate px-3 py-2.5 text-xs">{c.agent_name || '—'}</td>}
-                      {isVisible('disposition') && <td className="whitespace-nowrap px-3 py-2.5">{c.disposition ? <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(c.disposition) }}><span className="h-2 w-2 rounded-full" style={{ background: dispositionColor(c.disposition) }} />{humanizeDisposition(c.disposition)}</span> : <span className="text-xs text-slate-400">—</span>}</td>}
+                      {isVisible('disposition') && <td className="whitespace-nowrap px-3 py-2.5">{c.disposition ? <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(c.disposition) }}><StageIcon name={dispositionIconName(c.disposition)} color={dispositionColor(c.disposition)} className="h-3.5 w-3.5" />{humanizeDisposition(c.disposition)}</span> : <span className="text-xs text-slate-400">—</span>}</td>}
                       {isVisible('summary') && <td className="max-w-[280px] px-3 py-2.5">{c.call_summary ? <span className="flex items-center gap-1.5 text-xs text-slate-600"><FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{c.call_summary}</span></span> : <span className="text-xs text-slate-300">—</span>}</td>}
                       {isVisible('duration') && <td className="px-3 py-2.5 text-right font-mono text-xs">{secs(Number(c.duration_seconds || 0))}</td>}
                       {isVisible('cost') && <td className="px-3 py-2.5 text-right font-mono text-xs">{usd(Number(c.combined_cost_cents || 0) / 100, { precise: true })}</td>}
