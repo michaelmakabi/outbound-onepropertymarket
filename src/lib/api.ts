@@ -101,6 +101,11 @@ export const opm = {
   workspaces: () => opmCall('workspaces'),
   summary: () => opmCall('summary'),
   pipelines: () => opmCall('pipelines'),
+  // Snapshots: list a specific workspace's pipelines/custom fields (source picker), and clone across.
+  pipelinesFor: (workspace: string) => opmCall('pipelines', { params: { workspace } }),
+  customFieldsFor: (workspace: string) => opmCall('custom_fields', { params: { workspace } }),
+  clonePipelines: (b: { source_workspace: string; target_workspace: string; pipeline_ids: number[]; include_custom_fields: boolean }) =>
+    opmCall('clone_pipelines', { method: 'POST', params: { workspace: '' }, body: b }),
   savePipeline: (b: any) => opmCall('save_pipeline', { method: 'POST', body: b }),
   deletePipeline: (id: number) => opmCall('delete_pipeline', { method: 'POST', body: { id } }),
   // Persist a new pipeline order (ordered array of pipeline ids for the active workspace).
@@ -193,6 +198,12 @@ export const testai = {
   workspaces: () => testaiCall('workspaces'),
   agents: (workspace: string) => testaiCall('agents', { params: { workspace } }),
   numbers: (workspace: string) => testaiCall('numbers', { params: { workspace } }),
+  // Prompt-aware variable detection: returns the agent's general_prompt + detected {{vars}} (browser never sees the Retell key).
+  agentPromptVars: (workspace: string, agent_id: string) => testaiCall('agent_prompt_vars', { params: { workspace, agent_id } }),
+  // Reusable Test-AI templates, keyed by workspace.
+  templates: (workspace: string) => testaiCall('list_templates', { params: { workspace } }),
+  saveTemplate: (b: { id?: number; workspace: string; name: string; agent_id?: string; config: any }) => testaiCall('save_template', { method: 'POST', body: b }),
+  deleteTemplate: (id: number) => testaiCall('delete_template', { method: 'POST', body: { id } }),
   call: (b: { workspace: string; agent_id: string; to_number: string; from_number?: string; dynamic_variables?: Record<string, string> }) =>
     testaiCall('call', { method: 'POST', body: b }),
 };
