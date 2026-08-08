@@ -122,6 +122,53 @@ Deno.serve(async (req) => {
     }
     if (action === 'delete_stage' && req.method === 'POST') { await client.from('opm_stages').delete().eq('id', body.id); return json({ ok: true }); }
 
+    // ---- Snapshots: clone pipelines (+ optional custom fields) across workspaces ----
+    // Copies selected source pipelines and their stages into a target workspace.
+    // Never clones/overwrites the pinned "Standard 1PM Pipeline" (every workspace has one),
+    // and skips any pipeline whose name already exists in the target. super_admin/admin, or
+    // an owner of BOTH the source and target workspace.
+    if (action === 'clone_pipelines' && req.method === 'POST') {
+      const src = String(body.source_workspace || '').trim();
+      const tgt = String(body.target_workspace || '').trim();
+      if (!src || !tgt) return json({ error: 'source_workspace and target_workspace required' }, 400);
+      if (src === tgt) return json({ error: 'source and target must differ' }, 400);
+      if (!isStaff && (roleMap[src] !== 'owner' || roleMap[tgt] !== 'owner')) {
+        return json({ error: 'forbidden: owner of both workspaces (or staff) required' }, 403);
+      }
+      const pids = Array.isArray(body.pipeline_ids) ? body.pipeline_ids.map((x: any) => Number(x)).filter((n: number) => Number.isFinite(n)) : [];
+      if (!pids.length) return json({ error: 'pipeline_ids required' }, 400);
+      const { data: srcPipes } = await client.from('opm_pipelines').select('*').eq('workspace', src).eq('archived', false).in('id', pids);
+      const { data: tgtPipes } = await client.from('opm_pipelines').select('id,name,sort_order').eq('workspace', tgt).eq('archived', false);
+      const tgtNames = new Set((tgtPipes || []).map((p: any) => p.name));
+      let maxSort = 0;
+      for (const p of tgtPipes || []) { const s = Number(p.sort_order) || 0; if (s > maxSort) maxSort = s; }
+      const results: any[] = [];
+      // Preserve the caller's selected order (pids) when assigning new sort_order.
+      const orderedSrc = pids.map((id: number) => (srcPipes || []).find((p: any) => p.id === id)).filter(Boolean);
+      for (const p of orderedSrc) {
+        if (p.name === 'Standard 1PM Pipeline') { results.push({ name: p.name, status: 'skipped', reason: 'pinned' }); continue; }
+        if (tgtNames.has(p.name)) { results.push({ name: p.name, status: 'skipped', reason: 'exists' }); continue; }
+        maxSort += 1;
+        const { data: np, error: pe } = await client.from('opm_pipelines').insert({ workspace: tgt, name: p.name, sort_order: maxSort, campaign: p.campaign || null }).select().maybeSingle();
+        if (pe || !np) { results.push({ name: p.name, status: 'error', reason: pe?.message || 'insert failed' }); continue; }
+        const { data: srcStages } = await client.from('opm_stages').select('*').eq('pipeline_id', p.id).order('sort_order');
+        const stageRows = (srcStages || []).map((s: any) => ({ pipeline_id: np.id, name: s.name, color: s.color, icon: s.icon, sort_order: s.sort_order }));
+        if (stageRows.length) await client.from('opm_stages').insert(stageRows);
+        tgtNames.add(p.name);
+        results.push({ name: p.name, status: 'cloned', new_id: np.id, stages: stageRows.length });
+      }
+      let customFieldsCopied = 0;
+      if (body.include_custom_fields === true) {
+        const { data: srcCf } = await client.from('workspace_custom_fields').select('*').eq('workspace', src);
+        const { data: tgtCf } = await client.from('workspace_custom_fields').select('entity,field_key').eq('workspace', tgt);
+        const have = new Set((tgtCf || []).map((f: any) => `${f.entity}::${f.field_key}`));
+        const rows = (srcCf || []).filter((f: any) => !have.has(`${f.entity}::${f.field_key}`)).map((f: any) => ({ workspace: tgt, entity: f.entity, field_key: f.field_key, label: f.label, field_type: f.field_type, options: f.options || [], sort_order: f.sort_order || 0 }));
+        if (rows.length) { const { error } = await client.from('workspace_custom_fields').insert(rows); if (!error) customFieldsCopied = rows.length; }
+      }
+      const cloned = results.filter((r) => r.status === 'cloned').length;
+      return json({ ok: true, source: src, target: tgt, cloned, results, custom_fields_copied: customFieldsCopied });
+    }
+
     if (action === 'leads') {
       const pipeline_id = str('pipeline_id'); const stage_id = str('stage_id'); const search = str('search');
       let q = client.from('opm_leads').select('lead_id,name,crm_stage,pipeline_id,stage_id,lead_source,assigned_to,deal_price,property_ref,tags,updated_at').eq('workspace', ws).order('updated_at', { ascending: false }).limit(1000);
