@@ -103,6 +103,9 @@ export const opm = {
   pipelines: () => opmCall('pipelines'),
   savePipeline: (b: any) => opmCall('save_pipeline', { method: 'POST', body: b }),
   deletePipeline: (id: number) => opmCall('delete_pipeline', { method: 'POST', body: { id } }),
+  // Persist a new pipeline order (ordered array of pipeline ids for the active workspace).
+  // The pinned "Standard 1PM Pipeline" is always forced first server-side regardless of position.
+  reorderPipelines: (ids: number[]) => opmCall('reorder_pipelines', { method: 'POST', body: { ids } }),
   saveStage: (b: any) => opmCall('save_stage', { method: 'POST', body: b }),
   deleteStage: (id: number) => opmCall('delete_stage', { method: 'POST', body: { id } }),
   leads: (p: any) => opmCall('leads', { params: p }),
