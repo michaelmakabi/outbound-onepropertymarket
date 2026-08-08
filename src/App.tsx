@@ -34,6 +34,7 @@ import Register from './pages/Register';
 import RegisterComplete from './pages/RegisterComplete';
 import Onboarding from './pages/Onboarding';
 import AgentClone from './pages/AgentClone';
+import Snapshots from './pages/Snapshots';
 
 // admin: admin/super_admin only. op: operator tooling — hidden from customers (role=user).
 function Protected({ children, admin, op }: { children: JSX.Element; admin?: boolean; op?: boolean }) {
@@ -88,6 +89,7 @@ export default function App() {
       <Route path="/compare" element={<Protected op><Compare /></Protected>} />
       <Route path="/agents" element={<Protected op><Agents /></Protected>} />
       <Route path="/agent-clone" element={<Protected admin><AgentClone /></Protected>} />
+      <Route path="/snapshots" element={<Protected admin><Snapshots /></Protected>} />
       <Route path="/test-ai" element={<Protected><TestAI /></Protected>} />
       <Route path="/suggestions" element={<Protected op><Suggestions /></Protected>} />
       <Route path="/prompt-studio" element={<Protected op><PromptStudio /></Protected>} />
