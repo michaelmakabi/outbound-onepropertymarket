@@ -31,6 +31,10 @@ type DateBasis = 'added' | 'updated';
 
 const cx = (...c: (string | false | undefined | null)[]) => c.filter(Boolean).join(' ');
 
+// The "Standard 1PM Pipeline" is pinned first, non-deletable and non-draggable in every workspace.
+const PINNED_PIPELINE = 'Standard 1PM Pipeline';
+const isPinnedPipeline = (p: Pipeline) => p.name === PINNED_PIPELINE;
+
 /** Parse a date that may be 'YYYY-MM-DD' or ISO. Returns ms or null. */
 function parseDate(v?: string | null): number | null {
   if (!v) return null;
@@ -92,9 +96,12 @@ export default function Pipelines() {
   const [durMax, setDurMax] = useState('');
   const [callAgents, setCallAgents] = useState<string[]>([]);
 
-  // drag state
+  // drag state (lead cards on the board)
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  // drag state (reordering the pipeline pills)
+  const [pipeDragId, setPipeDragId] = useState<number | null>(null);
+  const [pipeDragOver, setPipeDragOver] = useState<number | null>(null);
 
   const loadPipelines = () =>
     opm.pipelines().then((d: any) => {
@@ -107,6 +114,12 @@ export default function Pipelines() {
   useEffect(() => { setLoading(true); loadPipelines(); /* eslint-disable-next-line */ }, [activeWorkspace]);
 
   const current = pipelines.find((p) => p.id === active) || null;
+  // Render order: pinned "Standard 1PM Pipeline" always first, then the rest in their stored order.
+  const orderedPipelines = useMemo(() => {
+    const pinned = pipelines.filter(isPinnedPipeline);
+    const rest = pipelines.filter((p) => !isPinnedPipeline(p));
+    return [...pinned, ...rest];
+  }, [pipelines]);
   // Distinct source / assigned values for the filter dropdowns.
   const sourceOptions = useMemo(() => [...new Set(leads.map((l) => l.lead_source).filter(Boolean) as string[])].sort(), [leads]);
   const assignedOptions = useMemo(() => [...new Set(leads.map((l) => l.assigned_to).filter(Boolean) as string[])].sort(), [leads]);
@@ -152,8 +165,29 @@ export default function Pipelines() {
     await opm.savePipeline({ name, sort_order: pipelines.length }); loadPipelines();
   }
   async function delPipeline(id: number) {
+    const p = pipelines.find((x) => x.id === id);
+    if (p && isPinnedPipeline(p)) return; // pinned pipeline is non-deletable
     if (!confirm('Archive this pipeline?')) return;
     await opm.deletePipeline(id); setActive(null); loadPipelines();
+  }
+  // Drag-reorder the (non-pinned) pipelines: move `dragId` to `dropId`'s slot, persist, reload on failure.
+  async function reorderPipelines(dragId: number, dropId: number) {
+    if (dragId === dropId) return;
+    const pinned = pipelines.filter(isPinnedPipeline);
+    const rest = pipelines.filter((p) => !isPinnedPipeline(p));
+    const from = rest.findIndex((p) => p.id === dragId);
+    const to = rest.findIndex((p) => p.id === dropId);
+    if (from < 0 || to < 0) return; // never move the pinned pipeline
+    const next = [...rest];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    const newList = [...pinned, ...next];
+    setPipelines(newList); // optimistic
+    try {
+      await opm.reorderPipelines(newList.map((p) => p.id));
+    } catch {
+      loadPipelines(); // resync on failure
+    }
   }
   async function addStage() {
     if (!current) return;
@@ -308,15 +342,28 @@ export default function Pipelines() {
 
       {/* pipeline pills */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        {pipelines.map((p) => (
-          <button key={p.id} onClick={() => setActive(p.id)}
-            className={cx('group inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold',
-              active === p.id ? 'bg-brand text-white' : 'bg-surface text-slate-600 hover:bg-line')}>
-            {p.name}
-            <span className={cx('rounded-full px-1.5 text-xs', active === p.id ? 'bg-white/20' : 'bg-white')}>{p.stages.reduce((s, x) => s + x.leadCount, 0)}</span>
-            {active === p.id && <Trash2 className="h-3.5 w-3.5 opacity-70 hover:opacity-100" onClick={(e) => { e.stopPropagation(); delPipeline(p.id); }} />}
-          </button>
-        ))}
+        {orderedPipelines.map((p) => {
+          const pinned = isPinnedPipeline(p);
+          return (
+            <button key={p.id} onClick={() => setActive(p.id)}
+              draggable={!pinned}
+              onDragStart={pinned ? undefined : (e) => { setPipeDragId(p.id); e.dataTransfer.effectAllowed = 'move'; }}
+              onDragEnd={() => { setPipeDragId(null); setPipeDragOver(null); }}
+              onDragOver={pinned ? undefined : (e) => { if (pipeDragId != null && pipeDragId !== p.id) { e.preventDefault(); setPipeDragOver(p.id); } }}
+              onDragLeave={() => setPipeDragOver((c) => (c === p.id ? null : c))}
+              onDrop={pinned ? undefined : (e) => { e.preventDefault(); if (pipeDragId != null) reorderPipelines(pipeDragId, p.id); setPipeDragOver(null); setPipeDragId(null); }}
+              className={cx('group inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold',
+                active === p.id ? 'bg-brand text-white' : 'bg-surface text-slate-600 hover:bg-line',
+                pipeDragId === p.id && 'opacity-40',
+                pipeDragOver === p.id && 'ring-2 ring-brand/40',
+                !pinned && 'cursor-grab')}>
+              {!pinned && <GripVertical className={cx('h-3.5 w-3.5', active === p.id ? 'opacity-60' : 'opacity-40')} />}
+              {p.name}
+              <span className={cx('rounded-full px-1.5 text-xs', active === p.id ? 'bg-white/20' : 'bg-white')}>{p.stages.reduce((s, x) => s + x.leadCount, 0)}</span>
+              {active === p.id && !pinned && <Trash2 className="h-3.5 w-3.5 opacity-70 hover:opacity-100" onClick={(e) => { e.stopPropagation(); delPipeline(p.id); }} />}
+            </button>
+          );
+        })}
         {pipelines.length === 0 && <span className="text-sm text-slate-400">No pipelines yet.</span>}
       </div>
 
