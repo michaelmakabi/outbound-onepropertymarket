@@ -7,6 +7,12 @@ import { Bot, Copy, ArrowRight, Check, AlertCircle, Loader2, RefreshCw } from 'l
 type Ws = { slug: string; display_name: string; connected: boolean; status: string | null };
 
 export default function AgentClone() {
+  return <AgentClonePanel />;
+}
+
+// Reusable panel — rendered standalone at /agent-clone and surfaced inside the Snapshots tab.
+// Pass embedded to drop the page header when it lives under another PageHead.
+export function AgentClonePanel({ embedded }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const [wss, setWss] = useState<Ws[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +53,7 @@ export default function AgentClone() {
 
   return (
     <div>
-      <PageHead title="Clone Agent" subtitle="Copy a proven agent's prompt and settings into a customer's Retell workspace" />
+      {!embedded && <PageHead title="Clone Agent" subtitle="Copy a proven agent's prompt and settings into a customer's Retell workspace" />}
 
       <div className="mx-auto max-w-2xl">
         {connected.length < 2 && (
