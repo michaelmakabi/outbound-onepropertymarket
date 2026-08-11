@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, Fragment } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { opm } from '../lib/api';
+import { opm, testai } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
 import CustomFieldsModal from '../components/CustomFieldsModal';
@@ -17,6 +17,8 @@ const PAGE_SIZE = 50;
 
 // AI dialing — Adrian B aggressive outbound agent + rotating caller IDs (matches LeadDetail launcher)
 const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) · OUTBOUND' };
+// Retell workspace whose key places these outbound calls (also where its agents live).
+const DIAL_WORKSPACE = '1propertymarket';
 const DIAL_NUMBERS = ['+18563634757', '+18563634758', '+18563634759', '+18563634760', '+18563634761', '+18563634762'];
 
 function fmtNum(n: string) {
@@ -61,6 +63,9 @@ export default function SellerContacts() {
 
   // ---- Bulk AI caller ----
   const [callModal, setCallModal] = useState(false);
+  // Selectable AI voice agent for this batch (defaults to the outbound Adrian agent).
+  const [agents, setAgents] = useState<{ agent_id: string; agent_name: string }[]>([]);
+  const [agentId, setAgentId] = useState(DIAL_AGENT.id);
   const [callFrom, setCallFrom] = useState<'rotate' | string>('rotate');
   const [callScope, setCallScope] = useState<'primary' | 'all'>('primary');
   const [gapSec, setGapSec] = useState(8);
@@ -80,6 +85,15 @@ export default function SellerContacts() {
 
   const loadFields = useCallback(() => { opm.customFields().then((d: any) => setCustomFields(d.fields || [])).catch(() => setCustomFields([])); }, []);
   useEffect(() => { loadFields(); }, [loadFields]);
+
+  // Load the dial workspace's agents so the bulk launcher can pick which AI voice agent calls.
+  useEffect(() => {
+    testai.agents(DIAL_WORKSPACE).then((d) => {
+      const list = d.agents || [];
+      setAgents(list);
+      if (list.length && !list.some((a: any) => a.agent_id === DIAL_AGENT.id)) setAgentId(list[0].agent_id);
+    }).catch(() => {});
+  }, []);
 
   const pipeName = useMemo(() => Object.fromEntries(pipelines.map((p) => [p.id, p.name])), [pipelines]);
 
@@ -294,7 +308,7 @@ export default function SellerContacts() {
   }, [selectedRecords, callScope]);
 
   async function runBulkCalls() {
-    if (running || callQueue.length === 0) return;
+    if (running || callQueue.length === 0 || !agentId) return;
     setRunning(true);
     setCallLog([]);
     setProgress({ done: 0, total: callQueue.length, ok: 0, fail: 0, current: '' });
@@ -306,7 +320,7 @@ export default function SellerContacts() {
       const from = callFrom === 'rotate' ? DIAL_NUMBERS[i % DIAL_NUMBERS.length] : callFrom;
       setProgress((p) => ({ ...p, current: name }));
       try {
-        await opm.placeCall({ lead_id: r.lead_id, to_number: r.phone, from_number: from, agent_id: DIAL_AGENT.id, workspace: '1propertymarket' });
+        await opm.placeCall({ lead_id: r.lead_id, to_number: r.phone, from_number: from, agent_id: agentId, workspace: DIAL_WORKSPACE });
         ok++;
         setCallLog((l) => [{ name, phone: r.phone, ok: true }, ...l]);
       } catch (e: any) {
@@ -403,8 +417,15 @@ export default function SellerContacts() {
             {progress.total === 0 ? (
               <>
                 <p className="mb-3 text-sm text-slate-600">
-                  This will place <span className="font-bold text-ink">{callQueue.length}</span> live AI call{callQueue.length === 1 ? '' : 's'} to real sellers, one at a time, using <span className="font-semibold">{DIAL_AGENT.name}</span>. Each call carries the seller's property context, stage, and our assessed value. Calls are spaced so none overlap.
+                  This will place <span className="font-bold text-ink">{callQueue.length}</span> live AI call{callQueue.length === 1 ? '' : 's'} to real sellers, one at a time, using <span className="font-semibold">{agents.find((a) => a.agent_id === agentId)?.agent_name || DIAL_AGENT.name}</span>. Each call carries the seller's property context, stage, and our assessed value. Calls are spaced so none overlap.
                 </p>
+                <label className="mb-3 block text-xs font-semibold text-slate-500">AI voice agent
+                  <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
+                    {!agents.length && <option value={DIAL_AGENT.id}>{DIAL_AGENT.name}</option>}
+                    {agents.length > 0 && !agents.some((a) => a.agent_id === agentId) && <option value="">Select an agent…</option>}
+                    {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
+                  </select>
+                </label>
                 <label className="mb-3 block text-xs font-semibold text-slate-500">Numbers to dial
                   <select value={callScope} onChange={(e) => setCallScope(e.target.value as any)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
                     <option value="primary">Primary number of each record</option>
@@ -427,7 +448,7 @@ export default function SellerContacts() {
                 </div>
                 <div className="flex justify-end gap-2">
                   <button className="btn-ghost" onClick={() => setCallModal(false)}>Cancel</button>
-                  <button disabled={callQueue.length === 0} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50" onClick={runBulkCalls}><PhoneOutgoing className="h-4 w-4" /> Start dialing {callQueue.length}</button>
+                  <button disabled={callQueue.length === 0 || !agentId} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50" onClick={runBulkCalls}><PhoneOutgoing className="h-4 w-4" /> Start dialing {callQueue.length}</button>
                 </div>
               </>
             ) : (
