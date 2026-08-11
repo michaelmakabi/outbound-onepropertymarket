@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { testai } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import { PageHead, Spinner } from '../components/ui';
@@ -56,6 +57,10 @@ const nativeOf = (key: string) => NATIVE.find((n) => n.test.test(key)) || null;
 
 export default function TestAI() {
   const { workspaces, active, loading: wsLoading } = useWorkspace();
+  // Deep-link support: /test-ai?workspace=<slug>&agent=<id> pre-selects (e.g. the AI Agents "Test" button).
+  const [sp] = useSearchParams();
+  const qpWorkspace = sp.get('workspace') || '';
+  const qpAgent = sp.get('agent') || '';
   const [workspace, setWorkspace] = useState<string>('');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [numbers, setNumbers] = useState<Num[]>([]);
@@ -84,8 +89,8 @@ export default function TestAI() {
   const [placing, setPlacing] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  // Default the workspace selector to the active tenant.
-  useEffect(() => { if (!workspace && active) setWorkspace(active); }, [active, workspace]);
+  // Default the workspace selector to the query param (deep-link), else the active tenant.
+  useEffect(() => { if (!workspace && (qpWorkspace || active)) setWorkspace(qpWorkspace || active || ''); }, [active, workspace, qpWorkspace]);
 
   // Load agents + caller-ID numbers whenever the workspace changes.
   useEffect(() => {
@@ -98,9 +103,10 @@ export default function TestAI() {
         const ags: Agent[] = a.agents || [];
         setAgents(ags);
         setNumbers(n.numbers || []);
-        // Preselect the Adrian negotiator if present, else the first agent.
+        // Preselect the deep-linked agent if present, else the Adrian negotiator, else the first agent.
+        const wanted = qpAgent ? ags.find((x) => x.agent_id === qpAgent) : null;
         const neg = ags.find((x) => /negotiat/i.test(x.agent_name));
-        setAgentId((neg || ags[0])?.agent_id || '');
+        setAgentId((wanted || neg || ags[0])?.agent_id || '');
       })
       .catch((e) => { if (!cancelled) setMetaErr(e?.message || 'Failed to load workspace'); })
       .finally(() => { if (!cancelled) setLoadingMeta(false); });
