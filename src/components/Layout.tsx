@@ -6,7 +6,7 @@ import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -49,6 +49,7 @@ const NAV = [
   { to: '/calls', label: 'Call History', icon: PhoneCall },
   { to: '/compare', label: 'Compare', icon: GitCompare, op: true },
   { to: '/agents', label: 'Agents & Models', icon: Bot, op: true },
+  { to: '/ai-agents', label: 'AI Agents', icon: Headset },
   { to: '/test-ai', label: 'Test AI', icon: PhoneOutgoing },
   { to: '/suggestions', label: 'AI Suggestions', icon: Sparkles, op: true },
   { to: '/prompt-studio', label: 'Prompt Studio', icon: PenLine, op: true },
