@@ -197,6 +197,14 @@ async function testaiCall(action: string, opts: { method?: string; params?: Reco
 export const testai = {
   workspaces: () => testaiCall('workspaces'),
   agents: (workspace: string) => testaiCall('agents', { params: { workspace } }),
+  // Rich per-agent directory (derived type, description, voice, prompt) for the AI Agents tab.
+  agentsDetailed: (workspace: string) => testaiCall('agents_detailed', { params: { workspace } }),
+  // Admin/owner: push name/prompt/voice edits to the live Retell agent (browser never sees the key).
+  updateAgent: (b: { workspace: string; agent_id: string; name?: string; general_prompt?: string; voice_id?: string }) =>
+    testaiCall('update_agent', { method: 'POST', body: b }),
+  // Clone an agent within the same workspace (any user with access to that agent).
+  cloneAgent: (b: { workspace: string; agent_id: string; new_name?: string }) =>
+    testaiCall('clone_agent', { method: 'POST', body: b }),
   numbers: (workspace: string) => testaiCall('numbers', { params: { workspace } }),
   // Prompt-aware variable detection: returns the agent's general_prompt + detected {{vars}} (browser never sees the Retell key).
   agentPromptVars: (workspace: string, agent_id: string) => testaiCall('agent_prompt_vars', { params: { workspace, agent_id } }),
