@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { opm } from '../lib/api';
+import { opm, testai } from '../lib/api';
 import { LoadingBlock, EmptyState, AudioPlayer } from '../components/dash';
 import { humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 
 const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) · OUTBOUND' };
+// Retell workspace whose key places these outbound calls (also where its agents live).
+const DIAL_WORKSPACE = '1propertymarket';
 const DIAL_NUMBERS = [
   { v: '+17184070959', label: 'Adrian NYC 1 · (718) 407-0959' },
   { v: '+13475727425', label: 'Adrian NYC 2 · (347) 572-7425' },
@@ -83,6 +85,9 @@ export default function LeadDetail() {
   const [callTo, setCallTo] = useState('');
   const [callScope, setCallScope] = useState<'one' | 'primary' | 'all'>('one');
   const [calling, setCalling] = useState(false);
+  // Selectable AI voice agent for this launch (defaults to the outbound Adrian agent).
+  const [agents, setAgents] = useState<{ agent_id: string; agent_name: string }[]>([]);
+  const [agentId, setAgentId] = useState(DIAL_AGENT.id);
 
   // Full call history (incl. transcripts) for this record's numbers.
   const [leadCalls, setLeadCalls] = useState<any[]>([]);
@@ -114,6 +119,14 @@ export default function LeadDetail() {
   useEffect(load, [id]);
   useEffect(loadCalls, [id]);
   useEffect(() => { if (!ids.length) opm.leads({}).then((d) => setIds((d.leads || []).map((l: any) => l.lead_id))).catch(() => {}); }, []);
+  // Load the dial workspace's agents so the launcher can pick which AI voice agent calls.
+  useEffect(() => {
+    testai.agents(DIAL_WORKSPACE).then((d) => {
+      const list = d.agents || [];
+      setAgents(list);
+      if (list.length && !list.some((a: any) => a.agent_id === DIAL_AGENT.id)) setAgentId(list[0].agent_id);
+    }).catch(() => {});
+  }, []);
   useEffect(() => {
     opm.pipelines().then((d) => setPipelines(d.pipelines || [])).catch(() => {});
     opm.customFields().then((d) => setCustomFields((d.fields || []).filter((f: any) => f.entity === 'lead'))).catch(() => {});
@@ -261,14 +274,14 @@ export default function LeadDetail() {
   }
   async function launchCall() {
     const targets = callTargets();
-    if (!targets.length || !callFrom) return;
+    if (!targets.length || !callFrom || !agentId) return;
     setCalling(true);
     let ok = 0, fail = 0;
     try {
       for (let i = 0; i < targets.length; i++) {
         const from = targets.length > 1 ? DIAL_NUMBERS[i % DIAL_NUMBERS.length].v : callFrom;
         try {
-          await opm.placeCall({ lead_id: id, to_number: targets[i], from_number: from, agent_id: DIAL_AGENT.id, workspace: '1propertymarket' });
+          await opm.placeCall({ lead_id: id, to_number: targets[i], from_number: from, agent_id: agentId, workspace: DIAL_WORKSPACE });
           ok++;
         } catch { fail++; }
         if (i < targets.length - 1) await new Promise((res) => setTimeout(res, 8000)); // non-overlapping
@@ -637,7 +650,14 @@ export default function LeadDetail() {
             <div className="space-y-3 text-sm">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-500">AI Voice Agent</label>
-                <div className="rounded-lg border border-line bg-surface px-3 py-2 font-medium text-ink">{DIAL_AGENT.name}</div>
+                {agents.length ? (
+                  <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="input w-full">
+                    {!agents.some((a) => a.agent_id === agentId) && <option value="">Select an agent…</option>}
+                    {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
+                  </select>
+                ) : (
+                  <div className="rounded-lg border border-line bg-surface px-3 py-2 font-medium text-ink">{DIAL_AGENT.name}</div>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-500">Who to dial</label>
@@ -668,7 +688,7 @@ export default function LeadDetail() {
               <button onClick={aiCallBrief} className="text-xs font-semibold text-slate-500 hover:text-brand">Copy context brief</button>
               <div className="flex gap-2">
                 <button onClick={() => setCallOpen(false)} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-surface">Cancel</button>
-                <button onClick={launchCall} disabled={calling || (callScope === 'one' && !callTo)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{calling ? <><Loader2 className="h-4 w-4 animate-spin" /> Dialing…</> : <><PhoneCall className="h-4 w-4" /> {callScope === 'all' ? 'Launch Calls' : 'Launch Call'}</>}</button>
+                <button onClick={launchCall} disabled={calling || !agentId || (callScope === 'one' && !callTo)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{calling ? <><Loader2 className="h-4 w-4 animate-spin" /> Dialing…</> : <><PhoneCall className="h-4 w-4" /> {callScope === 'all' ? 'Launch Calls' : 'Launch Call'}</>}</button>
               </div>
             </div>
           </div>
