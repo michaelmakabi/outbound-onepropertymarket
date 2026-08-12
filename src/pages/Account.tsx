@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { billing, fmt } from '../lib/api';
 import { PageHead, Spinner } from '../components/ui';
-import { CreditCard, Receipt, TrendingUp, Calendar, ExternalLink, ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
+import { CreditCard, Receipt, TrendingUp, Calendar, ExternalLink, ShieldCheck, AlertCircle, Loader2, Package } from 'lucide-react';
 
 const invStatusColor: Record<string, string> = {
   paid: 'bg-emerald-100 text-emerald-700', open: 'bg-amber-100 text-amber-700',
@@ -68,6 +68,20 @@ export default function Account() {
               <div className="text-[11px] text-slate-400">{fmt.int(w.usage?.events || 0)} calls billed</div>
             </div>
           </div>
+
+          {/* subscription (when on a recurring plan) */}
+          {w.subscription && (
+            <div className="card mb-4 p-4">
+              <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand"><Package className="h-3.5 w-3.5" /> Your plan</div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div><div className="label">Plan</div><div className="text-sm font-bold text-ink">{w.subscription.plan_name || '—'}</div></div>
+                <div><div className="label">Recurring</div><div className="text-sm font-bold text-ink">{fmt.money(w.subscription.amount)} / {w.subscription.interval}</div></div>
+                {Number(w.subscription.setup_fee) > 0 && <div><div className="label">Setup fee</div><div className="text-sm font-bold text-ink">{fmt.money(w.subscription.setup_fee)}</div></div>}
+                <div><div className="label">Status</div><div className={`text-sm font-bold ${w.subscription.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>{w.subscription.status === 'pending_stripe' ? 'pending' : w.subscription.status}</div></div>
+              </div>
+              {w.subscription.next_charge_at && <div className="mt-2 flex items-center gap-1 text-[11px] text-slate-500"><Calendar className="h-3 w-3" /> Next charge {new Date(w.subscription.next_charge_at).toLocaleDateString()}</div>}
+            </div>
+          )}
 
           {/* payment method */}
           <div className="card mb-4 flex flex-wrap items-center justify-between gap-3 p-4">
