@@ -1,9 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { adminOps, workspaceStore, fmt } from '../lib/api';
+import { adminOps, workspaceStore, fmt, opm } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { Spinner } from '../components/ui';
-import { ArrowLeft, Building2, Users, PhoneCall, Bot, KeyRound, AlertCircle, LogIn, Check, Ban, ShieldCheck, Crown, Layers, TrendingUp, DollarSign, Loader2 } from 'lucide-react';
+import { Spinner, KpiCard, SectionCard, EmptyState, LoadingBlock } from '../components/dash';
+import { UsersAndAccess, type Ws } from '../components/UsersAndAccess';
+import { StageIcon } from '../lib/statusIcons';
+import { dispositionColor, humanizeDisposition } from '../lib/format';
+import { statusIconName } from '../lib/statuses';
+import { ArrowLeft, Building2, Users, PhoneCall, Bot, KeyRound, AlertCircle, LogIn, Layers, TrendingUp, DollarSign, Loader2, PhoneIncoming, PhoneOutgoing, Voicemail, Clock3, Gauge } from 'lucide-react';
 
 const statusColor: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700', onboarding: 'bg-amber-100 text-amber-700',
@@ -59,7 +63,14 @@ export default function CustomerDetail() {
       </div>
 
       {tab === 'overview' && <Overview d={d} />}
-      {tab === 'users' && <UsersTab d={d} />}
+      {tab === 'users' && (
+        <UsersAndAccess
+          scopeWorkspaces={(d.workspaces || []).map((w: any): Ws => ({ slug: w.workspace, display_name: w.workspace === t.crm_workspace ? (t.display_name || w.workspace) : w.workspace }))}
+          scopedEmails={(d.users || []).map((u: any) => u.email).filter(Boolean)}
+          primaryWorkspace={t.crm_workspace}
+          onChanged={load}
+        />
+      )}
       {tab === 'agents' && <AgentsTab d={d} onReload={load} />}
       {tab === 'activity' && <ActivityTab d={d} />}
     </div>
@@ -110,48 +121,6 @@ function Overview({ d }: any) {
   );
 }
 function Row({ k, v }: any) { return <div className="flex items-center justify-between"><dt className="text-slate-500">{k}</dt><dd className="text-ink">{v}</dd></div>; }
-
-function UsersTab({ d }: any) {
-  if (!d.users.length) return <div className="card p-8 text-center text-sm text-slate-400">No users have access to this customer's workspaces yet.</div>;
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-slate-500">Each user's agent scope is shown explicitly — the agents they <span className="font-semibold text-emerald-600">can</span> use and the ones they <span className="font-semibold text-red-500">cannot</span>. Scope is set per workspace on the user's access record.</p>
-      {d.users.map((u: any, i: number) => (
-        <div key={i} className="card p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <div className="font-semibold text-ink">{u.name}</div>
-              {u.workspace_role === 'owner' && <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700"><Crown className="h-3 w-3" /> owner</span>}
-              {u.role && <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{u.role}</span>}
-              {u.disabled && <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">disabled</span>}
-            </div>
-            <div className="font-mono text-[11px] text-slate-400">{u.email} · ws:{u.workspace}</div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <span className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-1 font-semibold text-slate-600"><ShieldCheck className="h-3.5 w-3.5" /> mode: {u.agent_mode}</span>
-            <span className="text-emerald-600">{u.allowed_count} allowed</span>
-            <span className="text-slate-300">·</span>
-            <span className="text-red-500">{u.blocked_count} blocked</span>
-          </div>
-          {u.agent_mode === 'all' ? (
-            <div className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700"><Check className="mr-1 inline h-3.5 w-3.5" /> Full access — can use every agent in this account ({u.allowed_count}).</div>
-          ) : (
-            <div className="mt-2 grid gap-2 md:grid-cols-2">
-              <div>
-                <div className="mb-1 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-emerald-600"><Check className="h-3 w-3" /> Can use</div>
-                <div className="flex flex-wrap gap-1">{u.allowed_agents.length ? u.allowed_agents.map((a: any) => <span key={a.agent_id} className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">{a.agent_name}</span>) : <span className="text-[11px] text-slate-400">none</span>}</div>
-              </div>
-              <div>
-                <div className="mb-1 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-red-500"><Ban className="h-3 w-3" /> Cannot use</div>
-                <div className="flex flex-wrap gap-1">{u.blocked_agents.length ? u.blocked_agents.map((a: any) => <span key={a.agent_id} className="rounded bg-red-50 px-1.5 py-0.5 text-[11px] text-red-600">{a.agent_name}</span>) : <span className="text-[11px] text-slate-400">none</span>}</div>
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function AgentsTab({ d, onReload }: any) {
   const [busy, setBusy] = useState('');
@@ -206,33 +175,163 @@ function AgentsTab({ d, onReload }: any) {
   );
 }
 
+/* ---------------- Activity tab: rich workspace call analytics (computed from `calls`) ---------------- */
+
+const RANGES: { key: string; label: string; days: number | null }[] = [
+  { key: '7d', label: '7D', days: 7 }, { key: '30d', label: '30D', days: 30 },
+  { key: '90d', label: '90D', days: 90 }, { key: 'all', label: 'All', days: null },
+];
+
 function ActivityTab({ d }: any) {
+  const slugs = useMemo<string[]>(() => [...new Set((d.workspaces || []).map((w: any) => w.workspace).filter(Boolean))] as string[], [d.workspaces]);
+  const [range, setRange] = useState('30d');
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    if (!slugs.length) { setLoading(false); return; }
+    setLoading(true); setError('');
+    const days = RANGES.find((r) => r.key === range)?.days ?? null;
+    const from = days != null ? Date.now() - days * 86400000 : undefined;
+    opm.workspaceActivity({ workspace: slugs.join(','), from })
+      .then(setData).catch((e: any) => setError(String(e?.message || e))).finally(() => setLoading(false));
+  }, [slugs, range]);
+  useEffect(() => { load(); }, [load]);
+
+  const k = data?.kpis || {};
+  const recent: any[] = data?.recent || [];
+
   return (
-    <div className="card overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
-          <tr><th className="px-4 py-2.5">Workspace</th><th className="px-3 py-2.5">Role</th><th className="px-3 py-2.5 text-right">Leads</th><th className="px-3 py-2.5 text-right">Contacts</th><th className="px-3 py-2.5 text-right">Calls</th><th className="px-3 py-2.5 text-right">Agents</th></tr>
-        </thead>
-        <tbody>
-          {d.workspaces.map((w: any) => (
-            <tr key={w.workspace} className="border-t border-line hover:bg-surface">
-              <td className="px-4 py-2.5 font-mono text-xs font-semibold text-ink">{w.workspace}</td>
-              <td className="px-3 py-2.5 text-slate-500">{w.role}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(w.leads)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(w.contacts)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(w.calls)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(w.agents)}</td>
-            </tr>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-slate-500">Live call analytics across this customer's workspace{slugs.length === 1 ? '' : 's'} ({slugs.join(', ') || '—'}), computed from the calls table.</p>
+        <div className="inline-flex items-center rounded-lg border border-line bg-white p-0.5">
+          {RANGES.map((r) => (
+            <button key={r.key} onClick={() => setRange(r.key)} className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${range === r.key ? 'bg-brand text-white' : 'text-slate-600 hover:bg-surface'}`}>{r.label}</button>
           ))}
-          <tr className="border-t-2 border-line bg-surface/50 font-semibold">
-            <td className="px-4 py-2.5 text-ink">Total</td><td></td>
-            <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(d.totals.leads)}</td>
-            <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(d.totals.contacts)}</td>
-            <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(d.totals.calls)}</td>
-            <td className="px-3 py-2.5 text-right tabular-nums">{fmt.int(d.totals.agents)}</td>
-          </tr>
-        </tbody>
-      </table>
+        </div>
+      </div>
+
+      {error && <div className="card border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+      {loading ? <LoadingBlock label="Loading activity…" /> : !slugs.length ? <EmptyState text="No workspaces linked to this customer yet." /> : (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KpiCard label="Total calls" value={fmt.int(k.total || 0)} sub={`${fmt.int(k.inbound || 0)} in · ${fmt.int(k.outbound || 0)} out`} icon={PhoneCall} accent="blue" />
+            <KpiCard label="Pickup rate" value={fmt.pct(k.pickup_rate || 0)} sub={`${fmt.int(k.answered || 0)} answered`} icon={Gauge} accent="green" />
+            <KpiCard label="Voicemail rate" value={fmt.pct(k.voicemail_rate || 0)} sub={`${fmt.int(k.voicemail || 0)} voicemails`} icon={Voicemail} accent="amber" />
+            <KpiCard label="Avg call length" value={fmt.dur(k.avg_duration_seconds || 0)} sub={`${fmt.int(k.not_connected || 0)} not connected`} icon={Clock3} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KpiCard label="Total cost" value={fmt.money((k.total_cost_cents || 0) / 100)} sub="hard cost across calls" icon={DollarSign} accent="blue" />
+            <KpiCard label="Avg cost / call" value={fmt.money((k.avg_cost_cents || 0) / 100)} sub="per billed call" icon={DollarSign} />
+            <KpiCard label="Inbound" value={fmt.int(k.inbound || 0)} icon={PhoneIncoming} accent="green" />
+            <KpiCard label="Outbound" value={fmt.int(k.outbound || 0)} icon={PhoneOutgoing} accent="amber" />
+          </div>
+
+          {(k.daily || []).length > 1 && (
+            <SectionCard title="Call volume trend" description={`${(k.daily || []).length} active day${(k.daily || []).length === 1 ? '' : 's'}`}>
+              <MiniTrend daily={k.daily || []} />
+            </SectionCard>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <SectionCard title="Dispositions" description="Outcome, calls, and cost per disposition">
+              {(k.dispositions || []).length === 0 ? <EmptyState text="No completed calls in this range." /> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr><th className="px-3 py-2">Disposition</th><th className="px-3 py-2 text-right">Count</th><th className="px-3 py-2 text-right">Cost</th><th className="px-3 py-2 text-right">Share</th></tr>
+                    </thead>
+                    <tbody>
+                      {(k.dispositions || []).map((row: any) => {
+                        const color = dispositionColor(row.disposition);
+                        return (
+                          <tr key={row.disposition} className="border-t border-line">
+                            <td className="px-3 py-2">
+                              <span className="inline-flex items-center gap-1.5 font-medium text-ink">
+                                <StageIcon name={statusIconName(row.disposition) || undefined} color={color} />
+                                {humanizeDisposition(row.disposition)}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono">{fmt.int(row.count)}</td>
+                            <td className="px-3 py-2 text-right font-mono">{fmt.money((row.cost_cents || 0) / 100)}</td>
+                            <td className="px-3 py-2 text-right text-slate-500">{k.total ? `${((row.count / k.total) * 100).toFixed(0)}%` : '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </SectionCard>
+
+            <SectionCard title="Agents used" description="Calls and cost per AI agent">
+              {(k.agents || []).length === 0 ? <EmptyState text="No agent activity in this range." /> : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr><th className="px-3 py-2">Agent</th><th className="px-3 py-2 text-right">Calls</th><th className="px-3 py-2 text-right">Cost</th></tr>
+                    </thead>
+                    <tbody>
+                      {(k.agents || []).map((a: any) => (
+                        <tr key={a.agent_id} className="border-t border-line">
+                          <td className="px-3 py-2"><div className="flex items-center gap-1.5 font-medium text-ink"><Bot className="h-3.5 w-3.5 text-slate-400" /> {a.agent_name || a.agent_id}</div></td>
+                          <td className="px-3 py-2 text-right font-mono">{fmt.int(a.count)}</td>
+                          <td className="px-3 py-2 text-right font-mono">{fmt.money((a.cost_cents || 0) / 100)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </SectionCard>
+          </div>
+
+          <SectionCard title="Recent activity" description={`Latest ${recent.length} call${recent.length === 1 ? '' : 's'}`}>
+            {recent.length === 0 ? <EmptyState text="No recent calls." /> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
+                    <tr><th className="px-3 py-2">When</th><th className="px-3 py-2">Dir</th><th className="px-3 py-2">Agent</th><th className="px-3 py-2">Disposition</th><th className="px-3 py-2 text-right">Length</th><th className="px-3 py-2 text-right">Cost</th></tr>
+                  </thead>
+                  <tbody>
+                    {recent.map((c: any) => (
+                      <tr key={c.call_id} className="border-t border-line hover:bg-surface">
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">{fmt.dateTime(Number(c.start_timestamp) || null)}</td>
+                        <td className="px-3 py-2">{c.direction === 'inbound' ? <PhoneIncoming className="h-3.5 w-3.5 text-emerald-500" /> : <PhoneOutgoing className="h-3.5 w-3.5 text-amber-500" />}</td>
+                        <td className="max-w-[150px] truncate px-3 py-2 text-slate-600">{c.agent_name || '—'}</td>
+                        <td className="px-3 py-2">
+                          <span className="inline-flex items-center gap-1.5 text-slate-700">
+                            <StageIcon name={statusIconName(c.disposition) || undefined} color={dispositionColor(c.disposition || '')} />
+                            {humanizeDisposition(c.disposition)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs">{fmt.dur(c.duration_seconds || 0)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs">{fmt.money((Number(c.combined_cost_cents) || 0) / 100)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Lightweight SVG bar trend for daily call volume (no chart dep needed here).
+function MiniTrend({ daily }: { daily: { date: string; count: number }[] }) {
+  const max = Math.max(1, ...daily.map((x) => x.count));
+  return (
+    <div className="flex items-end gap-1" style={{ height: 120 }}>
+      {daily.map((x) => (
+        <div key={x.date} className="flex flex-1 flex-col items-center justify-end" title={`${x.date}: ${x.count}`}>
+          <div className="w-full rounded-t bg-brand/70 transition hover:bg-brand" style={{ height: `${Math.max(3, (x.count / max) * 104)}px` }} />
+        </div>
+      ))}
     </div>
   );
 }
