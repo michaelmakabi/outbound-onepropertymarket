@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, Fragment } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { opm, testai } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
@@ -44,7 +44,8 @@ type ViewCfg = { pipelineId: string; stageId: string; verified: string; tags: st
 
 export default function SellerContacts() {
   const nav = useNavigate();
-  const { isStaff, ownsActive, active } = useWorkspace();
+  const { isStaff, ownsActive, active, setActive } = useWorkspace();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [contactRows, setContactRows] = useState<any[]>([]);
   const [leadRows, setLeadRows] = useState<any[]>([]);
   const [pipelines, setPipelines] = useState<any[]>([]);
@@ -61,17 +62,20 @@ export default function SellerContacts() {
   const [showFields, setShowFields] = useState(false);
   const [customFields, setCustomFields] = useState<any[]>([]);
 
-  // ---- Bulk AI caller ----
+  // ---- Bulk AI caller → tracked Campaign ----
   const [callModal, setCallModal] = useState(false);
   // Selectable AI voice agent for this batch (defaults to the outbound Adrian agent).
   const [agents, setAgents] = useState<{ agent_id: string; agent_name: string }[]>([]);
   const [agentId, setAgentId] = useState(DIAL_AGENT.id);
-  const [callFrom, setCallFrom] = useState<'rotate' | string>('rotate');
-  const [callScope, setCallScope] = useState<'primary' | 'all'>('primary');
-  const [gapSec, setGapSec] = useState(8);
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<{ done: number; total: number; ok: number; fail: number; current: string }>({ done: 0, total: 0, ok: 0, fail: 0, current: '' });
-  const [callLog, setCallLog] = useState<{ name: string; phone: string; ok: boolean; err?: string }[]>([]);
+  const [campaignName, setCampaignName] = useState('');
+  const [drip, setDrip] = useState(false);
+  const [dripBatch, setDripBatch] = useState(25);
+  const [dripMinutes, setDripMinutes] = useState(30);
+  const [launching, setLaunching] = useState(false);
+  const [launchResult, setLaunchResult] = useState<{ id?: string; launched: number; total: number; pending: number; name: string } | null>(null);
+  // Select-all-across-pages: when set, `selected` holds the FULL server-resolved matching set.
+  const [matchAll, setMatchAll] = useState(false);
+  const [resolving, setResolving] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -85,6 +89,16 @@ export default function SellerContacts() {
 
   const loadFields = useCallback(() => { opm.customFields().then((d: any) => setCustomFields(d.fields || [])).catch(() => setCustomFields([])); }, []);
   useEffect(() => { loadFields(); }, [loadFields]);
+
+  // Deep link from a campaign ("Show all leads for this campaign"): ?tag=campaign:<slug>&ws=<slug>.
+  // Switch to that workspace (if allowed) and pre-apply the campaign tag filter, then clear the params.
+  useEffect(() => {
+    const tag = searchParams.get('tag'); const ws = searchParams.get('ws');
+    if (!tag && !ws) return;
+    if (ws && ws !== active) setActive(ws);
+    if (tag) setTagFilter([tag]);
+    setSearchParams({}, { replace: true });
+  }, [searchParams, active, setActive, setSearchParams]);
 
   // Load the dial workspace's agents so the bulk launcher can pick which AI voice agent calls.
   useEffect(() => {
@@ -238,7 +252,7 @@ export default function SellerContacts() {
     pageKey: PAGE_KEY, columns: searchColumns, rows: preFiltered, getValue, initialSort: { by: 'name', dir: 'asc' },
   });
 
-  useEffect(() => { setPage(1); }, [pipelineId, stageId, verified, tagFilter, search, sort]);
+  useEffect(() => { setPage(1); setMatchAll(false); }, [pipelineId, stageId, verified, tagFilter, search, sort]);
 
   const total = rows.length;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -251,7 +265,7 @@ export default function SellerContacts() {
   const inPipeline = records.filter((r) => r.pipeline_id != null).length;
 
   const allOnPage = pageRows.length > 0 && pageRows.every((r) => selected.has(r.lead_id));
-  const toggleAll = () => setSelected((s) => { const n = new Set(s); if (allOnPage) pageRows.forEach((r) => n.delete(r.lead_id)); else pageRows.forEach((r) => n.add(r.lead_id)); return n; });
+  const toggleAll = () => { setMatchAll(false); setSelected((s) => { const n = new Set(s); if (allOnPage) pageRows.forEach((r) => n.delete(r.lead_id)); else pageRows.forEach((r) => n.add(r.lead_id)); return n; }); };
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleExpand = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -287,51 +301,43 @@ export default function SellerContacts() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `contacts-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
   };
 
-  // Numbers queued for AI dialing. Scope decides which numbers on each selected record
-  // get dialed: primary → the record's primary line only; all → every number. Always
-  // dedup by 10-digit phone, skip do-not-call and anything shorter than 10 digits.
-  const callQueue = useMemo(() => {
-    const candidates: any[] = [];
-    for (const rec of selectedRecords) {
-      if (callScope === 'primary') { if (rec.primary) candidates.push(rec.primary); }
-      else candidates.push(...rec.numbers);
-    }
-    const seen = new Set<string>();
-    return candidates.filter((n) => {
-      if (!n || n.do_not_call) return false;
-      const p = (n.phone || '').replace(/\D/g, '');
-      if (p.length < 10) return false;
-      const key = p.slice(-10);
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    });
-  }, [selectedRecords, callScope]);
+  // Lead ids currently selected for a campaign launch. campaign_launch resolves each lead's
+  // primary dialable number server-side (skipping do-not-call), so we only pass ids here.
+  const selectedLeadIds = useMemo(() => [...selected], [selected]);
 
-  async function runBulkCalls() {
-    if (running || callQueue.length === 0 || !agentId) return;
-    setRunning(true);
-    setCallLog([]);
-    setProgress({ done: 0, total: callQueue.length, ok: 0, fail: 0, current: '' });
-    const gap = Math.max(2, gapSec) * 1000;
-    let ok = 0, fail = 0;
-    for (let i = 0; i < callQueue.length; i++) {
-      const r = callQueue[i];
-      const name = r.lead_name || r.name || 'Unknown';
-      const from = callFrom === 'rotate' ? DIAL_NUMBERS[i % DIAL_NUMBERS.length] : callFrom;
-      setProgress((p) => ({ ...p, current: name }));
-      try {
-        await opm.placeCall({ lead_id: r.lead_id, to_number: r.phone, from_number: from, agent_id: agentId, workspace: DIAL_WORKSPACE });
-        ok++;
-        setCallLog((l) => [{ name, phone: r.phone, ok: true }, ...l]);
-      } catch (e: any) {
-        fail++;
-        setCallLog((l) => [{ name, phone: r.phone, ok: false, err: e?.message || 'failed' }, ...l]);
-      }
-      setProgress((p) => ({ ...p, done: i + 1, ok, fail }));
-      if (i < callQueue.length - 1) await new Promise((res) => setTimeout(res, gap)); // non-overlapping spacing
-    }
-    setProgress((p) => ({ ...p, current: '' }));
-    setRunning(false);
+  // "Select all N matching" — resolve the FULL filtered set server-side (not just the loaded page),
+  // so launch/export operate on every matching record. Uses the same filters as the table.
+  async function selectAllMatching() {
+    if (resolving) return;
+    setResolving(true);
+    try {
+      const d = await opm.resolveSelection({
+        pipeline_id: pipelineId || undefined, stage_id: stageId || undefined,
+        verified: verified || undefined, tags: tagFilter.length ? tagFilter.join(',') : undefined,
+        search: search || undefined,
+      });
+      setSelected(new Set<string>(d.lead_ids || []));
+      setMatchAll(true);
+    } catch (e: any) {
+      window.alert(e?.message || 'Could not resolve the full matching set.');
+    } finally { setResolving(false); }
+  }
+
+  // Launch the selected leads as ONE tracked campaign (tags each lead, places the first batch,
+  // and drips the rest if configured). Backend picks each lead's primary dialable number.
+  async function launchCampaign() {
+    if (launching || selectedLeadIds.length === 0 || !agentId || !campaignName.trim()) return;
+    setLaunching(true); setLaunchResult(null);
+    try {
+      const agentName = agents.find((a) => a.agent_id === agentId)?.agent_name || DIAL_AGENT.name;
+      const r = await opm.campaignLaunch({
+        name: campaignName.trim(), agent_id: agentId, agent_name: agentName, lead_ids: selectedLeadIds,
+        drip_batch: drip ? dripBatch : null, drip_minutes: drip ? dripMinutes : null,
+      });
+      setLaunchResult({ id: r?.campaign?.id, launched: r?.launched || 0, total: r?.total || selectedLeadIds.length, pending: r?.pending || 0, name: campaignName.trim() });
+    } catch (e: any) {
+      window.alert(e?.message || 'Could not launch the campaign.');
+    } finally { setLaunching(false); }
   }
 
   // Staff can import into any tenant; a company owner can import into their own tenant only.
@@ -396,29 +402,55 @@ export default function SellerContacts() {
       </SectionCard>
 
       {selected.size > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-brand/30 bg-brand-light/50 px-4 py-2.5">
-          <span className="text-sm font-semibold text-brand">{selected.size} selected</span>
-          <span className="mx-1 h-4 w-px bg-brand/20" />
-          <button className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand/90" onClick={() => { setCallLog([]); setProgress({ done: 0, total: 0, ok: 0, fail: 0, current: '' }); setCallModal(true); }}><PhoneOutgoing className="h-3.5 w-3.5" /> Launch AI calls</button>
-          <button className="btn-ghost !py-1.5" onClick={exportCsv}><Download className="h-3.5 w-3.5" /> Export selected</button>
-          {canManage && <button className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={deleting} onClick={bulkDelete}>{deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete</button>}
-          <button className="btn-ghost !py-1.5" onClick={() => setSelected(new Set())}>Clear</button>
+        <div className="mb-4 flex flex-col gap-2 rounded-xl border border-brand/30 bg-brand-light/50 px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-brand">{selected.size} selected{matchAll ? ' (all matching)' : ''}</span>
+            <span className="mx-1 h-4 w-px bg-brand/20" />
+            <button className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand/90" onClick={() => { setLaunchResult(null); setCampaignName(''); setCallModal(true); }}><PhoneOutgoing className="h-3.5 w-3.5" /> Launch AI calls</button>
+            <button className="btn-ghost !py-1.5" onClick={exportCsv}><Download className="h-3.5 w-3.5" /> Export selected</button>
+            {canManage && <button className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={deleting} onClick={bulkDelete}>{deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete</button>}
+            <button className="btn-ghost !py-1.5" onClick={() => { setMatchAll(false); setSelected(new Set()); }}>Clear</button>
+          </div>
+          {/* Select-all-across-pages: appears once the current page is fully checked and more rows match. */}
+          {allOnPage && !matchAll && total > pageRows.length && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-brand/15 pt-2 text-sm">
+              <span className="text-slate-600">All {pageRows.length} on this page selected.</span>
+              <button className="inline-flex items-center gap-1.5 font-semibold text-brand hover:underline disabled:opacity-50" disabled={resolving} onClick={selectAllMatching}>{resolving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Select all {num(total)} matching</button>
+            </div>
+          )}
+          {matchAll && (
+            <div className="border-t border-brand/15 pt-2 text-sm text-slate-600">All {num(selected.size)} matching records are selected. <button className="font-semibold text-brand hover:underline" onClick={() => { setMatchAll(false); setSelected(new Set()); }}>Clear selection</button></div>
+          )}
         </div>
       )}
 
       {callModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => !running && setCallModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => !launching && setCallModal(false)}>
           <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><PhoneOutgoing className="h-5 w-5 text-brand" /> Launch AI calls</h3>
-              {!running && <button onClick={() => setCallModal(false)} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-4 w-4" /></button>}
+              <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><PhoneOutgoing className="h-5 w-5 text-brand" /> Launch AI calls as a campaign</h3>
+              {!launching && <button onClick={() => setCallModal(false)} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-4 w-4" /></button>}
             </div>
 
-            {progress.total === 0 ? (
+            {launchResult ? (
+              <>
+                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
+                  <div className="flex items-center gap-2 font-semibold text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Campaign "{launchResult.name}" launched</div>
+                  <div className="mt-2 text-slate-600">{launchResult.launched} of {launchResult.total} call{launchResult.total === 1 ? '' : 's'} placed{launchResult.pending > 0 ? ` · ${launchResult.pending} queued for drip` : ''}. Each launched lead is tagged and tracked.</div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button className="btn-ghost" onClick={() => { setCallModal(false); setSelected(new Set()); setMatchAll(false); }}>Close</button>
+                  {launchResult.id && <button className="btn-primary" onClick={() => nav(`/campaigns/${launchResult.id}`)}>View campaign</button>}
+                </div>
+              </>
+            ) : (
               <>
                 <p className="mb-3 text-sm text-slate-600">
-                  This will place <span className="font-bold text-ink">{callQueue.length}</span> live AI call{callQueue.length === 1 ? '' : 's'} to real sellers, one at a time, using <span className="font-semibold">{agents.find((a) => a.agent_id === agentId)?.agent_name || DIAL_AGENT.name}</span>. Each call carries the seller's property context, stage, and our assessed value. Calls are spaced so none overlap.
+                  This launches a tracked campaign that places <span className="font-bold text-ink">{launching ? '' : selectedLeadIds.length}</span> live AI call{selectedLeadIds.length === 1 ? '' : 's'} to real sellers using <span className="font-semibold">{agents.find((a) => a.agent_id === agentId)?.agent_name || DIAL_AGENT.name}</span>. Each lead's primary number is dialed with its property context, and every lead is tagged <code className="rounded bg-surface px-1 text-[11px]">campaign:…</code>.
                 </p>
+                <label className="mb-3 block text-xs font-semibold text-slate-500">Campaign name
+                  <input autoFocus value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="e.g. Miami Off-Market — August" className="input mt-1 w-full !py-1.5 text-sm text-ink" />
+                </label>
                 <label className="mb-3 block text-xs font-semibold text-slate-500">AI voice agent
                   <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
                     {!agents.length && <option value={DIAL_AGENT.id}>{DIAL_AGENT.name}</option>}
@@ -426,52 +458,19 @@ export default function SellerContacts() {
                     {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
                   </select>
                 </label>
-                <label className="mb-3 block text-xs font-semibold text-slate-500">Numbers to dial
-                  <select value={callScope} onChange={(e) => setCallScope(e.target.value as any)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
-                    <option value="primary">Primary number of each record</option>
-                    <option value="all">Every number on each record</option>
-                  </select>
-                </label>
-                <div className="mb-3 text-xs text-slate-400">A record can hold several phone numbers. Choose whether to reach just the primary line or every number on it.</div>
-                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label className="text-xs font-semibold text-slate-500">Caller ID
-                    <select value={callFrom} onChange={(e) => setCallFrom(e.target.value)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
-                      <option value="rotate">Rotate all {DIAL_NUMBERS.length} numbers</option>
-                      {DIAL_NUMBERS.map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold text-slate-500">Gap between calls
-                    <select value={gapSec} onChange={(e) => setGapSec(Number(e.target.value))} className="input mt-1 w-full !py-1.5 text-sm text-ink">
-                      <option value={8}>8 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>60 seconds</option>
-                    </select>
-                  </label>
-                </div>
+                <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-ink"><input type="checkbox" checked={drip} onChange={(e) => setDrip(e.target.checked)} className="h-4 w-4 accent-[#1f6feb]" /> Drip the calls in batches</label>
+                {drip && (
+                  <div className="mb-3 grid grid-cols-2 gap-3">
+                    <label className="text-xs font-semibold text-slate-500">Batch size
+                      <input type="number" min={1} value={dripBatch} onChange={(e) => setDripBatch(Math.max(1, Number(e.target.value) || 1))} className="input mt-1 w-full !py-1.5 text-sm text-ink" /></label>
+                    <label className="text-xs font-semibold text-slate-500">Every N minutes
+                      <input type="number" min={2} value={dripMinutes} onChange={(e) => setDripMinutes(Math.max(2, Number(e.target.value) || 2))} className="input mt-1 w-full !py-1.5 text-sm text-ink" /></label>
+                  </div>
+                )}
+                <div className="mb-4 text-xs text-slate-400">{drip ? `First ${Math.min(dripBatch, selectedLeadIds.length)} call${Math.min(dripBatch, selectedLeadIds.length) === 1 ? '' : 's'} go out now; the rest drip automatically every ${dripMinutes} min.` : 'All calls are placed now. Leads without a dialable primary number are skipped.'}</div>
                 <div className="flex justify-end gap-2">
                   <button className="btn-ghost" onClick={() => setCallModal(false)}>Cancel</button>
-                  <button disabled={callQueue.length === 0 || !agentId} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50" onClick={runBulkCalls}><PhoneOutgoing className="h-4 w-4" /> Start dialing {callQueue.length}</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="mb-3">
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span className="font-semibold text-ink">{running ? <span className="inline-flex items-center gap-1.5"><Loader2 className="h-4 w-4 animate-spin text-brand" /> Dialing {progress.current}…</span> : 'Done'}</span>
-                    <span className="tabular-nums text-slate-500">{progress.done} / {progress.total}</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-surface"><div className="h-full bg-brand transition-all" style={{ width: `${(progress.done / progress.total) * 100}%` }} /></div>
-                  <div className="mt-1.5 flex gap-3 text-xs"><span className="text-emerald-600">{progress.ok} placed</span>{progress.fail > 0 && <span className="text-red-500">{progress.fail} failed</span>}</div>
-                </div>
-                <div className="mb-4 max-h-48 overflow-y-auto rounded-lg border border-line">
-                  {callLog.map((c, i) => (
-                    <div key={i} className="flex items-center gap-2 border-b border-line px-3 py-1.5 text-xs last:border-0">
-                      {c.ok ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />}
-                      <span className="font-medium text-ink">{c.name}</span><span className="font-mono text-slate-400">{fmtNum(c.phone)}</span>
-                      {!c.ok && <span className="ml-auto truncate text-red-500">{c.err}</span>}
-                    </div>
-                  ))}
-                </div>
-                <div className="flex justify-end">
-                  <button disabled={running} className="btn-primary disabled:opacity-50" onClick={() => { setCallModal(false); if (!running) setSelected(new Set()); }}>{running ? 'Dialing…' : 'Close'}</button>
+                  <button disabled={launching || selectedLeadIds.length === 0 || !agentId || !campaignName.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50" onClick={launchCampaign}>{launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneOutgoing className="h-4 w-4" />} Launch {drip ? Math.min(dripBatch, selectedLeadIds.length) : selectedLeadIds.length} now</button>
                 </div>
               </>
             )}
