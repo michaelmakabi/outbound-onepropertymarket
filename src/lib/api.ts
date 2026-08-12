@@ -163,6 +163,11 @@ export const opm = {
   campaignDetail: (id: string) => opmCall('campaign_detail', { params: { id } }),
   // Super-admin: manually advance any due drip batches (same processor pg_cron calls every 2 min).
   campaignDripRun: () => opmCall('campaign_drip_run', { method: 'POST' }),
+  // Rich workspace call analytics (volume, dispositions, agents, cost, pickup/voicemail, duration,
+  // daily trend, recent) computed from `calls`. `workspace` may be a comma-joined slug list;
+  // from/to are epoch-ms bounds on start_timestamp. Authorized per the caller's workspace access.
+  workspaceActivity: (p: { workspace: string; from?: number; to?: number }) =>
+    opmCall('workspace_activity', { params: { workspace: p.workspace, from: p.from, to: p.to } }),
 };
 
 // companion `opm-ext` edge function — shares OPM auth + active-workspace scoping.
