@@ -32,6 +32,7 @@ import CustomerDetail from './pages/CustomerDetail';
 import Account from './pages/Account';
 import Register from './pages/Register';
 import RegisterComplete from './pages/RegisterComplete';
+import Authorize from './pages/Authorize';
 import Onboarding from './pages/Onboarding';
 import AgentClone from './pages/AgentClone';
 import Snapshots from './pages/Snapshots';
@@ -78,6 +79,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/register/complete" element={<RegisterComplete />} />
+      <Route path="/authorize/:token" element={<Authorize />} />
       <Route path="/" element={<RootRoute />} />
       <Route path="/workspaces" element={<Protected op><Workspaces /></Protected>} />
       <Route path="/workspaces/:slug" element={<Protected op><WorkspaceDetail /></Protected>} />
