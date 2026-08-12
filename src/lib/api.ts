@@ -149,6 +149,20 @@ export const opm = {
   // Rich per-pipeline lead list (created/updated dates, attempts) for table/grid/date-range views.
   pipelineLeads: (pipeline_id: number | string) => opmExtCall('pipeline_leads', { params: { pipeline_id } }),
   backfillCallContacts: (workspace: string, commit: boolean) => opmExtCall('backfill_call_contacts', { method: 'POST', params: { workspace: '' }, body: { workspace, commit } }),
+  // ---- Campaign management (opm campaign_* actions on the MAIN project) ----
+  // Resolve the FULL matching lead_id set for the current Contacts filters (server-side select-all).
+  resolveSelection: (p: { workspace?: string; pipeline_id?: string; stage_id?: string; verified?: string; tags?: string; search?: string }) => opmCall('resolve_selection', { params: p }),
+  // Create a tracked campaign, tag its leads (campaign:<slug>), and launch the first batch of AI calls.
+  campaignLaunch: (b: { workspace?: string; name: string; agent_id: string; agent_name?: string; lead_ids: string[]; drip_batch?: number | null; drip_minutes?: number | null }) =>
+    opmCall('campaign_launch', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
+  // Campaigns visible to the caller (own workspaces; super_admin all) + per-campaign cost/disposition rollup.
+  // The workspace key is always present (possibly undefined) so the active-tenant param is NOT auto-injected —
+  // an unset workspace means "all my workspaces" (customer) or "all workspaces" (super_admin).
+  campaignsList: (p: { workspace?: string; from?: string; to?: string } = {}) => opmCall('campaigns_list', { params: { workspace: p.workspace, from: p.from, to: p.to } }),
+  // One campaign + its leads + KPIs (cost, pickup, voicemail, disposition breakdown) computed from `calls`.
+  campaignDetail: (id: string) => opmCall('campaign_detail', { params: { id } }),
+  // Super-admin: manually advance any due drip batches (same processor pg_cron calls every 2 min).
+  campaignDripRun: () => opmCall('campaign_drip_run', { method: 'POST' }),
 };
 
 // companion `opm-ext` edge function — shares OPM auth + active-workspace scoping.
