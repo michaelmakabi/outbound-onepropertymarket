@@ -36,6 +36,7 @@ import Onboarding from './pages/Onboarding';
 import AgentClone from './pages/AgentClone';
 import Snapshots from './pages/Snapshots';
 import AiAgents from './pages/AiAgents';
+import AgentEdit from './pages/AgentEdit';
 
 // admin: admin/super_admin only. op: operator tooling — hidden from customers (role=user).
 function Protected({ children, admin, op }: { children: JSX.Element; admin?: boolean; op?: boolean }) {
@@ -93,6 +94,7 @@ export default function App() {
       <Route path="/snapshots" element={<Protected admin><Snapshots /></Protected>} />
       <Route path="/test-ai" element={<Protected><TestAI /></Protected>} />
       <Route path="/ai-agents" element={<Protected><AiAgents /></Protected>} />
+      <Route path="/ai-agents/:agentId/edit" element={<Protected admin><AgentEdit /></Protected>} />
       <Route path="/suggestions" element={<Protected op><Suggestions /></Protected>} />
       <Route path="/prompt-studio" element={<Protected op><PromptStudio /></Protected>} />
       <Route path="/reports" element={<Protected op><Reports /></Protected>} />
