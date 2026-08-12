@@ -339,7 +339,12 @@ function ModelSection({ llm, setL, hasLlm, engineType }: any) {
 
       <FieldLabel className="mt-5">First message <span className="font-normal text-slate-400">(what the agent says first)</span></FieldLabel>
       <textarea className="input mt-1 min-h-[80px] text-sm" value={llm.begin_message ?? ''} onChange={(e) => setL('begin_message', e.target.value)} placeholder="e.g. Hi, thanks for calling — how can I help today?" />
-      <p className="mt-1 text-xs text-slate-400">Leave blank to let the agent open the conversation on its own.</p>
+      <p className="mt-1 text-xs text-slate-400">
+        Leave blank to let the agent open the conversation on its own. Tip: for INBOUND agents the platform default is a simple &ldquo;Hello&rdquo; so the agent speaks first (business / customer-service agents excepted).{' '}
+        {!(llm.begin_message ?? '').trim() && (
+          <button type="button" onClick={() => setL('begin_message', 'Hello')} className="font-semibold text-brand hover:underline">Use &ldquo;Hello&rdquo;</button>
+        )}
+      </p>
     </div>
   );
 }
@@ -435,7 +440,7 @@ function KnowledgeSection({ agent, setA, llm, setL, kbs, hasLlm }: any) {
         <FieldLabel>Post-call analysis fields</FieldLabel>
         <button onClick={() => setPca([...pca, { type: 'string', name: '', description: '' }])} className="btn-ghost !py-1 text-xs">+ Add field</button>
       </div>
-      <p className="mb-2 mt-1 text-xs text-slate-400">Data points the agent extracts from each call (e.g. “interested”, “callback_time”).</p>
+      <p className="mb-2 mt-1 text-xs text-slate-400">Data points the agent extracts from each call (e.g. “interested”, “callback_time”). Every agent includes the standard 20-status <span className="font-mono">disposition</span> plus <span className="font-mono">notes</span>, <span className="font-mono">follow_up_action</span>, <span className="font-mono">follow_up_date</span> and <span className="font-mono">appointment_datetime</span> by default.</p>
       {pca.length === 0 ? (
         <p className="text-sm text-slate-400">None yet. Add a field to capture structured info from calls.</p>
       ) : (
