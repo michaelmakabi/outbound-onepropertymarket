@@ -23,6 +23,7 @@ export default function Authorize() {
   // Completion phase (returning from Stripe with a session_id).
   const [phase, setPhase] = useState<'form' | 'completing' | 'done'>(sessionId ? 'completing' : 'form');
   const [savedCard, setSavedCard] = useState<any>(null);
+  const [authRecorded, setAuthRecorded] = useState(false);
   const ran = useRef(false);
 
   useEffect(() => {
@@ -41,6 +42,7 @@ export default function Authorize() {
       try {
         const r = await billing.cardLinkComplete(token, sessionId);
         setSavedCard(r.card || null);
+        setAuthRecorded(!!r.authorization_recorded || !!r.already);
         setPhase('done');
       } catch (e: any) {
         setError(e?.message || 'We could not confirm your card. Please try again.');
@@ -93,6 +95,11 @@ export default function Authorize() {
               <p className="mt-2 text-base text-slate-600">
                 {savedCard ? <>Your <span className="font-medium capitalize">{savedCard.brand}</span> ending in {savedCard.last4} is now on file{info?.display_name ? <> for {info.display_name}</> : null}.</> : <>Your card has been securely saved{info?.display_name ? <> for {info.display_name}</> : null}.</>}
               </p>
+              {authRecorded && (
+                <p className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700">
+                  <FileText className="h-4 w-4" /> Your signed authorization has been recorded.
+                </p>
+              )}
               <p className="mt-4 text-sm text-slate-400">You can close this page. There's nothing else to do.</p>
             </div>
           )}
