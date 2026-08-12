@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { opm, billing, fmt } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
-import { DollarSign, Check, AlertCircle, TrendingUp, CreditCard, Info, RefreshCw, FileText, Loader2, ExternalLink } from 'lucide-react';
+import { DollarSign, Check, AlertCircle, TrendingUp, CreditCard, Info, RefreshCw, FileText, Loader2, ExternalLink, Package, Send, Copy, Calendar, Plus, Trash2 } from 'lucide-react';
+
+const INTERVALS = ['daily', 'weekly', 'monthly', 'annual'];
 
 const MODES = [
-  { value: 'full_retail', label: 'Full retail (bill hard cost × multiplier)' },
-  { value: 'margin_split', label: 'Margin split (bill the margin only)' },
-  { value: 'live_metered', label: 'Live metered' },
+  { value: 'full_retail', label: 'Usage credits (× multiplier)' },
+  { value: 'subscription', label: 'Subscription' },
 ];
 const STATUSES = ['onboarding', 'active', 'paused', 'closed'];
 const statusColor: Record<string, string> = {
@@ -22,9 +23,11 @@ export default function Billing() {
   const [ledgerPopulated, setLedgerPopulated] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  const [plans, setPlans] = useState<any[]>([]);
 
   const load = () => opm.billingOverview().then((d: any) => { setRows(d.workspaces || []); setLedgerPopulated(!!d.ledger_populated); }).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+  const loadPlans = () => billing.plansList().then((d: any) => setPlans(d.plans || [])).catch(() => {});
+  useEffect(() => { load(); loadPlans(); }, []);
 
   if (user?.role !== 'super_admin') return <div className="py-16 text-center text-slate-400">Billing is restricted to super admins.</div>;
   if (loading) return <Spinner />;
@@ -66,15 +69,87 @@ export default function Billing() {
         <div className="card p-4"><div className="label flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Margin</div><div className={`mt-1 text-2xl font-bold ${totalMargin > 0 ? 'text-emerald-600' : 'text-ink'}`}>{fmt.money(totalMargin)}</div></div>
       </div>
 
+      <PlanManager plans={plans} onChanged={loadPlans} />
+
       <div className="space-y-4">
-        {rows.map((r) => <TenantCard key={r.workspace_slug} row={r} onChanged={load} />)}
+        {rows.map((r) => <TenantCard key={r.workspace_slug} row={r} plans={plans} onChanged={load} />)}
         {rows.length === 0 && <div className="card p-8 text-center text-sm text-slate-400">No billing workspaces configured yet.</div>}
       </div>
     </div>
   );
 }
 
-function TenantCard({ row, onChanged }: { row: any; onChanged: () => void }) {
+// ---- Reusable subscription plans (Requirement 2) ----
+const blankPlan = { id: '', name: '', interval: 'monthly', amount: '', setup_fee: '' };
+function PlanManager({ plans, onChanged }: { plans: any[]; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState<any>(blankPlan);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const edit = (p: any) => { setForm({ id: p.id, name: p.name, interval: p.interval, amount: String(p.amount ?? ''), setup_fee: String(p.setup_fee ?? '') }); setOpen(true); setErr(''); };
+  const create = () => { setForm(blankPlan); setOpen(true); setErr(''); };
+
+  const save = async () => {
+    setErr(''); setBusy(true);
+    try {
+      await billing.planSave({ id: form.id || undefined, name: form.name.trim(), interval: form.interval, amount: Number(form.amount), setup_fee: Number(form.setup_fee || 0) });
+      setOpen(false); setForm(blankPlan); onChanged();
+    } catch (e: any) { setErr(e?.message || 'Could not save plan.'); } finally { setBusy(false); }
+  };
+  const del = async (p: any) => {
+    if (!confirm(`Deactivate plan “${p.name}”? Existing subscriptions keep running; the plan just won't be assignable to new customers.`)) return;
+    try { await billing.planDelete(p.id); onChanged(); } catch (e: any) { alert(e?.message || 'Could not delete plan.'); }
+  };
+
+  const activePlans = plans.filter((p) => p.active);
+  return (
+    <div className="card mb-5 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2"><Package className="h-4 w-4 text-brand" /><h3 className="text-base font-bold text-ink">Subscription plans</h3><span className="pill bg-slate-100 text-slate-500">{activePlans.length} active</span></div>
+        <button className="btn-ghost" onClick={create}><Plus className="h-4 w-4" /> New plan</button>
+      </div>
+      <p className="mb-3 text-xs text-slate-500">Reusable named plans — assign any of these to a workspace below to put it on Subscription billing.</p>
+
+      {activePlans.length === 0 && !open && <div className="rounded-lg bg-surface px-4 py-6 text-center text-sm text-slate-400">No plans yet. Create one to start assigning subscriptions.</div>}
+
+      {activePlans.length > 0 && (
+        <div className="mb-3 divide-y divide-line rounded-lg border border-line">
+          {activePlans.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm">
+              <div>
+                <span className="font-semibold text-ink">{p.name}</span>
+                <span className="ml-2 text-slate-500">{fmt.money(p.amount)} / {p.interval}{Number(p.setup_fee) > 0 ? ` · ${fmt.money(p.setup_fee)} setup` : ''}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="text-xs font-semibold text-brand hover:underline" onClick={() => edit(p)}>Edit</button>
+                <button className="text-slate-400 hover:text-red-600" title="Deactivate" onClick={() => del(p)}><Trash2 className="h-3.5 w-3.5" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {open && (
+        <div className="rounded-xl border border-line bg-surface/60 p-4">
+          {err && <div className="mb-2 flex items-center gap-1 text-xs text-red-600"><AlertCircle className="h-3.5 w-3.5" /> {err}</div>}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block"><span className="label mb-1 block">Plan name</span><input className="input w-full" value={form.name} placeholder="Starter" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+            <label className="block"><span className="label mb-1 block">Interval</span><select className="input w-full" value={form.interval} onChange={(e) => setForm({ ...form, interval: e.target.value })}>{INTERVALS.map((i) => <option key={i} value={i}>{i}</option>)}</select></label>
+            <label className="block"><span className="label mb-1 block">Recurring amount ($)</span><input className="input w-full" type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
+            <label className="block"><span className="label mb-1 block">Setup fee ($, optional)</span><input className="input w-full" type="number" step="0.01" min="0" value={form.setup_fee} onChange={(e) => setForm({ ...form, setup_fee: e.target.value })} /></label>
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <button className="btn-ghost" onClick={() => { setOpen(false); setForm(blankPlan); }}>Cancel</button>
+            <button className="btn-primary disabled:opacity-50" disabled={busy || !form.name.trim() || !(Number(form.amount) > 0)} onClick={save}>{busy ? 'Saving…' : form.id ? 'Save plan' : 'Create plan'}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TenantCard({ row, plans, onChanged }: { row: any; plans: any[]; onChanged: () => void }) {
   const [form, setForm] = useState({
     display_name: row.display_name || '', billing_mode: row.billing_mode, status: row.status,
     default_multiplier: String(row.default_multiplier ?? '1'), stripe_customer_id: row.stripe_customer_id || '',
@@ -82,8 +157,40 @@ function TenantCard({ row, onChanged }: { row: any; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState('');
-  const [action, setAction] = useState<'' | 'customer' | 'invoice'>('');
+  const [action, setAction] = useState<'' | 'customer' | 'invoice' | 'cardlink'>('');
   const [actionMsg, setActionMsg] = useState<{ ok: boolean; text: string; url?: string } | null>(null);
+  // Subscription (Requirement 3) + plan assignment (Requirement 2)
+  const [sub, setSub] = useState<any>(null);
+  const [assignPlan, setAssignPlan] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [subMsg, setSubMsg] = useState('');
+  // Consent + card link (Requirement 4)
+  const [cardLink, setCardLink] = useState('');
+
+  const isSubscription = form.billing_mode === 'subscription';
+  useEffect(() => {
+    if (row.billing_mode === 'subscription') billing.subscriptionGet(row.workspace_slug).then((d: any) => setSub(d.subscription || null)).catch(() => {});
+  }, [row.workspace_slug, row.billing_mode]);
+
+  const activePlans = plans.filter((p) => p.active);
+  const assign = async () => {
+    if (!assignPlan) return;
+    setSubMsg(''); setAssigning(true);
+    try {
+      const r = await billing.subscriptionAssign(row.workspace_slug, assignPlan);
+      setSub(r.subscription || null);
+      setSubMsg(r.stripe_wired ? 'Subscription created in Stripe and assigned.' : 'Plan assigned. Stripe subscription is pending — add a Stripe customer/card, then re-assign to activate billing.');
+      onChanged();
+    } catch (e: any) { setSubMsg(e?.message || 'Could not assign plan.'); } finally { setAssigning(false); }
+  };
+  const sendCardLink = async () => {
+    setActionMsg(null); setAction('cardlink');
+    try {
+      const r = await billing.cardLinkCreate(row.workspace_slug);
+      setCardLink(r.url);
+      setActionMsg({ ok: true, text: 'Shareable consent + card link created.', url: r.url });
+    } catch (e: any) { setActionMsg({ ok: false, text: e?.message || 'Could not create link.' }); } finally { setAction(''); }
+  };
 
   const dirty = form.display_name !== (row.display_name || '') || form.billing_mode !== row.billing_mode ||
     form.status !== row.status || form.default_multiplier !== String(row.default_multiplier ?? '1') ||
@@ -152,6 +259,33 @@ function TenantCard({ row, onChanged }: { row: any; onChanged: () => void }) {
         <div><div className="label">Billable</div><div className="text-lg font-bold text-ink">{fmt.money(billable)}</div></div>
       </div>
 
+      {/* Subscription panel (Requirement 3) — plan line items when on Subscription billing */}
+      {isSubscription && (
+        <div className="mb-4 rounded-xl border border-brand/30 bg-brand/5 p-4">
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand"><Package className="h-3.5 w-3.5" /> Subscription</div>
+          {sub ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div><div className="label">Plan</div><div className="text-sm font-bold text-ink">{sub.plan_name || sub.label || '—'}</div></div>
+              <div><div className="label">Recurring</div><div className="text-sm font-bold text-ink">{fmt.money(sub.amount)} / {sub.interval}</div></div>
+              <div><div className="label">Setup fee</div><div className="text-sm font-bold text-ink">{Number(sub.setup_fee) > 0 ? fmt.money(sub.setup_fee) : '—'}</div></div>
+              <div><div className="label">Status</div><div className={`text-sm font-bold ${sub.status === 'active' ? 'text-emerald-600' : 'text-amber-600'}`}>{sub.status === 'pending_stripe' ? 'pending Stripe' : sub.status}</div></div>
+              {sub.next_charge_at && <div className="col-span-2 sm:col-span-4 flex items-center gap-1 text-[11px] text-slate-500"><Calendar className="h-3 w-3" /> Next charge {new Date(sub.next_charge_at).toLocaleDateString()}</div>}
+            </div>
+          ) : (
+            <div className="text-sm text-slate-500">No plan assigned yet. Usage rebilling is disabled on Subscription — assign a plan to start recurring billing.</div>
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-brand/20 pt-3">
+            <select className="input !py-1.5 max-w-[220px] text-sm" value={assignPlan} onChange={(e) => setAssignPlan(e.target.value)}>
+              <option value="">{sub ? 'Change plan…' : 'Select a plan…'}</option>
+              {activePlans.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmt.money(p.amount)}/{p.interval}</option>)}
+            </select>
+            <button className="btn-ghost" disabled={!assignPlan || assigning} onClick={assign}>{assigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Assign plan</button>
+            {activePlans.length === 0 && <span className="text-[11px] text-slate-400">Create a plan above first.</span>}
+            {subMsg && <span className="text-[11px] text-slate-600">{subMsg}</span>}
+          </div>
+        </div>
+      )}
+
       {/* config row */}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
         <label className="block"><span className="label mb-1 block">Display name</span>
@@ -184,6 +318,15 @@ function TenantCard({ row, onChanged }: { row: any; onChanged: () => void }) {
         <button className="btn-ghost" disabled={action === 'invoice' || !row.stripe_customer_id} onClick={generateInvoice} title={!row.stripe_customer_id ? 'Create a Stripe customer first' : ''}>
           {action === 'invoice' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Generate draft invoice
         </button>
+        <button className="btn-ghost" disabled={action === 'cardlink'} onClick={sendCardLink} title="Generate a shareable consent + card-entry link for this customer">
+          {action === 'cardlink' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Send consent + card link
+        </button>
+        {cardLink && (
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-surface px-2.5 py-1.5 text-xs">
+            <input readOnly value={cardLink} className="w-52 bg-transparent font-mono text-[11px] text-slate-600 outline-none" onFocus={(e) => e.target.select()} />
+            <button className="text-brand hover:text-brand/70" title="Copy link" onClick={() => navigator.clipboard?.writeText(cardLink)}><Copy className="h-3.5 w-3.5" /></button>
+          </span>
+        )}
         {actionMsg && (
           <span className={`inline-flex items-center gap-1 text-xs ${actionMsg.ok ? 'text-emerald-700' : 'text-red-600'}`}>
             {actionMsg.ok ? <Check className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />} {actionMsg.text}
