@@ -271,12 +271,24 @@ export const billing = {
   // Customer self-serve account portal (any authenticated user; scoped to their own tenant).
   myAccount: () => billingGet('my_account'),
   portal: () => billingCall('portal'),
+  // Subscription plan manager (super-admin).
+  plansList: () => billingGet('plans_list'),
+  planSave: (b: { id?: string; name: string; interval: string; amount: number; setup_fee?: number; active?: boolean }) => billingCall('plan_save', { body: b }),
+  planDelete: (id: string) => billingCall('plan_delete', { body: { id } }),
+  subscriptionAssign: (workspace: string, plan_id: string) => billingCall('subscription_assign', { body: { workspace, plan_id } }),
+  subscriptionGet: (workspace: string) => billingGet('subscription_get', { workspace }),
+  // Forward-facing consent + manual card capture link.
+  cardLinkCreate: (workspace: string) => billingCall('card_link_create', { body: { workspace } }),
+  cardLinkGet: (token: string) => billingGet('card_link_get', { token }),
+  cardLinkStart: (b: { token: string; signature_name: string; agreement_accepted: boolean }) => billingCall('card_link_start', { body: b }),
+  cardLinkComplete: (token: string, session_id?: string) => billingCall('card_link_complete', { body: { token, session_id } }),
 };
 
 // GET helper for authenticated billing reads (my_account).
-async function billingGet(action: string) {
+async function billingGet(action: string, params?: Record<string, string>) {
   const url = new URL(BILLING_BASE);
   url.searchParams.set('action', action);
+  for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = tokenStore.get();
   if (token) headers['Authorization'] = `Bearer ${token}`;
