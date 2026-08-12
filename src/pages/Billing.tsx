@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { opm, billing, fmt } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
-import { DollarSign, Check, AlertCircle, TrendingUp, CreditCard, Info, RefreshCw, FileText, Loader2, ExternalLink, Package, Send, Copy, Calendar, Plus, Trash2 } from 'lucide-react';
+import { DollarSign, Check, AlertCircle, TrendingUp, CreditCard, Info, RefreshCw, FileText, Loader2, ExternalLink, Package, Send, Copy, Calendar, Plus, Trash2, ShieldCheck, Download, Wallet } from 'lucide-react';
 
 const INTERVALS = ['daily', 'weekly', 'monthly', 'annual'];
 
@@ -166,8 +166,41 @@ function TenantCard({ row, plans, onChanged }: { row: any; plans: any[]; onChang
   const [subMsg, setSubMsg] = useState('');
   // Consent + card link (Requirement 4)
   const [cardLink, setCardLink] = useState('');
+  // Feature 1 — direct-pay capability (customer pays providers directly, no rebill)
+  const [directPay, setDirectPay] = useState<boolean>(!!row.direct_pay_enabled);
+  const [dpBusy, setDpBusy] = useState(false);
+  // Feature 2 — signed authorization PDFs
+  const [authDocs, setAuthDocs] = useState<any[]>([]);
+  const [authLoaded, setAuthLoaded] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
+  const [authMsg, setAuthMsg] = useState('');
 
   const isSubscription = form.billing_mode === 'subscription';
+
+  const loadAuthDocs = async () => {
+    try { const d = await billing.authorizationPdfList(row.workspace_slug); setAuthDocs(d.documents || []); }
+    catch { /* non-fatal */ } finally { setAuthLoaded(true); }
+  };
+  useEffect(() => { loadAuthDocs(); }, [row.workspace_slug]);
+
+  const toggleDirectPay = async () => {
+    const next = !directPay;
+    setDpBusy(true); setDirectPay(next);
+    try { await billing.setDirectPay(row.workspace_slug, next); onChanged(); }
+    catch (e: any) { setDirectPay(!next); alert(e?.message || 'Could not update direct-pay setting.'); }
+    finally { setDpBusy(false); }
+  };
+
+  const generateAuthPdf = async () => {
+    setAuthMsg(''); setGenBusy(true);
+    try {
+      await billing.authorizationPdf(row.workspace_slug);
+      setAuthMsg('Authorization PDF generated.');
+      await loadAuthDocs();
+    } catch (e: any) { setAuthMsg(e?.message || 'Could not generate authorization PDF.'); }
+    finally { setGenBusy(false); }
+  };
+
   useEffect(() => {
     if (row.billing_mode === 'subscription') billing.subscriptionGet(row.workspace_slug).then((d: any) => setSub(d.subscription || null)).catch(() => {});
   }, [row.workspace_slug, row.billing_mode]);
@@ -332,6 +365,68 @@ function TenantCard({ row, plans, onChanged }: { row: any; plans: any[]; onChang
             {actionMsg.ok ? <Check className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />} {actionMsg.text}
             {actionMsg.url && <a href={actionMsg.url} target="_blank" rel="noreferrer" className="ml-1 inline-flex items-center gap-0.5 text-brand underline">view <ExternalLink className="h-3 w-3" /></a>}
           </span>
+        )}
+      </div>
+
+      {/* Feature 1 — Direct pay (customer pays providers directly; not rebilled) */}
+      <div className="mt-4 rounded-xl border border-line bg-surface/50 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-2">
+            <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+            <div>
+              <div className="text-sm font-bold text-ink">Allow customer to pay directly (no rebill)</div>
+              <p className="mt-0.5 max-w-xl text-xs text-slate-500">
+                When on, certain items are paid by the customer directly to the provider/processor and are <span className="font-semibold text-ink">NOT rebilled</span> by us. This is additive to the billing mode above — usage credits and subscriptions are unaffected.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button" role="switch" aria-checked={directPay} disabled={dpBusy} onClick={toggleDirectPay}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${directPay ? 'bg-brand' : 'bg-slate-300'} ${dpBusy ? 'opacity-60' : ''}`}
+            title={directPay ? 'Direct pay enabled' : 'Direct pay disabled'}
+          >
+            <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${directPay ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+        {directPay && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>Direct pay is ON. Items marked as customer-paid are settled by the customer directly and should not be included in rebilled invoices. (Per-line direct/billed marking is a planned follow-up; today this is a workspace-level flag.)</span>
+          </div>
+        )}
+      </div>
+
+      {/* Feature 2 — Signed authorization PDFs */}
+      <div className="mt-4 rounded-xl border border-line bg-surface/50 p-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-bold text-ink"><ShieldCheck className="h-4 w-4 text-brand" /> Payment authorizations</div>
+          <button className="btn-ghost" disabled={genBusy} onClick={generateAuthPdf} title="Generate a flattened PDF authorization from the signed agreement + card on file (brand + last 4 only)">
+            {genBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Generate authorization PDF
+          </button>
+        </div>
+        <p className="mb-2 text-xs text-slate-500">Flattened, non-editable PDF records of the signed authorization. The card is referenced only by brand + last 4 — never the full number.</p>
+        {authMsg && <div className="mb-2 text-xs text-slate-600">{authMsg}</div>}
+        {!authLoaded ? (
+          <div className="text-xs text-slate-400">Loading…</div>
+        ) : authDocs.length === 0 ? (
+          <div className="rounded-lg bg-surface px-3 py-3 text-center text-xs text-slate-400">No authorization PDFs yet.</div>
+        ) : (
+          <div className="divide-y divide-line rounded-lg border border-line">
+            {authDocs.map((doc) => (
+              <div key={doc.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <div className="font-semibold text-ink">{doc.signer_name || '—'} <span className="ml-1 font-normal text-slate-400">· {doc.agreement_version || '—'}</span></div>
+                  <div className="text-slate-500">
+                    {doc.card_brand && doc.card_last4 ? <span className="capitalize">{doc.card_brand} ending {doc.card_last4} · </span> : null}
+                    Signed {doc.signed_at ? new Date(doc.signed_at).toLocaleString() : '—'} · {doc.source}
+                  </div>
+                </div>
+                {doc.signed_url
+                  ? <a href={doc.signed_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-brand hover:underline"><Download className="h-3.5 w-3.5" /> Download</a>
+                  : <span className="text-slate-400">link unavailable</span>}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
