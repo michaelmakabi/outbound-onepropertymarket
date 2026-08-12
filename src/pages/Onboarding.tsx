@@ -3,11 +3,9 @@ import { onboarding, AUTHORIZATION_TEXT, AUTHORIZATION_VERSION } from '../lib/on
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
 import AutoChargeBar from '../components/AutoChargeBar';
-import CreditsPanel from '../components/CreditsPanel';
-import SubscriptionsPanel from '../components/SubscriptionsPanel';
 import {
   UserPlus, ShieldCheck, CreditCard, Link2, Eye, Check, X, AlertCircle, Copy,
-  KeyRound, RefreshCw, FileSignature, Building2, Repeat,
+  KeyRound, RefreshCw, FileSignature, Building2,
 } from 'lucide-react';
 
 const COMPANY = '1PropertyMarket';
@@ -46,7 +44,6 @@ export default function Onboarding() {
               <th className="px-3 py-2.5 font-semibold">Mode</th>
               <th className="px-3 py-2.5 font-semibold">Authorization</th>
               <th className="px-3 py-2.5 font-semibold">Card on file</th>
-              <th className="px-3 py-2.5 font-semibold">Credits</th>
               <th className="px-3 py-2.5 text-right font-semibold">Setup</th>
             </tr>
           </thead>
@@ -55,20 +52,17 @@ export default function Onboarding() {
               <tr key={a.workspace_slug} className="cursor-pointer border-t border-line hover:bg-surface" onClick={() => setOpenSlug(a.workspace_slug)}>
                 <td className="px-5 py-2.5"><div className="font-semibold text-ink">{a.display_name || a.workspace_slug}</div><div className="font-mono text-xs text-slate-400">{a.workspace_slug}</div></td>
                 <td className="px-3 py-2.5"><span className={`pill ${statusColor[a.status] || 'bg-slate-100 text-slate-600'}`}>{a.status}</span></td>
-                <td className="px-3 py-2.5 text-slate-600">{String(a.billing_engine || a.billing_mode || '').replace(/_/g, ' ')}</td>
+                <td className="px-3 py-2.5 text-slate-600">{String(a.billing_mode || '').replace(/_/g, ' ')}</td>
                 <td className="px-3 py-2.5">{a.has_authorization
                   ? <span className="inline-flex items-center gap-1 text-emerald-700"><ShieldCheck className="h-3.5 w-3.5" /> {a.authorization?.signer_name}</span>
                   : <span className="inline-flex items-center gap-1 text-amber-600"><AlertCircle className="h-3.5 w-3.5" /> Not signed</span>}</td>
                 <td className="px-3 py-2.5">{a.card_on_file
                   ? <span className="inline-flex items-center gap-1 text-ink"><CreditCard className="h-3.5 w-3.5 text-slate-400" /> {a.card_on_file}</span>
                   : <span className="text-slate-400">None</span>}</td>
-                <td className="px-3 py-2.5">{a.credit_balance == null
-                  ? <span className="text-slate-300">—</span>
-                  : <span className={Number(a.credit_balance) < 0 ? 'font-semibold text-red-600' : 'text-ink'}>{Number(a.credit_balance).toFixed(2)}</span>}</td>
                 <td className="px-3 py-2.5 text-right"><button className="btn-ghost !px-2 !py-1 text-xs" onClick={(e) => { e.stopPropagation(); setOpenSlug(a.workspace_slug); }}>Open →</button></td>
               </tr>
             ))}
-            {accounts.length === 0 && <tr><td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-400">No accounts yet — create your first one.</td></tr>}
+            {accounts.length === 0 && <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No accounts yet — create your first one.</td></tr>}
           </tbody>
         </table>
         </div>
@@ -82,7 +76,7 @@ export default function Onboarding() {
 
 // ---------------- New account ----------------
 function NewAccountModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [form, setForm] = useState({ workspace_slug: '', display_name: '', billing_mode: 'full_retail', billing_engine: 'prepaid_credits', default_multiplier: '2.0' });
+  const [form, setForm] = useState({ workspace_slug: '', display_name: '', billing_mode: 'full_retail', default_multiplier: '1.0' });
   const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
   const submit = async () => {
     setErr(''); setBusy(true);
@@ -95,9 +89,9 @@ function NewAccountModal({ onClose, onDone }: { onClose: () => void; onDone: () 
       <Field label="Workspace slug (unique id)"><input className="input" value={form.workspace_slug} placeholder="acme_realty" onChange={(e) => setForm({ ...form, workspace_slug: e.target.value })} /></Field>
       <Field label="Display name"><input className="input" value={form.display_name} placeholder="Acme Realty" onChange={(e) => setForm({ ...form, display_name: e.target.value })} /></Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Billing engine"><select className="input" value={form.billing_engine} onChange={(e) => setForm({ ...form, billing_engine: e.target.value })}>
-          <option value="prepaid_credits">Prepaid credits (SaaS)</option><option value="direct_subscription">Direct retail + subscription</option><option value="arrears_sweep">Arrears sweep (legacy)</option></select></Field>
-        <Field label="Multiplier (× Retell cost)"><input className="input" type="number" step="0.1" min="0.1" max="100" value={form.default_multiplier} onChange={(e) => setForm({ ...form, default_multiplier: e.target.value })} /></Field>
+        <Field label="Billing mode"><select className="input" value={form.billing_mode} onChange={(e) => setForm({ ...form, billing_mode: e.target.value })}>
+          <option value="full_retail">Usage credits (× multiplier)</option><option value="subscription">Subscription</option></select></Field>
+        <Field label="Multiplier"><input className="input" type="number" step="0.1" min="1" max="10" value={form.default_multiplier} onChange={(e) => setForm({ ...form, default_multiplier: e.target.value })} /></Field>
       </div>
       <button className="btn-primary w-full" disabled={busy || !form.workspace_slug} onClick={submit}>{busy ? 'Creating…' : 'Create account'}</button>
     </Modal>
@@ -125,7 +119,7 @@ function AccountDrawer({ slug, onClose }: { slug: string; onClose: () => void })
             <div className="mb-5 flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-2"><Building2 className="h-5 w-5 text-brand" /><h2 className="text-xl font-extrabold text-ink">{d.workspace?.display_name || slug}</h2></div>
-                <div className="font-mono text-xs text-slate-400">{slug} · {String(d.workspace?.billing_engine || d.workspace?.billing_mode || '').replace(/_/g, ' ')} · {Number(d.workspace?.default_multiplier || 1).toFixed(2)}×</div>
+                <div className="font-mono text-xs text-slate-400">{slug} · {String(d.workspace?.billing_mode || '').replace(/_/g, ' ')} · {Number(d.workspace?.default_multiplier || 1).toFixed(2)}×</div>
               </div>
               <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button>
             </div>
@@ -172,24 +166,6 @@ function AccountDrawer({ slug, onClose }: { slug: string; onClose: () => void })
               )}
               <div className="mt-2 text-xs text-slate-400">Retell has no API to add a card, so the full card is revealed for your team to key in. It stays on file under the customer's signed authorization.</div>
             </Step>
-
-            {/* Step 4 — Billing & credits */}
-            <div className="mb-4 rounded-xl border border-line p-4">
-              <div className="mb-3 flex items-center gap-2">
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-600">4</span>
-                <span className="inline-flex items-center gap-1.5 font-bold text-ink"><CreditCard className="h-4 w-4" /> Billing & credits</span>
-              </div>
-              <CreditsPanel slug={slug} />
-            </div>
-
-            {/* Step 5 — Subscriptions & service fees */}
-            <div className="mb-4 rounded-xl border border-line p-4">
-              <div className="mb-3 flex items-center gap-2">
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-slate-200 text-xs font-bold text-slate-600">5</span>
-                <span className="inline-flex items-center gap-1.5 font-bold text-ink"><Repeat className="h-4 w-4" /> Subscriptions & service fees</span>
-              </div>
-              <SubscriptionsPanel slug={slug} />
-            </div>
           </>
         )}
       </div>
@@ -234,7 +210,7 @@ function ConsentModal({ slug, onClose, onDone }: any) {
   return (
     <Modal title="Card authorization" onClose={onClose} wide>
       {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
-      <div className="mb-3 max-h-40 overflow-y-auto whitespace-pre-line rounded-lg border border-line bg-surface p-3 text-sm text-slate-700">{text}</div>
+      <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-line bg-surface p-3 text-sm text-slate-700">{text}</div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Signer legal name"><input className="input" value={signer} onChange={(e) => setSigner(e.target.value)} /></Field>
         <Field label="Account email (optional)"><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
