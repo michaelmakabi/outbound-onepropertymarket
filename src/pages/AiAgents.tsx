@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { testai } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
@@ -6,8 +6,8 @@ import { useAuth } from '../lib/auth';
 import { PageHead, Spinner, EmptyState } from '../components/ui';
 import {
   Bot, PhoneIncoming, PhoneOutgoing, Handshake, ConciergeBell, ClipboardCheck,
-  LayoutGrid, Table as TableIcon, Copy, Pencil, PlayCircle, Loader2, X, Save,
-  CheckCircle2, AlertCircle, RefreshCw, Mic,
+  LayoutGrid, Table as TableIcon, Copy, Pencil, PlayCircle, Loader2, X,
+  CheckCircle2, AlertCircle, RefreshCw,
 } from 'lucide-react';
 
 type Agent = {
@@ -46,7 +46,8 @@ export default function AiAgents() {
   const [view, setView] = useState<ViewMode>('grid');
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const [cloningId, setCloningId] = useState('');
-  const [editing, setEditing] = useState<Agent | null>(null);
+
+  function editAgent(a: Agent) { nav(`/ai-agents/${encodeURIComponent(a.agent_id)}/edit`); }
 
   const load = () => {
     if (!active) return;
@@ -79,10 +80,10 @@ export default function AiAgents() {
   if (wsLoading) return <Spinner label="Loading…" />;
 
   return (
-    <div className="mx-auto max-w-[1200px]">
+    <div className="w-full">
       <PageHead
         title="AI Agents"
-        subtitle={`Your workspace's voice agents${activeName ? ` — ${activeName}` : ''}. Test them live, clone a copy, or edit the live prompt.`}
+        subtitle={`Your workspace's voice agents${activeName ? ` — ${activeName}` : ''}. Test them live, clone a copy, or open the full editor.`}
         right={
           <div className="flex items-center gap-2">
             <button onClick={load} className="btn-ghost" title="Refresh"><RefreshCw className="h-4 w-4" /></button>
@@ -111,27 +112,27 @@ export default function AiAgents() {
       {loading ? <Spinner label="Loading agents…" /> : agents.length === 0 ? (
         <EmptyState text="No AI agents are assigned to this workspace yet." />
       ) : view === 'grid' ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {agents.map((a) => {
             const meta = metaFor(a.type);
             const Icon = meta.icon;
             return (
-              <div key={a.agent_id} className="card flex flex-col p-5">
-                <div className="mb-3 flex items-start gap-3">
-                  <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-full ${meta.ring}`}><Icon className="h-5 w-5" /></div>
+              <div key={a.agent_id} className="card flex flex-col p-6">
+                <div className="mb-4 flex items-start gap-4">
+                  <div className={`grid h-14 w-14 shrink-0 place-items-center rounded-full ${meta.ring}`}><Icon className="h-7 w-7" /></div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold text-ink">{a.agent_name}</div>
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.ring}`}>{meta.label}</span>
-                      {!a.live && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">cached</span>}
+                    <div className="truncate text-base font-bold text-ink">{a.agent_name}</div>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${meta.ring}`}>{meta.label}</span>
+                      {!a.live && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">cached</span>}
                     </div>
                   </div>
                 </div>
-                <p className="mb-4 line-clamp-3 flex-1 text-xs leading-relaxed text-slate-500">{a.description}</p>
+                <p className="mb-5 line-clamp-3 flex-1 text-sm leading-relaxed text-slate-500">{a.description}</p>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => testAgent(a)} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand/90"><PlayCircle className="h-3.5 w-3.5" /> Test</button>
-                  <button onClick={() => cloneAgent(a)} disabled={cloningId === a.agent_id} className="btn-ghost !py-1.5 text-xs">{cloningId === a.agent_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />} Clone</button>
-                  {isAdmin && <button onClick={() => setEditing(a)} className="btn-ghost !py-1.5 text-xs"><Pencil className="h-3.5 w-3.5" /> Edit</button>}
+                  <button onClick={() => testAgent(a)} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand/90"><PlayCircle className="h-4 w-4" /> Test</button>
+                  <button onClick={() => cloneAgent(a)} disabled={cloningId === a.agent_id} className="btn-ghost text-sm">{cloningId === a.agent_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />} Clone</button>
+                  {isAdmin && <button onClick={() => editAgent(a)} className="btn-ghost text-sm"><Pencil className="h-4 w-4" /> Edit</button>}
                 </div>
               </div>
             );
@@ -167,7 +168,7 @@ export default function AiAgents() {
                         <div className="flex items-center justify-end gap-1.5">
                           <button onClick={() => testAgent(a)} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand/90"><PlayCircle className="h-3.5 w-3.5" /> Test</button>
                           <button onClick={() => cloneAgent(a)} disabled={cloningId === a.agent_id} className="btn-ghost !py-1.5 text-xs">{cloningId === a.agent_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}</button>
-                          {isAdmin && <button onClick={() => setEditing(a)} className="btn-ghost !py-1.5 text-xs"><Pencil className="h-3.5 w-3.5" /></button>}
+                          {isAdmin && <button onClick={() => editAgent(a)} className="btn-ghost !py-1.5 text-xs"><Pencil className="h-3.5 w-3.5" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -179,77 +180,6 @@ export default function AiAgents() {
         </div>
       )}
 
-      {editing && isAdmin && (
-        <EditAgentModal
-          workspace={active || ''}
-          agent={editing}
-          onClose={() => setEditing(null)}
-          onSaved={(msg) => { setEditing(null); flash(true, msg); load(); }}
-          onError={(msg) => flash(false, msg)}
-        />
-      )}
-    </div>
-  );
-}
-
-function EditAgentModal({ workspace, agent, onClose, onSaved, onError }: {
-  workspace: string; agent: Agent; onClose: () => void; onSaved: (msg: string) => void; onError: (msg: string) => void;
-}) {
-  const [name, setName] = useState(agent.agent_name);
-  const [voice, setVoice] = useState(agent.voice_id || '');
-  const [prompt, setPrompt] = useState(agent.general_prompt || '');
-  const [saving, setSaving] = useState(false);
-  const promptEditable = !!agent.llm_id;
-
-  const dirty = useMemo(() => (
-    name.trim() !== agent.agent_name ||
-    voice.trim() !== (agent.voice_id || '') ||
-    (promptEditable && prompt !== (agent.general_prompt || ''))
-  ), [name, voice, prompt, agent, promptEditable]);
-
-  async function save() {
-    if (!dirty || saving) return;
-    setSaving(true);
-    const patch: any = { workspace, agent_id: agent.agent_id };
-    if (name.trim() !== agent.agent_name) patch.name = name.trim();
-    if (voice.trim() !== (agent.voice_id || '')) patch.voice_id = voice.trim();
-    if (promptEditable && prompt !== (agent.general_prompt || '')) patch.general_prompt = prompt;
-    try {
-      const r = await testai.updateAgent(patch);
-      onSaved(`Saved to Retell — updated ${(r.applied || []).join(', ') || 'agent'}.`);
-    } catch (e: any) { onError(e?.message || 'Update failed'); }
-    finally { setSaving(false); }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => !saving && onClose()}>
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-base font-bold text-ink"><Pencil className="h-5 w-5 text-brand" /> Edit agent</div>
-          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:text-ink"><X className="h-4 w-4" /></button>
-        </div>
-
-        <label className="label mt-1 block">Agent name</label>
-        <input className="input mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="Agent name" />
-
-        <label className="label mt-4 block flex items-center gap-1.5"><Mic className="h-3.5 w-3.5" /> Voice ID <span className="font-normal text-slate-400">(optional — Retell voice_id)</span></label>
-        <input className="input mt-1 font-mono text-xs" value={voice} onChange={(e) => setVoice(e.target.value)} placeholder="e.g. 11labs-Adrian" />
-
-        <label className="label mt-4 block">Prompt <span className="font-normal text-slate-400">(general_prompt — the description shown to customers is the first line)</span></label>
-        {promptEditable ? (
-          <textarea className="input mt-1 min-h-[220px] font-mono text-xs leading-relaxed" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="The agent's instructions…" />
-        ) : (
-          <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">This agent is a conversation-flow agent — its prompt isn't editable here. Name and voice still save.</div>
-        )}
-
-        <div className="mt-5 flex items-center justify-between">
-          <span className="text-xs text-slate-400">Saving PATCHes the live agent in Retell for this workspace.</span>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="btn-ghost" disabled={saving}>Cancel</button>
-            <button onClick={save} disabled={!dirty || saving} className="btn-primary">{saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Save className="h-4 w-4" /> Save to Retell</>}</button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
