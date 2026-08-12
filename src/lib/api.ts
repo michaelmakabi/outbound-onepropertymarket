@@ -282,6 +282,12 @@ export const billing = {
   cardLinkGet: (token: string) => billingGet('card_link_get', { token }),
   cardLinkStart: (b: { token: string; signature_name: string; agreement_accepted: boolean }) => billingCall('card_link_start', { body: b }),
   cardLinkComplete: (token: string, session_id?: string) => billingCall('card_link_complete', { body: { token, session_id } }),
+  // Feature 1 — direct-pay capability (super-admin). Toggle whether the customer pays providers directly (no rebill).
+  setDirectPay: (workspace: string, enabled: boolean) => billingCall('set_direct_pay', { body: { workspace, enabled } }),
+  // Feature 2 — signed authorization PDF (super-admin). Generate/list/fetch flattened PDF records (card = brand+last4 only).
+  authorizationPdf: (workspace: string) => billingCall('authorization_pdf', { body: { workspace } }),
+  authorizationPdfList: (workspace: string) => billingGet('authorization_pdf_list', { workspace }),
+  authorizationPdfGet: (id: string) => billingGet('authorization_pdf_get', { id }),
 };
 
 // GET helper for authenticated billing reads (my_account).
