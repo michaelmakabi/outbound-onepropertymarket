@@ -163,6 +163,17 @@ export default function LeadDetail() {
   // newest first
   const notes = useMemo(() => [...rawNotes].sort((a, b) => noteTime(b) - noteTime(a)), [rawNotes]);
   const sortedCalls = useMemo(() => [...leadCalls].sort((a, b) => Number(b.start_timestamp || 0) - Number(a.start_timestamp || 0)), [leadCalls]);
+  // Most recent AI-captured follow-up / appointment across this record's calls (evolved
+  // post-call fields land in each call's custom_data). Surfaced on the record.
+  const aiFollowUp = useMemo(() => {
+    for (const c of sortedCalls) {
+      const cd = (c.custom_data && typeof c.custom_data === 'object') ? c.custom_data : {};
+      if (cd.follow_up_action || cd.follow_up_date || cd.appointment_datetime || cd.notes) {
+        return { ...cd, when: c.start_timestamp, agent: c.agent_name };
+      }
+    }
+    return null;
+  }, [sortedCalls]);
   const owners = contacts.filter((c) => c.contact_kind !== 'relative');
   const relatives = contacts.filter((c) => c.contact_kind === 'relative');
   const parcel = lead?.parcel || {};
@@ -578,6 +589,18 @@ export default function LeadDetail() {
               ) : tab === 'calls' ? (
                 callsLoading ? <LoadingBlock label="Loading call history…" /> :
                 sortedCalls.length === 0 ? <EmptyState text="No dialer calls matched to this record's numbers yet." /> :
+                <>
+                {aiFollowUp && (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700">AI-captured follow-up</div>
+                    <div className="space-y-0.5 text-slate-700">
+                      {aiFollowUp.appointment_datetime && <div><span className="font-semibold text-slate-500">Appointment:</span> {aiFollowUp.appointment_datetime}</div>}
+                      {aiFollowUp.follow_up_action && <div><span className="font-semibold text-slate-500">Next action:</span> {aiFollowUp.follow_up_action}</div>}
+                      {aiFollowUp.follow_up_date && <div><span className="font-semibold text-slate-500">Follow-up date:</span> {aiFollowUp.follow_up_date}</div>}
+                      {aiFollowUp.notes && <div><span className="font-semibold text-slate-500">Notes:</span> {aiFollowUp.notes}</div>}
+                    </div>
+                  </div>
+                )}
                 <ol className="space-y-3">{sortedCalls.map((c) => {
                   const open = openTx.has(c.call_id);
                   const inbound = String(c.direction || '').toLowerCase().startsWith('in');
@@ -605,6 +628,14 @@ export default function LeadDetail() {
                         {(inbound ? c.from_number : c.to_number) && <span className="font-mono text-slate-400">{fmtNum(inbound ? c.from_number : c.to_number)}</span>}
                       </div>
                       {c.call_summary && <div className="mt-2 text-sm leading-relaxed text-slate-700">{c.call_summary}</div>}
+                      {c.custom_data && (c.custom_data.notes || c.custom_data.follow_up_action || c.custom_data.follow_up_date || c.custom_data.appointment_datetime) && (
+                        <div className="mt-2 space-y-1 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-slate-700">
+                          {c.custom_data.notes && <div><span className="font-semibold text-slate-500">Notes:</span> {c.custom_data.notes}</div>}
+                          {c.custom_data.follow_up_action && <div><span className="font-semibold text-slate-500">Follow-up:</span> {c.custom_data.follow_up_action}</div>}
+                          {c.custom_data.follow_up_date && <div><span className="font-semibold text-slate-500">Follow-up date:</span> {c.custom_data.follow_up_date}</div>}
+                          {c.custom_data.appointment_datetime && <div><span className="font-semibold text-slate-500">Appointment:</span> {c.custom_data.appointment_datetime}</div>}
+                        </div>
+                      )}
                       {c.recording_url && <div className="mt-2"><AudioPlayer src={c.recording_url} /></div>}
                       {c.transcript && (
                         <div className="mt-2">
@@ -617,6 +648,7 @@ export default function LeadDetail() {
                     </li>
                   );
                 })}</ol>
+                </>
               ) : (
                 activityList.length === 0 ? <EmptyState text="No activity yet — add a note, log a call, or record an email/text above." /> :
                 <ol className="space-y-3">{activityList.map((n) => {
