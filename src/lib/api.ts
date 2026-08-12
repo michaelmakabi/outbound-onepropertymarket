@@ -199,8 +199,15 @@ export const testai = {
   agents: (workspace: string) => testaiCall('agents', { params: { workspace } }),
   // Rich per-agent directory (derived type, description, voice, prompt) for the AI Agents tab.
   agentsDetailed: (workspace: string) => testaiCall('agents_detailed', { params: { workspace } }),
-  // Admin/owner: push name/prompt/voice edits to the live Retell agent (browser never sees the key).
-  updateAgent: (b: { workspace: string; agent_id: string; name?: string; general_prompt?: string; voice_id?: string }) =>
+  // Full editable snapshot of one agent (agent settings + its LLM settings) for the editor page.
+  agentFull: (workspace: string, agent_id: string) => testaiCall('agent_full', { params: { workspace, agent_id } }),
+  // Retell voice catalog for the workspace (avatars + preview URLs) — powers the voice picker.
+  listVoices: (workspace: string) => testaiCall('list_voices', { params: { workspace } }),
+  // Retell knowledge bases for the workspace — powers the KB multi-select.
+  listKbs: (workspace: string) => testaiCall('list_kbs', { params: { workspace } }),
+  // Admin/owner: push edits to the live Retell agent (browser never sees the key). Accepts the
+  // legacy flat fields plus the full editor's grouped agent {} / llm {} payloads.
+  updateAgent: (b: { workspace: string; agent_id: string; name?: string; general_prompt?: string; voice_id?: string; agent?: Record<string, any>; llm?: Record<string, any> }) =>
     testaiCall('update_agent', { method: 'POST', body: b }),
   // Clone an agent within the same workspace (any user with access to that agent).
   cloneAgent: (b: { workspace: string; agent_id: string; new_name?: string }) =>
