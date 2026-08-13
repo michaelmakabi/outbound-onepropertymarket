@@ -280,7 +280,9 @@ export const billing = {
   // Forward-facing consent + manual card capture link.
   cardLinkCreate: (workspace: string) => billingCall('card_link_create', { body: { workspace } }),
   cardLinkGet: (token: string) => billingGet('card_link_get', { token }),
-  cardLinkStart: (b: { token: string; signature_name: string; agreement_accepted: boolean }) => billingCall('card_link_start', { body: b }),
+  // Identity/billing fields (full_name, email, billing_address, member_id) are saved against the
+  // authorization for this token. No PAN/CVV — the card itself is captured via the tokenized processor flow.
+  cardLinkStart: (b: { token: string; signature_name: string; agreement_accepted: boolean; full_name?: string; email?: string; billing_address?: string; member_id?: string }) => billingCall('card_link_start', { body: b }),
   cardLinkComplete: (token: string, session_id?: string) => billingCall('card_link_complete', { body: { token, session_id } }),
   // Feature 1 — direct-pay capability (super-admin). Toggle whether the customer pays providers directly (no rebill).
   setDirectPay: (workspace: string, enabled: boolean) => billingCall('set_direct_pay', { body: { workspace, enabled } }),
@@ -288,6 +290,8 @@ export const billing = {
   authorizationPdf: (workspace: string) => billingCall('authorization_pdf', { body: { workspace } }),
   authorizationPdfList: (workspace: string) => billingGet('authorization_pdf_list', { workspace }),
   authorizationPdfGet: (id: string) => billingGet('authorization_pdf_get', { id }),
+  // Saved authorization contact details (full name, email, billing address, member ID + card brand/last4). Admin/owner.
+  authDetailsList: (workspace: string) => billingGet('auth_details_list', { workspace }),
 };
 
 // GET helper for authenticated billing reads (my_account).
