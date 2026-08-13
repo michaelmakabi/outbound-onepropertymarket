@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { opm, testai } from '../lib/api';
+import { opm, testai, fmt } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import { useWorkspace } from '../lib/workspace';
 import { LoadingBlock, EmptyState, AudioPlayer } from '../components/dash';
 import { humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
   Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check, X, Loader2, History,
-  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing, Trash2, Home,
+  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing, Trash2, Home, Users, UserCheck, Lock,
 } from 'lucide-react';
 
 const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) · OUTBOUND' };
@@ -64,6 +66,22 @@ const COMPOSE_TABS = [
 ] as const;
 const CALL_OUTCOMES = ['Connected', 'No Answer', 'Voicemail', 'Callback Scheduled', 'Wrong Number', 'Not Interested'];
 
+// Human labels for the append-only activity ledger (opm_activity_log).
+const LEDGER_LABEL: Record<string, string> = {
+  assign_lead: 'Set primary owner', add_follower: 'Added follower', remove_follower: 'Removed follower',
+  note_create: 'Added a note', note_edit: 'Edited a note', note_delete: 'Deleted a note', stage_move: 'Moved stage',
+};
+function ledgerDetail(a: any): string {
+  const d = a && a.detail && typeof a.detail === 'object' ? a.detail : {};
+  const parts: string[] = [];
+  if (d.primary_name) parts.push(String(d.primary_name));
+  if (d.name && !d.primary_name) parts.push(String(d.name));
+  if (d.to || d.stage) parts.push(String(d.to || d.stage));
+  if (d.override) parts.push('override');
+  return parts.join(' · ');
+}
+const NOTE_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export default function LeadDetail() {
   const { id = '' } = useParams();
   const nav = useNavigate();
@@ -71,9 +89,23 @@ export default function LeadDetail() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<'activity' | 'notes' | 'calls' | 'property'>('activity');
+  const [tab, setTab] = useState<'activity' | 'notes' | 'calls' | 'property' | 'ledger'>('activity');
   const [ids, setIds] = useState<string[]>((location.state as any)?.ids || []);
   const [toast, setToast] = useState('');
+
+  // ---- Phase 1 RBAC: role gating, assignment, activity ledger, note governance ----
+  const { user: me } = useAuth();
+  const isSuper = me?.role === 'super_admin';
+  const { isStaff, ownsActive, roles, active } = useWorkspace();
+  const canManageLead = isStaff || ownsActive || (active ? ['owner', 'admin', 'manager'].includes(roles[active] || '') : false);
+  const [assignees, setAssignees] = useState<{ primary: any; followers: any[] }>({ primary: null, followers: [] });
+  const [members, setMembers] = useState<any[]>([]);
+  const [ledger, setLedger] = useState<any[]>([]);
+  const [ledgerLoading, setLedgerLoading] = useState(true);
+  const [editNoteId, setEditNoteId] = useState<any>(null);
+  const [editNoteText, setEditNoteText] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
+  const flash = (m: string, ms = 3000) => { setToast(m); setTimeout(() => setToast(''), ms); };
 
   const [mode, setMode] = useState<'note' | 'email' | 'text' | 'call'>('note');
   const [body, setBody] = useState('');
@@ -116,8 +148,55 @@ export default function LeadDetail() {
 
   const load = () => { setLoading(true); opm.lead(id).then(setData).finally(() => setLoading(false)); };
   const loadCalls = () => { setCallsLoading(true); opm.leadCalls(id).then((d) => setLeadCalls(d.calls || [])).catch(() => setLeadCalls([])).finally(() => setCallsLoading(false)); };
+  const loadAssignees = () => opm.leadAssignees(id).then((d: any) => setAssignees({ primary: d.primary || null, followers: d.followers || [] })).catch(() => setAssignees({ primary: null, followers: [] }));
+  const loadLedger = () => { setLedgerLoading(true); opm.activityLog(id).then((d: any) => setLedger(d.activity || [])).catch(() => setLedger([])).finally(() => setLedgerLoading(false)); };
   useEffect(load, [id]);
   useEffect(loadCalls, [id]);
+  useEffect(() => { loadAssignees(); loadLedger(); }, [id]);
+  // Assignable members (owner/admin/manager only) for the primary/follower pickers.
+  useEffect(() => { if (canManageLead) opm.workspaceMembers().then((d: any) => setMembers(d.members || [])).catch(() => {}); }, [canManageLead]);
+
+  const assignErr = (e: any) => { const m = String(e?.message || ''); flash(/forbidden/i.test(m) ? 'You do not have permission to change assignments here.' : (m || 'Action failed.'), 4000); };
+  async function changePrimary(userId: number | '') {
+    try {
+      if (userId === '') return;
+      await opm.assignLead({ lead_id: id, primary_user_id: Number(userId) });
+      await loadAssignees(); loadLedger(); load();
+      flash('Primary owner updated.');
+    } catch (e: any) { assignErr(e); }
+  }
+  async function addFollower(userId: number | '') {
+    if (userId === '') return;
+    try { await opm.addFollower({ lead_id: id, user_id: Number(userId) }); await loadAssignees(); loadLedger(); } catch (e: any) { assignErr(e); }
+  }
+  async function removeFollower(userId: number) {
+    try { await opm.removeFollower({ lead_id: id, user_id: userId }); await loadAssignees(); loadLedger(); } catch (e: any) { assignErr(e); }
+  }
+  // ---- Note governance (author within 24h, or super_admin override) ----
+  const noteCreatedMs = (n: any) => { if (n.created_at) { const t = new Date(n.created_at).getTime(); if (!isNaN(t)) return t; } return noteTime(n); };
+  const noteOwn = (n: any) => !!me && n.author_user_id != null && Number(n.author_user_id) === Number(me.id);
+  const noteWithin24 = (n: any) => Date.now() - noteCreatedMs(n) < NOTE_EDIT_WINDOW_MS;
+  const noteNormallyEditable = (n: any) => noteOwn(n) && noteWithin24(n) && !n.locked;
+  const noteEditable = (n: any) => noteNormallyEditable(n) || isSuper;
+  const noteIsOverride = (n: any) => isSuper && !noteNormallyEditable(n);
+  async function saveNoteEdit(n: any) {
+    if (noteBusy) return;
+    setNoteBusy(true);
+    try {
+      const r: any = await opm.updateNote({ id: n.id, text: editNoteText, html: editNoteText.replace(/\n/g, '<br>') });
+      setEditNoteId(null); load(); loadLedger();
+      flash(r?.override ? 'Override recorded — this edit was logged.' : 'Note updated.');
+    } catch (e: any) { const m = String(e?.message || ''); flash(/forbidden/i.test(m) ? 'This note is locked.' : (m || 'Could not update note.'), 4000); }
+    finally { setNoteBusy(false); }
+  }
+  async function deleteNoteById(n: any) {
+    if (!confirm('Delete this note?')) return;
+    try {
+      const r: any = await opm.deleteNote(n.id);
+      load(); loadLedger();
+      flash(r?.override ? 'Override recorded — deletion logged.' : 'Note deleted.');
+    } catch (e: any) { const m = String(e?.message || ''); flash(/forbidden/i.test(m) ? 'This note is locked.' : (m || 'Could not delete note.'), 4000); }
+  }
   useEffect(() => { if (!ids.length) opm.leads({}).then((d) => setIds((d.leads || []).map((l: any) => l.lead_id))).catch(() => {}); }, []);
   // Load the dial workspace's agents so the launcher can pick which AI voice agent calls.
   useEffect(() => {
@@ -240,13 +319,13 @@ export default function LeadDetail() {
     if (!text) return;
     setSaving(true);
     await opm.addNote({ lead_id: id, text, html: text.replace(/\n/g, '<br>'), source: srcMap[mode] }).catch(() => {});
-    setBody(''); setSubject(''); setCallOutcome(''); setSaving(false); setTab('activity'); load();
+    setBody(''); setSubject(''); setCallOutcome(''); setSaving(false); setTab('activity'); load(); loadLedger();
   }
   async function aiNote() {
     if (!body.trim()) return;
     setSaving(true);
     await opm.addNote({ lead_id: id, text: `✨ ${body}`, html: `✨ ${body}`.replace(/\n/g, '<br>'), source: 'ai' }).catch(() => {});
-    setBody(''); setSaving(false); setTab('activity'); load();
+    setBody(''); setSaving(false); setTab('activity'); load(); loadLedger();
   }
   function aiCallBrief() {
     const primary = contacts.find((c) => c.is_primary_number) || contacts[0];
@@ -318,6 +397,7 @@ export default function LeadDetail() {
     { k: 'activity', label: 'Activity', n: notes.length },
     { k: 'notes', label: 'Notes', n: null },
     { k: 'calls', label: 'Calls', n: leadCalls.length },
+    { k: 'ledger', label: 'History', n: ledger.length },
     { k: 'property', label: 'Property & Details', n: null },
   ] as const;
   const activityList = tab === 'notes' ? notes.filter((n) => n.source !== 'call') : notes;
@@ -363,7 +443,7 @@ export default function LeadDetail() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat icon={DollarSign} label="Our Value" value={money(lead.deal_price)} />
             <Stat icon={GitBranch} label="Source" value={lead.lead_source || '—'} />
-            <Stat icon={User} label="Assigned" value={lead.assigned_to || '—'} />
+            <Stat icon={User} label="Assigned" value={assignees.primary?.name || lead.assigned_to || '—'} />
             <Stat icon={PhoneCall} label="Calls" value={`${leadCalls.length} · ${contacts.length}#`} />
           </div>
           <button onClick={openCallModal} title="Launch a live AI voice call to this lead" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white transition hover:brightness-125"><Bot className="h-4 w-4" /> AI Call</button>
@@ -400,6 +480,41 @@ export default function LeadDetail() {
               <div className="space-y-2">{relatives.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} onSave={saveNumberEdit} onDelete={deleteNumber} showRel />)}</div>
             </Card>
           )}
+
+          <Card title="Assignment">
+            {/* Primary owner — mirrors the record's assigned_to; owner/admin/manager can change it. */}
+            <div className="pb-2">
+              <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"><UserCheck className="h-3 w-3" /> Primary owner</div>
+              {canManageLead ? (
+                <select value={assignees.primary?.user_id ?? ''} onChange={(e) => changePrimary(e.target.value === '' ? '' : Number(e.target.value))} className="input h-8 w-full text-sm">
+                  <option value="">Unassigned</option>
+                  {members.map((m) => <option key={m.user_id} value={m.user_id}>{m.name || m.email || `User ${m.user_id}`}</option>)}
+                  {assignees.primary && !members.some((m) => m.user_id === assignees.primary.user_id) && <option value={assignees.primary.user_id}>{assignees.primary.name || assignees.primary.email}</option>}
+                </select>
+              ) : (
+                <div className="text-sm font-medium text-ink">{assignees.primary?.name || assignees.primary?.email || <span className="text-slate-400">Unassigned</span>}</div>
+              )}
+            </div>
+            {/* Followers */}
+            <div className="border-t border-dashed border-line pt-2">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Users className="h-3 w-3" /> Followers</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {assignees.followers.length === 0 && <span className="text-xs text-slate-400">No followers</span>}
+                {assignees.followers.map((f) => (
+                  <span key={f.user_id} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    {f.name || f.email || `User ${f.user_id}`}
+                    {canManageLead && <button onClick={() => removeFollower(f.user_id)} title="Remove follower" className="text-slate-400 hover:text-red-500"><X className="h-3 w-3" /></button>}
+                  </span>
+                ))}
+              </div>
+              {canManageLead && (
+                <select value="" onChange={(e) => { const v = e.target.value; e.currentTarget.value = ''; if (v) addFollower(Number(v)); }} className="input mt-1.5 h-8 w-full text-xs">
+                  <option value="">+ Add follower…</option>
+                  {members.filter((m) => m.user_id !== assignees.primary?.user_id && !assignees.followers.some((f) => f.user_id === m.user_id)).map((m) => <option key={m.user_id} value={m.user_id}>{m.name || m.email || `User ${m.user_id}`}</option>)}
+                </select>
+              )}
+            </div>
+          </Card>
 
           <Card title="Details">
             {/* Pipeline / Stage + inline Move editor */}
@@ -649,19 +764,58 @@ export default function LeadDetail() {
                   );
                 })}</ol>
                 </>
+              ) : tab === 'ledger' ? (
+                ledgerLoading ? <LoadingBlock label="Loading activity…" /> :
+                ledger.length === 0 ? <EmptyState text="No activity recorded yet — assignments, follower changes, stage moves and note edits will appear here." /> :
+                <ol className="space-y-2">{ledger.map((a, i) => (
+                  <li key={a.id || i} className="flex items-start gap-3 border-b border-dashed border-line pb-2 text-sm last:border-0">
+                    <div className="grid h-6 w-6 flex-none place-items-center rounded-full bg-surface text-[9px] font-bold text-slate-500">{(a.actor_name || 'SY').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-ink">{a.actor_name || 'System'}</span>
+                        <span className="text-slate-600">{LEDGER_LABEL[a.action] || fmt.title(a.action || '')}</span>
+                        {ledgerDetail(a) && <span className="text-slate-400">· {ledgerDetail(a)}</span>}
+                      </div>
+                      <div className="text-xs text-slate-400">{a.created_at ? new Date(a.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</div>
+                    </div>
+                  </li>
+                ))}</ol>
               ) : (
                 activityList.length === 0 ? <EmptyState text="No activity yet — add a note, log a call, or record an email/text above." /> :
                 <ol className="space-y-3">{activityList.map((n) => {
                   const text = cleanNote(n.body_html || n.body_text || '');
+                  const editing = editNoteId === n.id;
                   return (
                     <li key={n.id} className="flex gap-3">
                       <div className="grid h-7 w-7 flex-none place-items-center rounded-full bg-surface text-[10px] font-bold text-slate-500">{(n.author || 'SY').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
                       <div className="min-w-0 flex-1 rounded-xl border border-line bg-surface/50 p-3">
                         <div className="mb-1 flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2"><span className="text-sm font-semibold text-ink">{n.author || 'System'}</span>{n.source && SOURCE_STYLE[n.source] && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SOURCE_STYLE[n.source]}`}>{n.source}</span>}</div>
-                          <span className="shrink-0 text-xs text-slate-400">{n.note_date || ''}</span>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <span className="text-xs text-slate-400">{n.note_date || ''}</span>
+                            {!editing && (noteEditable(n) ? (
+                              <>
+                                <button onClick={() => { setEditNoteId(n.id); setEditNoteText(text); }} title={noteIsOverride(n) ? 'Edit note (super-admin override — logged)' : 'Edit note'} className="rounded p-1 text-slate-300 transition hover:text-brand"><Pencil className="h-3.5 w-3.5" /></button>
+                                <button onClick={() => deleteNoteById(n)} title={noteIsOverride(n) ? 'Delete note (super-admin override — logged)' : 'Delete note'} className="rounded p-1 text-slate-300 transition hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                                {noteIsOverride(n) && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">override</span>}
+                              </>
+                            ) : (
+                              <span title="Locked — editable only by the author within 24 hours" className="p-1 text-slate-300"><Lock className="h-3.5 w-3.5" /></span>
+                            ))}
+                          </div>
                         </div>
-                        <div className="whitespace-pre-line text-sm leading-relaxed text-slate-700">{text || <span className="text-slate-400">—</span>}</div>
+                        {editing ? (
+                          <div>
+                            <textarea autoFocus value={editNoteText} onChange={(e) => setEditNoteText(e.target.value)} rows={3} className="input w-full resize-y text-sm" />
+                            <div className="mt-1.5 flex items-center justify-end gap-1">
+                              {noteIsOverride(n) && <span className="mr-auto text-[11px] font-semibold text-amber-600">Editing as super-admin override — this is logged.</span>}
+                              <button onClick={() => setEditNoteId(null)} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-white">Cancel</button>
+                              <button onClick={() => saveNoteEdit(n)} disabled={noteBusy || !editNoteText.trim()} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{noteBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="whitespace-pre-line text-sm leading-relaxed text-slate-700">{text || <span className="text-slate-400">—</span>}</div>
+                        )}
                       </div>
                     </li>
                   );
@@ -692,18 +846,18 @@ export default function LeadDetail() {
                 )}
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-500">Who to dial</label>
-                <select value={callScope} onChange={(e) => setCallScope(e.target.value as any)} className="input w-full">
-                  <option value="one">Just one number</option>
-                  <option value="primary">Primary number of this record</option>
-                  <option value="all">Every number on this record ({contacts.filter((c) => !c.do_not_call && String(c.phone || '').replace(/\D/g, '').length >= 10).length})</option>
-                </select>
+                <label className="mb-1 block text-xs font-semibold text-slate-500">Who to call</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {([['one', 'This number'], ['primary', 'Primary only'], ['all', 'All numbers']] as const).map(([k, label]) => (
+                    <button key={k} onClick={() => setCallScope(k)} className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${callScope === k ? 'border-brand bg-brand text-white' : 'border-line text-slate-600 hover:border-brand'}`}>{label}</button>
+                  ))}
+                </div>
               </div>
               {callScope === 'one' && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-500">Call this number</label>
+                  <label className="mb-1 block text-xs font-semibold text-slate-500">Number</label>
                   <select value={callTo} onChange={(e) => setCallTo(e.target.value)} className="input w-full">
-                    {contacts.map((c) => <option key={c.contact_id} value={c.phone}>{fmtNum(c.phone)} · {c.contact_kind === 'relative' ? (c.related_name || 'relative') : 'owner'}{c.phone_verified ? ' ✓' : ''}</option>)}
+                    {contacts.filter((c) => String(c.phone || '').replace(/\D/g, '').length >= 10).map((c) => <option key={c.contact_id} value={c.phone}>{fmtNum(c.phone)}{c.is_primary_number ? ' · primary' : ''}{c.do_not_call ? ' · DNC' : ''}</option>)}
                   </select>
                 </div>
               )}
