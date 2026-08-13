@@ -161,13 +161,19 @@ function Row({ k, v }: any) { return <div className="flex items-center justify-b
 
 function AuthorizationsCard({ billingSlug }: { billingSlug: string }) {
   const [docs, setDocs] = useState<any[]>([]);
+  const [details, setDetails] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
   const load = async () => {
-    try { const d = await billing.authorizationPdfList(billingSlug); setDocs(d.documents || []); }
-    catch { /* non-fatal */ } finally { setLoaded(true); }
+    try {
+      const [d, dd] = await Promise.all([
+        billing.authorizationPdfList(billingSlug).catch(() => ({ documents: [] })),
+        billing.authDetailsList(billingSlug).catch(() => ({ details: [] })),
+      ]);
+      setDocs(d.documents || []); setDetails(dd.details || []);
+    } catch { /* non-fatal */ } finally { setLoaded(true); }
   };
   useEffect(() => { load(); }, [billingSlug]);
 
@@ -187,6 +193,24 @@ function AuthorizationsCard({ billingSlug }: { billingSlug: string }) {
         </button>
       </div>
       <p className="mb-2 text-xs text-slate-500">Flattened, non-editable PDF records of the signed payment authorization. The card is shown only as brand + last 4 — never the full number or security code.</p>
+
+      {/* Saved authorization contact details (from the /authorize form). Card = brand + last4 only; no PAN/CVV. */}
+      {details.length > 0 && (
+        <div className="mb-3 rounded-lg border border-line bg-surface/60 p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Submitted details</div>
+          <div className="space-y-2">
+            {details.map((det) => (
+              <div key={det.id} className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+                <div><span className="text-slate-400">Full name: </span><span className="font-medium text-ink">{det.full_name || '—'}</span></div>
+                <div><span className="text-slate-400">Email: </span><span className="font-medium text-ink">{det.email || '—'}</span></div>
+                <div className="sm:col-span-2"><span className="text-slate-400">Billing address: </span><span className="font-medium text-ink">{det.billing_address || '—'}</span></div>
+                <div><span className="text-slate-400">Member ID: </span><span className="font-medium text-ink">{det.member_id || '—'}</span></div>
+                <div><span className="text-slate-400">Card: </span><span className="font-medium capitalize text-ink">{det.card_brand && det.card_last4 ? `${det.card_brand} ending ${det.card_last4}` : '—'}</span></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {msg && <div className="mb-2 text-xs text-slate-600">{msg}</div>}
       {!loaded ? (
         <div className="text-xs text-slate-400">Loading…</div>
