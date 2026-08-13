@@ -183,6 +183,20 @@ export const opm = {
   // from/to are epoch-ms bounds on start_timestamp. Authorized per the caller's workspace access.
   workspaceActivity: (p: { workspace: string; from?: number; to?: number }) =>
     opmCall('workspace_activity', { params: { workspace: p.workspace, from: p.from, to: p.to } }),
+
+  // ---- Lead routing engine (companion `opm-ext` routing_* actions; owner/admin/manager only — server 403s otherwise) ----
+  // Ordered list of routing rules for the active workspace (or a specific one).
+  routingRulesList: (workspace?: string) => opmExtCall('routing_rules_list', workspace ? { params: { workspace } } : {}),
+  // Create/update one rule. Server returns the persisted rule (with id, sort_order, resolved target/fallback names).
+  routingRuleSave: (rule: any, workspace?: string) => opmExtCall('routing_rule_save', { method: 'POST', body: { ...(workspace ? { workspace } : {}), rule } }),
+  // Delete a rule by id.
+  routingRuleDelete: (id: string | number) => opmExtCall('routing_rule_delete', { method: 'POST', body: { id } }),
+  // Persist a new rule order (ordered array of rule ids).
+  routingRulesReorder: (ids: (string | number)[], workspace?: string) => opmExtCall('routing_rules_reorder', { method: 'POST', body: { ...(workspace ? { workspace } : {}), ids } }),
+  // Simulate (dry_run:true → {plan}) or apply (dry_run:false → {assigned, results}) rules over a lead set.
+  runRules: (b: { lead_ids: string[]; dry_run: boolean; trigger?: string; workspace?: string }) => opmExtCall('run_rules', { method: 'POST', body: b }),
+  // Per-rep load snapshot (open primary leads + assigned today) for the balance strip.
+  routingStats: (workspace?: string) => opmExtCall('routing_stats', workspace ? { params: { workspace } } : {}),
 };
 
 // companion `opm-ext` edge function — shares OPM auth + active-workspace scoping.
