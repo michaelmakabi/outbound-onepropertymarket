@@ -6,7 +6,7 @@ import ProfileModal from './ProfileModal';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -79,7 +79,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   const width = collapsed ? 'w-[68px]' : 'w-60';
-  const activeLabel = [...NAV, { to: '/leads', label: 'Contacts' }, { to: '/routing', label: 'Lead Routing' }, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }, { to: '/onboarding', label: 'Card Authorization' }, { to: '/agent-clone', label: 'Clone Agent' }, { to: '/snapshots', label: 'Snapshots' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
+  const activeLabel = [...NAV, { to: '/leads', label: 'Contacts' }, { to: '/routing', label: 'Lead Routing' }, { to: '/notifications', label: 'Notifications' }, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }, { to: '/onboarding', label: 'Card Authorization' }, { to: '/agent-clone', label: 'Clone Agent' }, { to: '/snapshots', label: 'Snapshots' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
 
   const item = (n: any) => (
     <NavLink
@@ -112,6 +112,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
         {NAV.filter((n) => !isCustomer || !n.op).map(item)}
         {canRoute && item({ to: '/routing', label: 'Lead Routing', icon: Waypoints })}
+        {canRoute && item({ to: '/notifications', label: 'Notifications', icon: Bell })}
         {isCustomer && item({ to: '/account', label: 'Account & Billing', icon: CreditCard })}
         {isAdmin && (
           <>
