@@ -3,10 +3,11 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
 import ProfileModal from './ProfileModal';
+import NotificationBell from './NotificationBell';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -45,6 +46,7 @@ const NAV = [
   { to: '/seller-contacts', label: 'Contacts', icon: Contact },
   { to: '/pipelines', label: 'Pipelines', icon: Columns3 },
   { to: '/campaigns', label: 'Campaigns', icon: Radio },
+  { to: '/team', label: 'Team', icon: MessageSquare },
   { to: '/workspaces', label: 'Workspaces', icon: Building2, op: true },
   { to: '/dispositions', label: 'Dispositions', icon: PieChart },
   { to: '/calls', label: 'Call History', icon: PhoneCall },
@@ -79,7 +81,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   const width = collapsed ? 'w-[68px]' : 'w-60';
-  const activeLabel = [...NAV, { to: '/leads', label: 'Contacts' }, { to: '/routing', label: 'Lead Routing' }, { to: '/notifications', label: 'Notifications' }, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }, { to: '/onboarding', label: 'Card Authorization' }, { to: '/agent-clone', label: 'Clone Agent' }, { to: '/snapshots', label: 'Snapshots' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
+  const activeLabel = [{ to: '/notifications-center', label: 'Notification Center' }, ...NAV, { to: '/leads', label: 'Contacts' }, { to: '/routing', label: 'Lead Routing' }, { to: '/notifications', label: 'Notifications' }, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }, { to: '/onboarding', label: 'Card Authorization' }, { to: '/agent-clone', label: 'Clone Agent' }, { to: '/snapshots', label: 'Snapshots' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
 
   const item = (n: any) => (
     <NavLink
@@ -129,6 +131,11 @@ export default function Layout({ children }: { children: ReactNode }) {
         )}
       </nav>
       <div className="mt-3 border-t border-white/10 pt-3">
+        {/* Notification bell — present on every page for all users (desktop sidebar). */}
+        <div className={`mb-2 flex items-center ${collapsed ? 'justify-center' : 'justify-between px-1'}`}>
+          {!collapsed && <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notifications</span>}
+          <NotificationBell variant="sidebar" panelClassName={collapsed ? 'fixed left-[72px] bottom-4' : 'fixed left-[248px] bottom-4'} />
+        </div>
         {!collapsed && (
           <>
             <div className="px-2 text-sm font-semibold text-white">{user?.name}</div>
@@ -171,6 +178,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <div className="fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-white/95 px-4 backdrop-blur md:hidden">
         <button onClick={() => setMobileOpen(true)} className="rounded-lg p-1.5 text-ink hover:bg-surface"><Menu className="h-5 w-5" /></button>
         <span className="font-bold text-ink">{activeLabel}</span>
+        <div className="ml-auto"><NotificationBell variant="topbar" /></div>
       </div>
 
       {/* Mobile drawer */}
