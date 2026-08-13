@@ -137,7 +137,7 @@ export const opm = {
   billingOverview: () => opmCall('billing_overview', { params: { workspace: '' } }),
   billingSetConfig: (b: any) => opmCall('billing_set_config', { method: 'POST', params: { workspace: '' }, body: b }),
   // Smart lists + bulk actions (companion `opm-ext` function).
-  savedLists: (page: string) => opmExtCall('saved_lists', { params: { page } }),
+  savedLists: (page: string, workspace?: string) => opmExtCall('saved_lists', { params: { page, ...(workspace ? { workspace } : {}) } }),
   saveList: (b: { id?: number; page: string; name: string; config: any; shared?: boolean }) => opmExtCall('save_list', { method: 'POST', body: b }),
   deleteList: (id: number) => opmExtCall('delete_list', { method: 'POST', body: { id } }),
   deleteContacts: (contact_ids: string[]) => opmExtCall('delete_contacts', { method: 'POST', body: { contact_ids } }),
@@ -168,8 +168,17 @@ export const opm = {
   // Resolve the FULL matching lead_id set for the current Contacts filters (server-side select-all).
   resolveSelection: (p: { workspace?: string; pipeline_id?: string; stage_id?: string; verified?: string; tags?: string; search?: string }) => opmCall('resolve_selection', { params: p }),
   // Create a tracked campaign, tag its leads (campaign:<slug>), and launch the first batch of AI calls.
-  campaignLaunch: (b: { workspace?: string; name: string; agent_id: string; agent_name?: string; lead_ids: string[]; drip_batch?: number | null; drip_minutes?: number | null }) =>
+  campaignLaunch: (b: { workspace?: string; name: string; agent_id: string; agent_name?: string; lead_ids: string[]; dial_mode?: 'primary' | 'all_numbers'; timezone?: string; drip_batch?: number | null; drip_minutes?: number | null }) =>
     opmCall('campaign_launch', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
+  // Pre-flight the launch: confirms the agent has assigned/dialable numbers and is callable.
+  // Returns { ok, numbers, number_count, agent_ok, issues[] }. Block Launch when !ok and show issues.
+  campaignPreflight: (b: { workspace?: string; agent_id: string }) =>
+    opmCall('campaign_preflight', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
+  // Projected calls / duration / cost range for a chosen lead set + dial mode (render defensively).
+  // Pass lead_ids[] (preferred) or count. Returns { estimated_calls, numbers, daily_throughput,
+  // estimated_duration:{days,finish_local,human}, cost_range:{low,blended,high,*.billed_usd,basis,note} }.
+  campaignProjection: (b: { workspace?: string; agent_id: string; lead_ids?: string[]; count?: number; dial_mode: 'primary' | 'all_numbers'; timezone?: string }) =>
+    opmCall('campaign_projection', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
   // Campaigns visible to the caller (own workspaces; super_admin all) + per-campaign cost/disposition rollup.
   // The workspace key is always present (possibly undefined) so the active-tenant param is NOT auto-injected —
   // an unset workspace means "all my workspaces" (customer) or "all workspaces" (super_admin).
