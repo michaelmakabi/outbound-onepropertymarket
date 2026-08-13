@@ -18,6 +18,12 @@ export default function Authorize() {
   const [loadErr, setLoadErr] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [signature, setSignature] = useState('');
+  // Identity / billing fields collected on the authorization form (no card PAN/CVV — the card is
+  // captured separately via the tokenized processor flow).
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [billingAddress, setBillingAddress] = useState('');
+  const [memberId, setMemberId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   // Completion phase (returning from Stripe with a session_id).
@@ -51,7 +57,9 @@ export default function Authorize() {
     })();
   }, [sessionId, token]);
 
-  const canSubmit = !!info && agreed && signature.trim().length >= 2 && !busy;
+  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim());
+  const detailsComplete = fullName.trim().length >= 2 && emailValid && billingAddress.trim().length >= 4 && memberId.trim().length >= 1;
+  const canSubmit = !!info && agreed && signature.trim().length >= 2 && detailsComplete && !busy;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,9 +68,16 @@ export default function Authorize() {
       setError('Please read and accept the agreement, and type your full legal name to sign.');
       return;
     }
+    if (!detailsComplete) {
+      setError('Please complete your full name, a valid email, billing address, and member ID.');
+      return;
+    }
     setBusy(true);
     try {
-      const r = await billing.cardLinkStart({ token, signature_name: signature.trim(), agreement_accepted: true });
+      const r = await billing.cardLinkStart({
+        token, signature_name: signature.trim(), agreement_accepted: true,
+        full_name: fullName.trim(), email: email.trim(), billing_address: billingAddress.trim(), member_id: memberId.trim(),
+      });
       window.location.assign(r.checkout_url);
     } catch (err: any) {
       setError(err?.message || 'Could not start secure card entry. Please try again.');
@@ -129,6 +144,32 @@ export default function Authorize() {
                     <input className="input mt-2 !py-3 text-lg" value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="Your full legal name" autoComplete="name" />
                   </label>
                   <p className="mt-2 text-xs leading-snug text-slate-400">Your typed name is your electronic signature (E-SIGN / UETA), recorded with the date, your IP address, and the exact terms shown.</p>
+                </div>
+
+                {/* Identity & billing details saved with the authorization. No card number/CVV here — the card is entered on the secure processor page. */}
+                <div className="mt-5 rounded-2xl border border-line bg-surface/60 p-5 sm:p-6">
+                  <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <ShieldCheck className="h-4 w-4" /> Your details
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="label text-sm">Full name</span>
+                      <input className="input mt-2 !py-3" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full name" autoComplete="name" />
+                    </label>
+                    <label className="block">
+                      <span className="label text-sm">Email</span>
+                      <input className="input mt-2 !py-3" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" autoComplete="email" />
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="label text-sm">Billing address</span>
+                      <input className="input mt-2 !py-3" value={billingAddress} onChange={(e) => setBillingAddress(e.target.value)} placeholder="Street, city, state, ZIP" autoComplete="street-address" />
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="label text-sm">Member ID</span>
+                      <input className="input mt-2 !py-3" value={memberId} onChange={(e) => setMemberId(e.target.value)} placeholder="Your member ID" />
+                    </label>
+                  </div>
+                  <p className="mt-3 text-xs leading-snug text-slate-400">We save these details with your authorization. Your card number is never entered here — you'll enter it on the secure, PCI-compliant payment page in the next step.</p>
                 </div>
 
                 <button className="btn-primary btn-glow mt-7 w-full !py-4 text-base disabled:cursor-not-allowed disabled:opacity-50" disabled={!canSubmit}>
