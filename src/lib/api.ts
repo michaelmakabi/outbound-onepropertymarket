@@ -199,6 +199,46 @@ export const opm = {
   routingStats: (workspace?: string) => opmExtCall('routing_stats', workspace ? { params: { workspace } } : {}),
 };
 
+// ---- Notifications (Phase 3) — dedicated `opm-notif` edge function; shares OPM auth + active-workspace scoping. ----
+const OPMNOTIF_BASE =
+  (import.meta as any).env?.VITE_OPMNOTIF_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-notif') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-notif');
+
+async function opmNotifCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMNOTIF_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err: any = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+export const notif = {
+  // Current notification settings + capability flags + the 20-status catalog for the disposition picker.
+  settingsGet: (workspace?: string) => opmNotifCall('notif_settings_get', workspace ? { params: { workspace } } : {}),
+  // Persist settings (owner/admin/super only — server 403s otherwise).
+  settingsSave: (settings: any, workspace?: string) => opmNotifCall('notif_settings_save', { method: 'POST', body: { ...(workspace ? { workspace } : {}), settings } }),
+  // Fire a test notification to the current user (or an explicit target). status may be 'sent' or 'pending'.
+  test: (b: { channel: 'email' | 'sms'; to_user_id?: number; to_email?: string; workspace?: string }) =>
+    opmNotifCall('notif_test', { method: 'POST', body: b }),
+  // Recent delivery log (newest first).
+  logList: (limit = 50, workspace?: string) => opmNotifCall('notif_log_list', { params: { limit, ...(workspace ? { workspace } : {}) } }),
+  // Dedicated-number picker source (workspace SMS numbers + the current selection).
+  workspaceNumbers: (workspace?: string) => opmNotifCall('workspace_numbers', workspace ? { params: { workspace } } : {}),
+};
+
 // companion `opm-ext` edge function — shares OPM auth + active-workspace scoping.
 const OPMEXT_BASE =
   (import.meta as any).env?.VITE_OPMEXT_BASE ||
