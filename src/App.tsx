@@ -42,6 +42,8 @@ import OpmCampaigns from './pages/OpmCampaigns';
 import OpmCampaignDetail from './pages/OpmCampaignDetail';
 import LeadRouting from './pages/LeadRouting';
 import Notifications from './pages/Notifications';
+import NotificationCenter from './pages/NotificationCenter';
+import Team from './pages/Team';
 
 // admin: admin/super_admin only. op: operator tooling — hidden from customers (role=user).
 function Protected({ children, admin, op }: { children: JSX.Element; admin?: boolean; op?: boolean }) {
@@ -96,6 +98,8 @@ export default function App() {
       <Route path="/pipelines" element={<Protected><Pipelines /></Protected>} />
       <Route path="/routing" element={<Protected><LeadRouting /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
+      <Route path="/notifications-center" element={<Protected><NotificationCenter /></Protected>} />
+      <Route path="/team" element={<Protected><Team /></Protected>} />
       <Route path="/campaigns" element={<Protected><OpmCampaigns /></Protected>} />
       <Route path="/campaigns/:id" element={<Protected><OpmCampaignDetail /></Protected>} />
       <Route path="/compare" element={<Protected op><Compare /></Protected>} />
