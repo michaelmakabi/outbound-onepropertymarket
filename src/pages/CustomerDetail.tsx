@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { adminOps, workspaceStore, fmt, opm } from '../lib/api';
+import { adminOps, workspaceStore, fmt, opm, billing } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Spinner, KpiCard, SectionCard, EmptyState, LoadingBlock } from '../components/dash';
 import { UsersAndAccess, type Ws } from '../components/UsersAndAccess';
 import { StageIcon } from '../lib/statusIcons';
 import { dispositionColor, humanizeDisposition } from '../lib/format';
 import { statusIconName } from '../lib/statuses';
-import { ArrowLeft, Building2, Users, PhoneCall, Bot, KeyRound, AlertCircle, LogIn, Layers, TrendingUp, DollarSign, Loader2, PhoneIncoming, PhoneOutgoing, Voicemail, Clock3, Gauge } from 'lucide-react';
+import { ArrowLeft, Building2, Users, PhoneCall, Bot, KeyRound, AlertCircle, LogIn, Layers, TrendingUp, DollarSign, Loader2, PhoneIncoming, PhoneOutgoing, Voicemail, Clock3, Gauge, Wallet, ShieldCheck, Download, FileText } from 'lucide-react';
 
 const statusColor: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700', onboarding: 'bg-amber-100 text-amber-700',
@@ -62,7 +62,7 @@ export default function CustomerDetail() {
         ))}
       </div>
 
-      {tab === 'overview' && <Overview d={d} />}
+      {tab === 'overview' && <Overview d={d} onReload={load} />}
       {tab === 'users' && (
         <UsersAndAccess
           scopeWorkspaces={(d.workspaces || []).map((w: any): Ws => ({ slug: w.workspace, display_name: w.workspace === t.crm_workspace ? (t.display_name || w.workspace) : w.workspace }))}
@@ -84,8 +84,21 @@ function Stat({ icon, label, value, onClick, accent }: any) {
     : <div className="card p-4">{inner}</div>;
 }
 
-function Overview({ d }: any) {
+function Overview({ d, onReload }: any) {
   const t = d.tenant;
+  const billingSlug = t.billing_slug;
+  const [directPay, setDirectPay] = useState<boolean>(!!d.billing?.direct_pay);
+  const [dpBusy, setDpBusy] = useState(false);
+  useEffect(() => { setDirectPay(!!d.billing?.direct_pay); }, [d.billing?.direct_pay]);
+
+  const toggleDirectPay = async () => {
+    const next = !directPay;
+    setDpBusy(true); setDirectPay(next);
+    try { await billing.setDirectPay(billingSlug, next); onReload && onReload(); }
+    catch (e: any) { setDirectPay(!next); alert(e?.message || 'Could not update direct-pay setting.'); }
+    finally { setDpBusy(false); }
+  };
+
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="card p-4">
@@ -116,11 +129,90 @@ function Overview({ d }: any) {
           <Row k="Margin" v={<span className="font-semibold text-emerald-600">{fmt.money(d.usage?.margin || 0)}</span>} />
           <Row k="Unbilled" v={fmt.money(d.usage?.unbilled || 0)} />
         </dl>
+        {/* Feature 1 — direct pay (customer pays providers directly; not rebilled) */}
+        <div className="mt-3 border-t border-line pt-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+              <div>
+                <div className="text-sm font-semibold text-ink">Customer pays directly (no rebill)</div>
+                <p className="mt-0.5 text-xs text-slate-500">When on, flagged items are paid by the customer directly to the provider and are not rebilled by us.</p>
+              </div>
+            </div>
+            <button
+              type="button" role="switch" aria-checked={directPay} disabled={dpBusy} onClick={toggleDirectPay}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${directPay ? 'bg-brand' : 'bg-slate-300'} ${dpBusy ? 'opacity-60' : ''}`}
+              title={directPay ? 'Direct pay enabled' : 'Direct pay disabled'}
+            >
+              <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${directPay ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Feature 2 — signed authorization PDFs */}
+      <div className="lg:col-span-2">
+        <AuthorizationsCard billingSlug={billingSlug} />
       </div>
     </div>
   );
 }
 function Row({ k, v }: any) { return <div className="flex items-center justify-between"><dt className="text-slate-500">{k}</dt><dd className="text-ink">{v}</dd></div>; }
+
+function AuthorizationsCard({ billingSlug }: { billingSlug: string }) {
+  const [docs, setDocs] = useState<any[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const load = async () => {
+    try { const d = await billing.authorizationPdfList(billingSlug); setDocs(d.documents || []); }
+    catch { /* non-fatal */ } finally { setLoaded(true); }
+  };
+  useEffect(() => { load(); }, [billingSlug]);
+
+  const generate = async () => {
+    setMsg(''); setBusy(true);
+    try { await billing.authorizationPdf(billingSlug); setMsg('Authorization PDF generated.'); await load(); }
+    catch (e: any) { setMsg(e?.message || 'Could not generate authorization PDF.'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="card p-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-semibold text-ink"><ShieldCheck className="h-4 w-4 text-slate-400" /> Authorizations</div>
+        <button className="btn-ghost" disabled={busy} onClick={generate} title="Generate a flattened PDF authorization from the signed agreement + card on file (brand + last 4 only)">
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Generate authorization PDF
+        </button>
+      </div>
+      <p className="mb-2 text-xs text-slate-500">Flattened, non-editable PDF records of the signed payment authorization. The card is shown only as brand + last 4 — never the full number or security code.</p>
+      {msg && <div className="mb-2 text-xs text-slate-600">{msg}</div>}
+      {!loaded ? (
+        <div className="text-xs text-slate-400">Loading…</div>
+      ) : docs.length === 0 ? (
+        <div className="rounded-lg bg-surface px-3 py-4 text-center text-xs text-slate-400">No authorization PDFs generated yet.</div>
+      ) : (
+        <div className="divide-y divide-line rounded-lg border border-line">
+          {docs.map((doc) => (
+            <div key={doc.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs">
+              <div className="min-w-0">
+                <div className="font-semibold text-ink">{doc.signer_name || '—'} <span className="ml-1 font-normal text-slate-400">· {doc.agreement_version || '—'}</span></div>
+                <div className="text-slate-500">
+                  {doc.card_brand && doc.card_last4 ? <span className="capitalize">{doc.card_brand} ending {doc.card_last4} · </span> : null}
+                  Signed {doc.signed_at ? new Date(doc.signed_at).toLocaleString() : '—'} · {doc.source}
+                </div>
+              </div>
+              {doc.signed_url
+                ? <a href={doc.signed_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-brand hover:underline"><Download className="h-3.5 w-3.5" /> Download</a>
+                : <span className="text-slate-400">link unavailable</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AgentsTab({ d, onReload }: any) {
   const [busy, setBusy] = useState('');
