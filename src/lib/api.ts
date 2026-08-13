@@ -235,6 +235,19 @@ async function opmNotifCall(action: string, opts: { method?: string; params?: Re
 }
 
 export const notif = {
+  // ---- Per-user Notification Center (inbox + personal mute prefs) — for ALL users. ----
+  // The caller's own recent notifications (optionally a single workspace, unread-only, limited).
+  inboxList: (p: { workspace?: string; limit?: number; unread_only?: boolean } = {}) =>
+    opmNotifCall('inbox_list', { params: { ...(p.workspace ? { workspace: p.workspace } : {}), ...(p.limit ? { limit: p.limit } : {}), ...(p.unread_only ? { unread_only: true } : {}) } }),
+  // Unread badge count for the bell.
+  inboxUnreadCount: () => opmNotifCall('inbox_unread_count'),
+  // Mark specific ids read, or all of the caller's notifications read.
+  inboxMarkRead: (b: { ids?: (string | number)[]; all?: boolean }) => opmNotifCall('inbox_mark_read', { method: 'POST', body: b }),
+  // Personal notification prefs (opt-out model): { prefs:{muted:[],email,inapp}, catalog:[{type,label}], model:'opt-out' }.
+  myPrefsGet: (workspace?: string) => opmNotifCall('my_notif_prefs_get', workspace ? { params: { workspace } } : {}),
+  myPrefsSave: (prefs: { muted: string[]; email: boolean; inapp: boolean }, workspace?: string) =>
+    opmNotifCall('my_notif_prefs_save', { method: 'POST', body: { ...(workspace ? { workspace } : {}), prefs } }),
+
   // Current notification settings + capability flags + the 20-status catalog for the disposition picker.
   settingsGet: (workspace?: string) => opmNotifCall('notif_settings_get', workspace ? { params: { workspace } } : {}),
   // Persist settings (owner/admin/super only — server 403s otherwise).
@@ -246,6 +259,46 @@ export const notif = {
   logList: (limit = 50, workspace?: string) => opmNotifCall('notif_log_list', { params: { limit, ...(workspace ? { workspace } : {}) } }),
   // Dedicated-number picker source (workspace SMS numbers + the current selection).
   workspaceNumbers: (workspace?: string) => opmNotifCall('workspace_numbers', workspace ? { params: { workspace } } : {}),
+};
+
+// ---- Phase 4 team collaboration — dedicated `opm-team` edge function; shares OPM auth + active-workspace scoping. ----
+const OPMTEAM_BASE =
+  (import.meta as any).env?.VITE_OPMTEAM_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-team') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-team');
+
+async function opmTeamCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMTEAM_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err: any = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+export const team = {
+  // ---- Per-lead internal comment thread (@mentions) — visible to anyone who can see the lead. ----
+  leadComments: (lead_id: string, workspace?: string) => opmTeamCall('lead_comments_list', { params: { lead_id, ...(workspace ? { workspace } : {}) } }),
+  leadCommentAdd: (b: { lead_id: string; body: string; mentions?: number[]; workspace?: string }) => opmTeamCall('lead_comment_add', { method: 'POST', body: b }),
+  // ---- Workspace internal status channel. ----
+  feedList: (p: { limit?: number; workspace?: string } = {}) => opmTeamCall('team_feed_list', { params: { ...(p.limit ? { limit: p.limit } : {}), ...(p.workspace ? { workspace: p.workspace } : {}) } }),
+  feedPost: (b: { body: string; mentions?: number[]; workspace?: string }) => opmTeamCall('team_feed_post', { method: 'POST', body: b }),
+  // ---- Team settings (pulse cadence / no-touch SLA). settingsGet returns { settings, can_manage }; save is owner/admin. ----
+  settingsGet: (workspace?: string) => opmTeamCall('team_settings_get', workspace ? { params: { workspace } } : {}),
+  settingsSave: (b: { pulse_hours?: number; no_touch_hours?: number; pulse_enabled?: boolean; workspace?: string }) => opmTeamCall('team_settings_save', { method: 'POST', body: b }),
+  // ---- Manager dashboard (owner/admin/manager) — per-rep KPIs + totals. May 403 for reps. ----
+  dashboard: (p: { from?: string; to?: string; workspace?: string } = {}) => opmTeamCall('team_dashboard', { params: { ...(p.from ? { from: p.from } : {}), ...(p.to ? { to: p.to } : {}), ...(p.workspace ? { workspace: p.workspace } : {}) } }),
 };
 
 // companion `opm-ext` edge function — shares OPM auth + active-workspace scoping.
