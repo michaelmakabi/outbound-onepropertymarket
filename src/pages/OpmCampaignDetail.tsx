@@ -8,8 +8,8 @@ import { ArrowLeft, DollarSign, PhoneOutgoing, Voicemail, PhoneCall, Loader2, Ch
 
 const STATUS_PILL: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-600', launching: 'bg-blue-100 text-blue-700',
-  dripping: 'bg-amber-100 text-amber-700', completed: 'bg-emerald-100 text-emerald-700',
-  paused: 'bg-slate-200 text-slate-600',
+  dripping: 'bg-amber-100 text-amber-700', throttled: 'bg-orange-100 text-orange-700',
+  completed: 'bg-emerald-100 text-emerald-700', paused: 'bg-slate-200 text-slate-600',
 };
 const LEAD_PILL: Record<string, string> = {
   launched: 'bg-emerald-100 text-emerald-700', completed: 'bg-emerald-100 text-emerald-700',
@@ -49,7 +49,7 @@ export default function OpmCampaignDetail() {
     <div>
       <button onClick={() => nav('/campaigns')} className="mb-3 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-brand"><ArrowLeft className="h-4 w-4" /> All campaigns</button>
       <PageHeader title={c.name} showDate={false}
-        description={`${c.workspace} · ${c.agent_name || 'agent'} · created ${c.created_at ? new Date(c.created_at).toLocaleDateString() : ''}`}
+        description={`${c.workspace} · ${c.agent_name || 'agent'}${c.dial_mode ? ` · ${c.dial_mode === 'all_numbers' ? 'all numbers' : 'primary only'}` : ''}${c.timezone ? ` · ${c.timezone}` : ''} · created ${c.created_at ? new Date(c.created_at).toLocaleDateString() : ''}`}
         actions={<div className="flex items-center gap-2">
           <span className={`pill ${STATUS_PILL[c.status] || 'bg-slate-100 text-slate-600'}`}>{c.status}</span>
           {isSuper && c.status === 'dripping' && <button className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-surface disabled:opacity-50" disabled={dripBusy} onClick={runDrip}>{dripBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneOutgoing className="h-3.5 w-3.5" />} Process drip now</button>}
@@ -74,7 +74,11 @@ export default function OpmCampaignDetail() {
           <div className="rounded-lg border border-line p-3"><div className="text-[11px] font-semibold uppercase text-slate-500">Completed</div><div className="text-xl font-extrabold text-ink">{num(k.total_calls || 0)}</div></div>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-surface"><div className="h-full bg-brand transition-all" style={{ width: `${k.total_leads ? Math.min(100, (k.launched / k.total_leads) * 100) : 0}%` }} /></div>
-        {c.drip_batch ? <p className="mt-2 text-xs text-amber-600">Dripping {c.drip_batch} leads every {c.drip_minutes} minutes{c.next_drip_at ? ` · next batch ~${new Date(c.next_drip_at).toLocaleString()}` : ''}.</p> : null}
+        {c.status === 'throttled'
+          ? <p className="mt-2 flex items-center gap-1.5 text-xs text-orange-600"><AlertCircle className="h-3.5 w-3.5" /> All numbers hit their daily cap — dialing auto-pauses and resumes tomorrow morning{c.next_drip_at ? ` (~${new Date(c.next_drip_at).toLocaleString()})` : ''}.</p>
+          : c.status === 'dripping'
+            ? <p className="mt-2 text-xs text-amber-600">Dialing is dripping automatically — paced ~1 call/15s, rotating across the agent's numbers, 9am–8pm local{c.next_drip_at ? ` · next batch ~${new Date(c.next_drip_at).toLocaleString()}` : ''}.</p>
+            : null}
       </SectionCard>
 
       {/* Disposition breakdown with count + cost */}
