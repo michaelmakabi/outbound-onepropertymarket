@@ -149,6 +149,21 @@ export const opm = {
   // Rich per-pipeline lead list (created/updated dates, attempts) for table/grid/date-range views.
   pipelineLeads: (pipeline_id: number | string) => opmExtCall('pipeline_leads', { params: { pipeline_id } }),
   backfillCallContacts: (workspace: string, commit: boolean) => opmExtCall('backfill_call_contacts', { method: 'POST', params: { workspace: '' }, body: { workspace, commit } }),
+  // ---- Phase 1 RBAC / lead distribution (companion `opm-ext`) ----
+  // Assignable users for the active workspace (or a specific one). Owner/admin/manager use this to pick a primary/follower.
+  workspaceMembers: (workspace?: string) => opmExtCall('workspace_members', workspace ? { params: { workspace } } : {}),
+  // Set/replace the PRIMARY assignee for one lead or many (bulk). Owner/admin only (server-enforced; 403 otherwise).
+  assignLead: (b: { workspace?: string; lead_id?: string; lead_ids?: string[]; primary_user_id: number }) => opmExtCall('assign_lead', { method: 'POST', body: b }),
+  // Add / remove a follower on a lead (owner/admin only).
+  addFollower: (b: { workspace?: string; lead_id: string; user_id: number }) => opmExtCall('add_follower', { method: 'POST', body: b }),
+  removeFollower: (b: { workspace?: string; lead_id: string; user_id: number }) => opmExtCall('remove_follower', { method: 'POST', body: b }),
+  // Primary + followers for one lead (visible to anyone who can see the lead).
+  leadAssignees: (lead_id: string, workspace?: string) => opmExtCall('lead_assignees', { params: { lead_id, ...(workspace ? { workspace } : {}) } }),
+  // Append-only audit ledger for one lead (newest first).
+  activityLog: (lead_id: string, workspace?: string) => opmExtCall('activity_log', { params: { lead_id, ...(workspace ? { workspace } : {}) } }),
+  // Note governance: edit / delete (author within 24h, or super_admin override). Server enforces; may 403.
+  updateNote: (b: { id: number | string; text?: string; html?: string }) => opmExtCall('update_note', { method: 'POST', body: b }),
+  deleteNote: (id: number | string) => opmExtCall('delete_note', { method: 'POST', body: { id } }),
   // ---- Campaign management (opm campaign_* actions on the MAIN project) ----
   // Resolve the FULL matching lead_id set for the current Contacts filters (server-side select-all).
   resolveSelection: (p: { workspace?: string; pipeline_id?: string; stage_id?: string; verified?: string; tags?: string; search?: string }) => opmCall('resolve_selection', { params: p }),
