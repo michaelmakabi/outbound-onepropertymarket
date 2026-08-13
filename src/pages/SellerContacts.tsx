@@ -10,7 +10,7 @@ import {
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
 } from '../components/dash';
 import { num } from '../lib/format';
-import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star } from 'lucide-react';
+import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star, UserCheck } from 'lucide-react';
 
 const PAGE_KEY = 'opm-crm';
 const PAGE_SIZE = 50;
@@ -44,7 +44,7 @@ type ViewCfg = { pipelineId: string; stageId: string; verified: string; tags: st
 
 export default function SellerContacts() {
   const nav = useNavigate();
-  const { isStaff, ownsActive, active, setActive } = useWorkspace();
+  const { isStaff, ownsActive, active, setActive, roles } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const [contactRows, setContactRows] = useState<any[]>([]);
   const [leadRows, setLeadRows] = useState<any[]>([]);
@@ -76,6 +76,36 @@ export default function SellerContacts() {
   // Select-all-across-pages: when set, `selected` holds the FULL server-resolved matching set.
   const [matchAll, setMatchAll] = useState(false);
   const [resolving, setResolving] = useState(false);
+
+  // ---- Bulk assignment (owner/admin/manager) ----
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [members, setMembers] = useState<{ user_id: number; name: string | null; email: string | null; workspace_role: string; lead_scope: string }[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [assignUserId, setAssignUserId] = useState<number | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [assignToast, setAssignToast] = useState('');
+  // Owner / admin / manager may reassign; scoped reps never see the control (server also enforces).
+  const canAssign = isStaff || ownsActive || (active ? ['owner', 'admin', 'manager'].includes(roles[active] || '') : false);
+  const openAssign = () => {
+    setAssignUserId(null); setAssignOpen(true); setMembersLoading(true);
+    opm.workspaceMembers().then((d: any) => setMembers(d.members || [])).catch(() => setMembers([])).finally(() => setMembersLoading(false));
+  };
+  async function doAssign() {
+    if (assigning || !assignUserId || selected.size === 0) return;
+    setAssigning(true);
+    try {
+      const r: any = await opm.assignLead({ lead_ids: [...selected], primary_user_id: assignUserId });
+      const name = r?.primary_name || members.find((m) => m.user_id === assignUserId)?.name || 'user';
+      const skipped = Array.isArray(r?.skipped) ? r.skipped.length : 0;
+      setAssignToast(`Assigned ${r?.assigned ?? 0} record${(r?.assigned ?? 0) === 1 ? '' : 's'} to ${name}${skipped ? ` · ${skipped} skipped` : ''}.`);
+      setAssignOpen(false); setSelected(new Set()); setMatchAll(false);
+      await load();
+      setTimeout(() => setAssignToast(''), 6000);
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      window.alert(/forbidden/i.test(msg) ? 'You do not have permission to reassign leads in this workspace.' : (msg || 'Could not assign the selected records.'));
+    } finally { setAssigning(false); }
+  }
 
   const load = useCallback(() => {
     setLoading(true);
@@ -407,6 +437,7 @@ export default function SellerContacts() {
             <span className="text-sm font-semibold text-brand">{selected.size} selected{matchAll ? ' (all matching)' : ''}</span>
             <span className="mx-1 h-4 w-px bg-brand/20" />
             <button className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand/90" onClick={() => { setLaunchResult(null); setCampaignName(''); setCallModal(true); }}><PhoneOutgoing className="h-3.5 w-3.5" /> Launch AI calls</button>
+            {canAssign && <button className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-white px-3 py-1.5 text-sm font-semibold text-brand hover:bg-brand-light" onClick={openAssign}><UserCheck className="h-3.5 w-3.5" /> Assign to…</button>}
             <button className="btn-ghost !py-1.5" onClick={exportCsv}><Download className="h-3.5 w-3.5" /> Export selected</button>
             {canManage && <button className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={deleting} onClick={bulkDelete}>{deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete</button>}
             <button className="btn-ghost !py-1.5" onClick={() => { setMatchAll(false); setSelected(new Set()); }}>Clear</button>
@@ -474,6 +505,38 @@ export default function SellerContacts() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {assignToast && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700"><CheckCircle2 className="h-4 w-4" /> {assignToast}</div>
+      )}
+
+      {assignOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => !assigning && setAssignOpen(false)}>
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><UserCheck className="h-5 w-5 text-brand" /> Assign to a team member</h3>
+              {!assigning && <button onClick={() => setAssignOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-4 w-4" /></button>}
+            </div>
+            <p className="mb-3 text-sm text-slate-600">Set the <span className="font-semibold text-ink">primary owner</span> for the <span className="font-bold text-ink">{selected.size}</span> selected record{selected.size === 1 ? '' : 's'}{matchAll ? ' (all matching)' : ''}. This replaces any existing primary and is logged to each lead's activity.</p>
+            {membersLoading ? (
+              <div className="flex items-center gap-2 py-6 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading team members…</div>
+            ) : members.length === 0 ? (
+              <div className="rounded-lg border border-line bg-surface px-3 py-4 text-sm text-slate-500">No assignable members found for this workspace.</div>
+            ) : (
+              <label className="mb-4 block text-xs font-semibold text-slate-500">Primary owner
+                <select value={assignUserId ?? ''} onChange={(e) => setAssignUserId(e.target.value ? Number(e.target.value) : null)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
+                  <option value="">Select a member…</option>
+                  {members.map((m) => <option key={m.user_id} value={m.user_id}>{m.name || m.email || `User ${m.user_id}`}{m.workspace_role && m.workspace_role !== 'member' ? ` · ${m.workspace_role}` : ''}</option>)}
+                </select>
+              </label>
+            )}
+            <div className="flex justify-end gap-2">
+              <button className="btn-ghost" onClick={() => setAssignOpen(false)} disabled={assigning}>Cancel</button>
+              <button className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50" disabled={assigning || !assignUserId || selected.size === 0} onClick={doAssign}>{assigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />} Assign {selected.size} record{selected.size === 1 ? '' : 's'}</button>
+            </div>
           </div>
         </div>
       )}
