@@ -40,6 +40,7 @@ import AiAgents from './pages/AiAgents';
 import AgentEdit from './pages/AgentEdit';
 import OpmCampaigns from './pages/OpmCampaigns';
 import OpmCampaignDetail from './pages/OpmCampaignDetail';
+import LeadRouting from './pages/LeadRouting';
 
 // admin: admin/super_admin only. op: operator tooling — hidden from customers (role=user).
 function Protected({ children, admin, op }: { children: JSX.Element; admin?: boolean; op?: boolean }) {
@@ -92,6 +93,7 @@ export default function App() {
       <Route path="/leads/:id" element={<Protected><LeadDetail /></Protected>} />
       <Route path="/seller-contacts" element={<Protected><SellerContacts /></Protected>} />
       <Route path="/pipelines" element={<Protected><Pipelines /></Protected>} />
+      <Route path="/routing" element={<Protected><LeadRouting /></Protected>} />
       <Route path="/campaigns" element={<Protected><OpmCampaigns /></Protected>} />
       <Route path="/campaigns/:id" element={<Protected><OpmCampaignDetail /></Protected>} />
       <Route path="/compare" element={<Protected op><Compare /></Protected>} />
