@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { opm, testai, fmt } from '../lib/api';
+import { opm, testai, fmt, team } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
 import { LoadingBlock, EmptyState, AudioPlayer } from '../components/dash';
+import MentionThread, { Member } from '../components/MentionThread';
+import { MessagesSquare } from 'lucide-react';
 import { humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
 import {
@@ -146,6 +148,11 @@ export default function LeadDetail() {
   const [addNumOpen, setAddNumOpen] = useState(false);
   const [newNum, setNewNum] = useState<{ phone: string; phone_label: string; contact_kind: string; related_name: string }>({ phone: '', phone_label: 'primary', contact_kind: 'owner', related_name: '' });
 
+  // ---- Phase 4: internal team discussion (@mentions) — visible to everyone who can see the lead ----
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(true);
+  const [teamMembers, setTeamMembers] = useState<Member[]>([]);
+
   const load = () => { setLoading(true); opm.lead(id).then(setData).finally(() => setLoading(false)); };
   const loadCalls = () => { setCallsLoading(true); opm.leadCalls(id).then((d) => setLeadCalls(d.calls || [])).catch(() => setLeadCalls([])).finally(() => setCallsLoading(false)); };
   const loadAssignees = () => opm.leadAssignees(id).then((d: any) => setAssignees({ primary: d.primary || null, followers: d.followers || [] })).catch(() => setAssignees({ primary: null, followers: [] }));
@@ -155,6 +162,14 @@ export default function LeadDetail() {
   useEffect(() => { loadAssignees(); loadLedger(); }, [id]);
   // Assignable members (owner/admin/manager only) for the primary/follower pickers.
   useEffect(() => { if (canManageLead) opm.workspaceMembers().then((d: any) => setMembers(d.members || [])).catch(() => {}); }, [canManageLead]);
+  // Team discussion: comments + the @mention member directory (available to all viewers).
+  const loadComments = () => { setCommentsLoading(true); team.leadComments(id).then((d: any) => setComments(d.comments || [])).catch(() => setComments([])).finally(() => setCommentsLoading(false)); };
+  useEffect(loadComments, [id]);
+  useEffect(() => { opm.workspaceMembers().then((d: any) => setTeamMembers(d.members || [])).catch(() => {}); }, [id]);
+  async function postComment(body: string, mentions: number[]) {
+    await team.leadCommentAdd({ lead_id: id, body, mentions: mentions.length ? mentions : undefined });
+    loadComments();
+  }
 
   const assignErr = (e: any) => { const m = String(e?.message || ''); flash(/forbidden/i.test(m) ? 'You do not have permission to change assignments here.' : (m || 'Action failed.'), 4000); };
   async function changePrimary(userId: number | '') {
@@ -823,6 +838,28 @@ export default function LeadDetail() {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Team discussion — internal (distinct from customer-facing notes & the activity ledger) */}
+      <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50/40 p-4">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-100 text-indigo-600"><MessagesSquare className="h-4 w-4" /></span>
+          <div>
+            <h3 className="text-sm font-bold text-ink">Team discussion — internal</h3>
+            <p className="text-[11px] text-slate-500">Private to your workspace. The customer never sees this. Mention teammates with @ to notify them.</p>
+          </div>
+        </div>
+        <div className="mt-3">
+          <MentionThread
+            members={teamMembers}
+            messages={comments}
+            loading={commentsLoading}
+            onPost={postComment}
+            heightClass="max-h-[460px]"
+            placeholder="Discuss this lead with your team… type @ to mention a teammate"
+            emptyText="No internal comments yet. Start the discussion — @mention a teammate to loop them in."
+          />
         </div>
       </div>
 
