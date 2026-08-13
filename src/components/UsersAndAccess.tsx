@@ -5,13 +5,14 @@
 // the access editor / new-user flow pre-target that workspace. All create / edit /
 // reset / invite / scope / view logic is shared so the two surfaces never drift.
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../lib/api';
+import { api, opm } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from './ui';
 import { UserPlus, ShieldCheck, X, Check, Pencil, KeyRound, Send, Copy, Clock, Eye } from 'lucide-react';
 
 export type Ws = { slug: string; display_name: string; status?: string };
-type AccessRow = { workspace: string; agent_mode: 'all' | 'only' | 'except'; agent_ids: string[] };
+type LeadScope = 'all' | 'assigned';
+type AccessRow = { workspace: string; agent_mode: 'all' | 'only' | 'except'; agent_ids: string[]; lead_scope: LeadScope };
 
 const dt = (s: string | null) => (s ? new Date(s).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
 
@@ -44,16 +45,30 @@ export function UsersAndAccess({
   const [editUser, setEditUser] = useState<any>(null);
   const [accessUser, setAccessUser] = useState<any>(null);
   const [reveal, setReveal] = useState<{ title: string; name?: string; username?: string; password: string; loginUrl?: string } | null>(null);
+  // Lead-visibility scope per user (keyed by email), surfaced as a badge. Scoped mode only —
+  // lead_scope lives per (user, workspace), so we read the customer's primary workspace members.
+  const [scopeByEmail, setScopeByEmail] = useState<Record<string, LeadScope>>({});
+  const scopeWsSlug = primaryWorkspace || scopeWorkspaces?.[0]?.slug || null;
+  const loadScopes = async () => {
+    if (!scoped || !scopeWsSlug) return;
+    try {
+      const d: any = await opm.workspaceMembers(scopeWsSlug);
+      const m: Record<string, LeadScope> = {};
+      for (const mem of (d.members || [])) if (mem.email) m[String(mem.email).toLowerCase()] = (mem.lead_scope === 'assigned' ? 'assigned' : 'all');
+      setScopeByEmail(m);
+    } catch { /* non-fatal */ }
+  };
 
   const refresh = async () => {
     const [u, e] = await Promise.all([api.admin.users(), scoped ? Promise.resolve({ events: [] }) : api.admin.userEvents()]);
     setUsers(u.users); if (!scoped) setEvents(e.events);
-    if (scoped) onChanged?.();
+    if (scoped) { onChanged?.(); loadScopes(); }
   };
   useEffect(() => {
     Promise.all([api.admin.users(), api.admin.allWorkspaces(), scoped ? Promise.resolve({ events: [] }) : api.admin.userEvents()])
       .then(([u, w, e]) => { setUsers(u.users); setAllWs(w.workspaces); if (!scoped) setEvents(e.events); })
       .finally(() => setLoading(false));
+    loadScopes();
   }, []);
 
   // Which users to show. Scoped → only users whose login/email is a member of this customer's workspace(s).
@@ -123,7 +138,16 @@ export function UsersAndAccess({
               <tr key={u.id} className="border-t border-line hover:bg-surface">
                 <td className="px-5 py-2.5 font-semibold text-ink">{u.name}</td>
                 <td className="px-3 py-2.5 text-slate-500">{u.username}</td>
-                <td className="px-3 py-2.5"><span className="pill bg-brand-light text-brand">{u.role.replace('_', ' ')}</span></td>
+                <td className="px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="pill bg-brand-light text-brand">{u.role.replace('_', ' ')}</span>
+                    {scoped && (() => {
+                      const s = scopeByEmail[String(u.username || u.email || '').toLowerCase()];
+                      if (!s) return null;
+                      return <span className={`pill ${s === 'assigned' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`} title="Lead visibility">{s === 'assigned' ? 'Assigned only' : 'All leads'}</span>;
+                    })()}
+                  </div>
+                </td>
                 <td className="px-3 py-2.5"><StatusBadge u={u} /></td>
                 <td className="px-3 py-2.5 text-slate-500">{u.claimed_at ? dt(u.last_signed_in) : '—'}</td>
                 <td className="px-3 py-2.5">
@@ -209,7 +233,7 @@ function UserForm({ mode, isSuper, user, afterCreate, onClose, onDone, onReveal 
           <input type="checkbox" checked={form.disabled} onChange={(e) => setForm({ ...form, disabled: e.target.checked })} className="h-4 w-4 accent-[#1f6feb]" /> Account disabled (cannot sign in)
         </label>
       )}
-      {mode === 'create' && form.role === 'user' && <p className="mb-4 text-xs text-slate-500">After creating, click <b>Scope</b> to choose which workspaces and agents they can see.</p>}
+      {mode === 'create' && form.role === 'user' && <p className="mb-4 text-xs text-slate-500">After creating, click <b>Scope</b> to choose which workspaces and agents they can see, and set their <b>Lead visibility</b> (all leads vs only assigned).</p>}
       <button className="btn-primary w-full" disabled={busy || !form.name || !form.email} onClick={submit}>{busy ? 'Saving…' : mode === 'create' ? 'Create user' : 'Save changes'}</button>
     </Modal>
   );
@@ -272,12 +296,13 @@ function AccessEditor({ user, workspaces, onClose, onSaved }: { user: any; works
   useEffect(() => {
     api.admin.getAccess(user.id).then((d) => {
       const map: Record<string, AccessRow> = {};
-      for (const r of d.access) map[r.workspace] = { workspace: r.workspace, agent_mode: r.agent_mode, agent_ids: r.agent_ids || [] };
+      for (const r of d.access) map[r.workspace] = { workspace: r.workspace, agent_mode: r.agent_mode, agent_ids: r.agent_ids || [], lead_scope: r.lead_scope === 'assigned' ? 'assigned' : 'all' };
       setRows(map);
     });
   }, [user.id]);
 
-  const toggleWs = (slug: string) => setRows((prev) => { const next = { ...prev }; if (next[slug]) delete next[slug]; else next[slug] = { workspace: slug, agent_mode: 'all', agent_ids: [] }; return next; });
+  const toggleWs = (slug: string) => setRows((prev) => { const next = { ...prev }; if (next[slug]) delete next[slug]; else next[slug] = { workspace: slug, agent_mode: 'all', agent_ids: [], lead_scope: 'all' }; return next; });
+  const setLeadScope = (slug: string, scope: LeadScope) => setRows((p) => ({ ...p, [slug]: { ...p[slug], lead_scope: scope } }));
   const loadAgents = async (slug: string) => { setExpanded(expanded === slug ? null : slug); if (!agentsByWs[slug]) { const d = await api.admin.workspaceAgents(slug); setAgentsByWs((p) => ({ ...p, [slug]: d.agents })); } };
   const setMode = (slug: string, mode: AccessRow['agent_mode']) => setRows((p) => ({ ...p, [slug]: { ...p[slug], agent_mode: mode } }));
   const toggleAgent = (slug: string, id: string) => setRows((p) => { const cur = p[slug]; const has = cur.agent_ids.includes(id); return { ...p, [slug]: { ...cur, agent_ids: has ? cur.agent_ids.filter((x) => x !== id) : [...cur.agent_ids, id] } }; });
@@ -287,7 +312,7 @@ function AccessEditor({ user, workspaces, onClose, onSaved }: { user: any; works
 
   return (
     <Modal title={`Access — ${user.name}`} onClose={onClose} wide>
-      <p className="mb-4 text-sm text-slate-500">Pick the workspaces this user can open. For each, choose which agents they can see.</p>
+      <p className="mb-4 text-sm text-slate-500">Pick the workspaces this user can open. For each, choose which agents they can see and their lead visibility.</p>
       <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
         {workspaces.map((w) => {
           const on = !!rows[w.slug]; const row = rows[w.slug];
@@ -307,6 +332,16 @@ function AccessEditor({ user, workspaces, onClose, onSaved }: { user: any; works
                   </div>
                 )}
               </div>
+              {on && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                  <span className="text-xs font-semibold text-slate-500">Lead visibility</span>
+                  <select className="input w-auto !py-1 text-xs" value={row.lead_scope} onChange={(e) => setLeadScope(w.slug, e.target.value as LeadScope)}>
+                    <option value="all">All leads (manager / owner)</option>
+                    <option value="assigned">Only assigned leads (rep)</option>
+                  </select>
+                  <span className="text-[11px] text-slate-400">{row.lead_scope === 'assigned' ? 'Sees only leads where they are primary or a follower.' : 'Sees every lead in this workspace.'}</span>
+                </div>
+              )}
               {on && row.agent_mode !== 'all' && expanded === w.slug && (
                 <div className="mt-3 grid max-h-40 grid-cols-1 gap-1 overflow-y-auto border-t border-line pt-3 sm:grid-cols-2">
                   {(agentsByWs[w.slug] || []).map((a) => (
