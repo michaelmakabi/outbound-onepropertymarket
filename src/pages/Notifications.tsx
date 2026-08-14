@@ -5,8 +5,8 @@ import { useAuth } from '../lib/auth';
 import { PageHead, Spinner, EmptyState } from '../components/ui';
 import { statusMeta } from '../lib/statuses';
 import {
-  Bell, ShieldAlert, Mail, MessageSquare, Save, Send, CheckCircle2, AlertCircle,
-  Clock, Users, Radio, Phone, Loader2, XCircle, Info, Tag,
+  Bell, ShieldAlert, Mail, Save, Send, CheckCircle2, AlertCircle,
+  Clock, Users, Radio, Loader2, XCircle, Info, Tag,
   UserPlus, PhoneMissed, Voicemail, PhoneForwarded, CalendarClock, PhoneOff, Ban,
   ThumbsDown, Footprints, Meh, Flame, CalendarCheck, Handshake, BadgeCheck, Trophy, Archive,
 } from 'lucide-react';
@@ -37,11 +37,10 @@ type LogRow = {
   recipient_name?: string; recipient_contact?: string; lead_name?: string; lead_id?: string; message?: string;
 };
 type TestResult = { status?: string; error?: string; to?: string };
-type NumberOpt = { phone_number: string; nickname?: string };
 
+// Email-only delivery. (SMS/Twilio intentionally not offered — notifications go out via email.)
 const CHANNELS: { key: 'email' | 'sms'; label: string; icon: any; provider: string }[] = [
   { key: 'email', label: 'Email', icon: Mail, provider: 'Resend key' },
-  { key: 'sms', label: 'SMS', icon: MessageSquare, provider: 'Twilio + staff phone numbers' },
 ];
 
 const CADENCES: { key: 'hourly' | 'daily'; label: string; cron: string }[] = [
@@ -74,7 +73,6 @@ export default function Notifications() {
   const [catalog, setCatalog] = useState<string[]>([]);
   const [flags, setFlags] = useState<Record<string, any>>({});
   const [log, setLog] = useState<LogRow[]>([]);
-  const [numbers, setNumbers] = useState<NumberOpt[]>([]);
 
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
@@ -108,12 +106,8 @@ export default function Notifications() {
         setSettings(normalizeSettings(d?.settings));
         setCatalog(Array.isArray(d?.catalog) ? d.catalog : []);
         setFlags(d?.flags || {});
-        // Companion reads are best-effort — a missing log/numbers shouldn't block the page.
+        // Companion read is best-effort — a missing log shouldn't block the page.
         notif.logList(50, active || undefined).then((r: any) => setLog(r?.log || [])).catch(() => {});
-        notif.workspaceNumbers(active || undefined).then((r: any) => {
-          setNumbers(r?.numbers || []);
-          setSettings((s) => (s.notifications_number == null && r?.current ? { ...s, notifications_number: r.current } : s));
-        }).catch(() => {});
       })
       .catch((e: any) => {
         if (e?.status === 403 || /403|manager|owner|admin|forbidden/i.test(e?.message || '')) { setForbidden(true); setCanManage(false); }
@@ -230,7 +224,7 @@ export default function Notifications() {
         <div className={cx('space-y-5 transition', !settings.enabled && 'opacity-60')}>
           {/* 2. Channels */}
           <section className="card p-4">
-            <SectionHead icon={Radio} title="Channels" hint="How your team gets notified" />
+            <SectionHead icon={Radio} title="Channel" hint="Notifications are delivered by email" />
             <div className="grid gap-3 sm:grid-cols-2">
               {CHANNELS.map((c) => {
                 const on = settings.channels.includes(c.key);
@@ -315,36 +309,14 @@ export default function Notifications() {
                   </div>
                   <span className="text-[11px] text-slate-400">cron: {settings.digest_cron}</span>
                 </div>
-                {digestPending && (
-                  <div className="mt-2 flex items-center gap-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
-                    <Info className="h-3.5 w-3.5 shrink-0" /> Digest flushing is coming soon — your cadence is saved, but batched sends aren't delivering yet.
-                  </div>
-                )}
+                <div className="mt-2 flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700">
+                  <Info className="h-3.5 w-3.5 shrink-0" /> Digest sends run on the schedule above (server cron). Each recipient gets one batched email of that period's updates.
+                </div>
               </div>
             )}
           </section>
 
-          {/* 6. Dedicated notifications number */}
-          <section className="card p-4">
-            <SectionHead icon={Phone} title="Dedicated notifications number" hint="The SMS sender number for this workspace" />
-            {numbers.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-line bg-surface px-3 py-2 text-xs text-slate-500">
-                No workspace SMS numbers available yet. Once staff phone numbers are provisioned (Twilio), pick the sender here.
-              </div>
-            ) : (
-              <label className="block max-w-sm">
-                <span className="label">Send SMS from</span>
-                <select value={settings.notifications_number ?? ''} onChange={(e) => set({ notifications_number: e.target.value || null })} className="input mt-1">
-                  <option value="">Workspace default</option>
-                  {numbers.map((n) => (
-                    <option key={n.phone_number} value={n.phone_number}>{n.nickname ? `${n.nickname} — ${n.phone_number}` : n.phone_number}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </section>
-
-          {/* 7. Test */}
+          {/* 6. Test */}
           <section className="card p-4">
             <SectionHead icon={Send} title="Send a test" hint={`Fires a real notification to you${user?.name ? ` (${user.name})` : ''}`} />
             <div className="grid gap-3 sm:grid-cols-2">
@@ -367,11 +339,11 @@ export default function Notifications() {
             </div>
           </section>
 
-          {/* 8. Recent notifications */}
+          {/* 7. Recent notifications */}
           <section className="card p-4">
             <SectionHead icon={Bell} title="Recent notifications" hint="Newest first" />
             {log.length === 0 ? (
-              <EmptyState text="No notifications sent yet. Enable a channel, pick some dispositions, and they'll show up here." />
+              <EmptyState text="No notifications sent yet. Enable the channel, pick some dispositions, and they'll show up here." />
             ) : (
               <div className="overflow-x-auto rounded-lg border border-line">
                 <table className="w-full min-w-[720px] text-left text-sm">
