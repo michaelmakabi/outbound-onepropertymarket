@@ -18,6 +18,18 @@ const STATUS_PILL: Record<string, string> = {
   completed: 'bg-emerald-100 text-emerald-700', paused: 'bg-slate-200 text-slate-600',
 };
 
+// Shared, generously-sized button styles for the launch wizard footer + actions.
+const BTN_GHOST = 'inline-flex items-center gap-2 rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-surface disabled:opacity-40';
+const BTN_PRIMARY = 'inline-flex items-center gap-2 rounded-xl bg-brand px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand/90 disabled:opacity-40';
+
+// Guiding copy shown at the top of every wizard step so the user always knows what to do next.
+const STEP_INTRO: { title: string; desc: string }[] = [
+  { title: 'Choose a workspace', desc: 'Pick which workspace this campaign belongs to. Its leads, tags and analytics are all scoped here.' },
+  { title: 'Pick your AI voice agent', desc: 'Select the AI agent that will place and handle every call in this campaign.' },
+  { title: 'Build your call list', desc: 'Add leads with a smart list, search & select, or import a fresh file. Then choose how many numbers to dial per lead.' },
+  { title: 'Name it & review', desc: 'Give the campaign a name and review the projected calls, cost and timing before you launch.' },
+];
+
 export default function OpmCampaigns() {
   const nav = useNavigate();
   const { user } = useAuth();
@@ -332,61 +344,76 @@ function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; 
   const steps = ['Workspace', 'Agent', 'Leads', 'Confirm'];
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => !busy && onClose()}>
-      <div className="card w-full max-w-2xl max-h-[92vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><Radio className="h-5 w-5 text-brand" /> New campaign</h3>
-          {!busy && <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-5 w-5" /></button>}
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/50 p-4 sm:p-6" onClick={() => !busy && onClose()}>
+      <div className="card w-full max-w-4xl max-h-[94vh] overflow-y-auto rounded-3xl p-7 shadow-2xl sm:p-9" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-6 flex items-start justify-between">
+          <div className="flex items-center gap-3.5">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-light/50 text-brand"><Radio className="h-6 w-6" /></span>
+            <div>
+              <h3 className="text-2xl font-extrabold tracking-tight text-ink">New campaign</h3>
+              <p className="mt-0.5 text-sm text-slate-500">Set up an AI-calling campaign in four quick steps.</p>
+            </div>
+          </div>
+          {!busy && <button onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-surface"><X className="h-6 w-6" /></button>}
         </div>
-        <div className="mb-5 flex flex-wrap items-center gap-2">
+
+        <div className="mb-6 flex flex-wrap items-center gap-2.5">
           {steps.map((s, i) => (
-            <span key={s} className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${i === step ? 'bg-brand text-white' : i < step ? 'bg-emerald-100 text-emerald-700' : 'border border-line bg-white text-slate-500'}`}>
-              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/20 text-[10px]">{i + 1}</span>{s}
+            <span key={s} className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold ${i === step ? 'bg-brand text-white shadow-sm' : i < step ? 'bg-emerald-100 text-emerald-700' : 'border border-line bg-white text-slate-500'}`}>
+              <span className={`grid h-7 w-7 place-items-center rounded-full text-xs font-bold ${i === step ? 'bg-white/20 text-white' : i < step ? 'bg-emerald-200 text-emerald-800' : 'bg-surface text-slate-500'}`}>{i < step ? <CheckCircle2 className="h-4 w-4" /> : i + 1}</span>{s}
             </span>
           ))}
         </div>
 
-        {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{err}</div>}
+        {/* Per-step guiding header */}
+        <div className="mb-6 rounded-2xl border border-brand/15 bg-brand-light/20 px-5 py-4">
+          <div className="text-lg font-bold text-ink">Step {step + 1} of {steps.length} — {STEP_INTRO[step].title}</div>
+          <p className="mt-1 text-sm text-slate-600">{STEP_INTRO[step].desc}</p>
+        </div>
+
+        {err && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{err}</div>}
 
         {step === 0 && (
           <div>
-            <label className="label mb-1 block">Workspace to launch for</label>
-            <select autoFocus className="input" value={ws} onChange={(e) => onPickWorkspace(e.target.value)}>
+            <label className="mb-2 block text-base font-bold text-ink">Workspace to launch for</label>
+            <select autoFocus className="input !py-3.5 text-base" value={ws} onChange={(e) => onPickWorkspace(e.target.value)}>
               <option value="">Select a workspace…</option>
               {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
             </select>
-            <p className="mt-2 text-xs text-slate-500">Leads, tagging and analytics all scope to this workspace. Calls are placed via the shared 1PropertyMarket dialer.</p>
+            <p className="mt-3 text-sm text-slate-500">Leads, tagging and analytics all scope to this workspace. Calls are placed via the shared 1PropertyMarket dialer.</p>
           </div>
         )}
 
         {step === 1 && (
           <div>
-            <label className="label mb-1 block">AI voice agent</label>
-            <select className="input" value={agentId} onChange={(e) => setAgentId(e.target.value)}>
+            <label className="mb-2 block text-base font-bold text-ink">AI voice agent</label>
+            <select className="input !py-3.5 text-base" value={agentId} onChange={(e) => setAgentId(e.target.value)}>
               {!agents.length && <option value="">Loading agents…</option>}
               {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
             </select>
+            <p className="mt-3 text-sm text-slate-500">This agent's script, voice and assigned phone numbers will be used for every call in the campaign.</p>
           </div>
         )}
 
         {step === 2 && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             {/* Smart-list batch selection */}
             <div>
-              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-400"><ListFilter className="h-3.5 w-3.5" /> Smart lists {listsLoading && <Loader2 className="h-3 w-3 animate-spin" />}</div>
+              <div className="mb-2 flex items-center gap-2 text-sm font-bold text-ink"><ListFilter className="h-4 w-4 text-brand" /> Smart lists {listsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}</div>
+              <p className="mb-2.5 text-xs text-slate-500">Tap a saved list to add everyone in it. Tap again to remove them.</p>
               {lists.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-line px-3 py-2.5 text-xs text-slate-400">{listsLoading ? 'Loading saved lists…' : 'No saved smart lists in this workspace.'}</div>
+                <div className="rounded-xl border border-dashed border-line px-4 py-3.5 text-sm text-slate-400">{listsLoading ? 'Loading saved lists…' : 'No saved smart lists in this workspace.'}</div>
               ) : (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2.5">
                   {lists.map((l) => {
                     const meta = listMeta[l.id];
                     const on = activeLists.has(l.id);
                     return (
                       <button key={l.id} disabled={!meta} onClick={() => toggleList(l)}
-                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${on ? 'border-brand bg-brand text-white' : 'border-line bg-white text-slate-600 hover:bg-surface'}`}>
-                        {on ? <CheckCircle2 className="h-3.5 w-3.5" /> : <ListFilter className="h-3.5 w-3.5" />}
+                        className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold disabled:opacity-50 ${on ? 'border-brand bg-brand text-white shadow-sm' : 'border-line bg-white text-slate-600 hover:bg-surface'}`}>
+                        {on ? <CheckCircle2 className="h-4 w-4" /> : <ListFilter className="h-4 w-4" />}
                         {l.name}
-                        <span className={`rounded px-1 py-0.5 text-[10px] ${on ? 'bg-white/20' : 'bg-surface text-slate-500'}`}>{meta ? num(meta.count) : '…'}</span>
+                        <span className={`rounded-lg px-2 py-0.5 text-xs ${on ? 'bg-white/20' : 'bg-surface text-slate-500'}`}>{meta ? num(meta.count) : '…'}</span>
                       </button>
                     );
                   })}
@@ -396,62 +423,65 @@ function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; 
 
             {/* Search + select with pagination */}
             <div>
-              <div className="mb-2 flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name or property…" className="input w-full pl-8 !py-1.5 text-sm" />
+              <div className="mb-2 text-sm font-bold text-ink">Search &amp; select leads</div>
+              <div className="mb-3 flex flex-wrap items-center gap-2.5">
+                <div className="relative min-w-[220px] flex-1">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name or property…" className="input w-full !py-3 pl-11 text-sm" />
                 </div>
-                <button className="whitespace-nowrap rounded-lg border border-brand/30 bg-brand-light/40 px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-light disabled:opacity-50" disabled={resolving || filtered.length === 0} onClick={selectAllMatching}>{resolving ? <Loader2 className="inline h-3.5 w-3.5 animate-spin" /> : `Select all ${num(filtered.length)}`}</button>
-                <button className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-surface" onClick={openImport}><Upload className="h-3.5 w-3.5" /> Import leads</button>
+                <button className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-brand/30 bg-brand-light/40 px-4 py-3 text-sm font-semibold text-brand hover:bg-brand-light disabled:opacity-50" disabled={resolving || filtered.length === 0} onClick={selectAllMatching}>{resolving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {resolving ? 'Selecting…' : `Select all ${num(filtered.length)}`}</button>
+                <button className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-line px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={openImport}><Upload className="h-4 w-4" /> Import leads</button>
               </div>
-              <div className="max-h-64 overflow-y-auto rounded-lg border border-line">
-                {leadsLoading ? <div className="p-6 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div> : pageRows.length === 0 ? <div className="p-6 text-center text-sm text-slate-400">No leads.</div> : pageRows.map((l) => (
-                  <label key={l.lead_id} className="flex cursor-pointer items-center gap-2 border-b border-line px-3 py-1.5 text-sm last:border-0 hover:bg-surface">
-                    <input type="checkbox" checked={selected.has(l.lead_id)} onChange={() => toggleSel(l.lead_id)} className="h-3.5 w-3.5 accent-[#1f6feb]" />
+              <div className="max-h-80 overflow-y-auto rounded-2xl border border-line">
+                {leadsLoading ? <div className="p-8 text-center text-sm text-slate-400"><Loader2 className="mx-auto h-6 w-6 animate-spin" /></div> : pageRows.length === 0 ? <div className="p-8 text-center text-sm text-slate-400">No leads.</div> : pageRows.map((l) => (
+                  <label key={l.lead_id} className="flex cursor-pointer items-center gap-3 border-b border-line px-4 py-2.5 text-sm last:border-0 hover:bg-surface">
+                    <input type="checkbox" checked={selected.has(l.lead_id)} onChange={() => toggleSel(l.lead_id)} className="h-4 w-4 accent-[#1f6feb]" />
                     <span className="font-medium text-ink">{l.name || '(no name)'}</span>
                     <span className="text-xs text-slate-400">{l.property_ref || ''}</span>
-                    <span className="ml-auto text-[11px] text-slate-400">{l.phoneCount || 0} #</span>
+                    <span className="ml-auto text-xs text-slate-400">{l.phoneCount || 0} #</span>
                   </label>
                 ))}
               </div>
               {filtered.length > LEADS_PAGE_SIZE && (
-                <div className="mt-2 flex items-center justify-end gap-2 text-xs text-slate-500">
-                  <button className="btn-ghost !p-1.5" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}><ChevronLeft className="h-4 w-4" /></button>
+                <div className="mt-3 flex items-center justify-end gap-2.5 text-sm text-slate-500">
+                  <button className="rounded-xl border border-line p-2 hover:bg-surface disabled:opacity-40" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}><ChevronLeft className="h-4 w-4" /></button>
                   <span className="tabular-nums">Page {page} / {pageCount}</span>
-                  <button className="btn-ghost !p-1.5" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-4 w-4" /></button>
+                  <button className="rounded-xl border border-line p-2 hover:bg-surface disabled:opacity-40" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-4 w-4" /></button>
                 </div>
               )}
             </div>
 
             {/* Dial mode selector */}
             <div>
-              <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">Dial mode</div>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => setDialMode('primary')} className={`rounded-lg border p-3 text-left ${dialMode === 'primary' ? 'border-brand bg-brand-light/40' : 'border-line hover:bg-surface'}`}>
-                  <div className="flex items-center gap-1.5 text-sm font-semibold text-ink"><Phone className="h-3.5 w-3.5 text-brand" /> Primary number only</div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">One call per lead — dials each lead's primary dialable number.</div>
+              <div className="mb-2 text-sm font-bold text-ink">How many numbers should we dial per lead?</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button onClick={() => setDialMode('primary')} className={`rounded-2xl border-2 p-5 text-left transition ${dialMode === 'primary' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
+                  <div className="flex items-center gap-2 text-base font-bold text-ink"><Phone className="h-5 w-5 text-brand" /> Primary number only</div>
+                  <div className="mt-1.5 text-sm text-slate-500">One call per lead — dials each lead's primary dialable number.</div>
                 </button>
-                <button onClick={() => setDialMode('all_numbers')} className={`rounded-lg border p-3 text-left ${dialMode === 'all_numbers' ? 'border-brand bg-brand-light/40' : 'border-line hover:bg-surface'}`}>
-                  <div className="flex items-center gap-1.5 text-sm font-semibold text-ink"><PhoneOutgoing className="h-3.5 w-3.5 text-brand" /> All numbers on each lead</div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">Dials every dialable number — expands the total call count.</div>
+                <button onClick={() => setDialMode('all_numbers')} className={`rounded-2xl border-2 p-5 text-left transition ${dialMode === 'all_numbers' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
+                  <div className="flex items-center gap-2 text-base font-bold text-ink"><PhoneOutgoing className="h-5 w-5 text-brand" /> All numbers on each lead</div>
+                  <div className="mt-1.5 text-sm text-slate-500">Dials every dialable number — expands the total call count.</div>
                 </button>
               </div>
             </div>
 
             {/* Live summary */}
-            <div className="rounded-lg bg-surface px-3 py-2 text-sm font-semibold text-ink">
-              {num(selected.size)} lead{selected.size === 1 ? '' : 's'} · ~{num(estimatedCalls)} call{estimatedCalls === 1 ? '' : 's'} <span className="text-xs font-normal text-slate-500">({dialMode === 'all_numbers' ? 'all numbers' : 'primary only'})</span>{leadsLoading ? ' · loading…' : ''}
+            <div className="flex items-center gap-2.5 rounded-2xl bg-brand-light/30 px-5 py-4 text-base font-bold text-ink">
+              <Users className="h-5 w-5 text-brand" />
+              {num(selected.size)} lead{selected.size === 1 ? '' : 's'} selected · ~{num(estimatedCalls)} call{estimatedCalls === 1 ? '' : 's'} <span className="text-sm font-normal text-slate-500">({dialMode === 'all_numbers' ? 'all numbers' : 'primary only'})</span>{leadsLoading ? ' · loading…' : ''}
             </div>
           </div>
         )}
 
         {step === 3 && (
-          <div className="space-y-3">
-            <div><label className="label mb-1 block">Campaign name</label>
-              <input autoFocus className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Miami Off-Market — August" /></div>
+          <div className="space-y-5">
+            <div><label className="mb-2 block text-base font-bold text-ink">Campaign name</label>
+              <input autoFocus className="input !py-3.5 text-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Miami Off-Market — August" />
+              <p className="mt-2 text-sm text-slate-500">This is how the campaign appears in your dashboard and reports.</p></div>
 
             {/* Summary */}
-            <div className="rounded-lg bg-surface p-3 text-sm">
+            <div className="space-y-2.5 rounded-2xl border border-line bg-surface p-5 text-base">
               <div className="flex justify-between"><span className="text-slate-500">Workspace</span><span className="font-semibold text-ink">{workspaces.find((w) => w.slug === ws)?.display_name || ws}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Agent</span><span className="font-semibold text-ink">{agentName}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Leads</span><span className="font-semibold text-ink">{num(selected.size)}</span></div>
@@ -480,11 +510,11 @@ function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; 
           </div>
         )}
 
-        <div className="mt-5 flex items-center justify-between">
-          <button className="btn-ghost" disabled={step === 0 || busy} onClick={() => setStep((s) => s - 1)}><ArrowLeft className="h-4 w-4" /> Back</button>
+        <div className="mt-7 flex items-center justify-between border-t border-line pt-6">
+          <button className={BTN_GHOST} disabled={step === 0 || busy} onClick={() => setStep((s) => s - 1)}><ArrowLeft className="h-4 w-4" /> Back</button>
           {step < 3
-            ? <button className="btn-primary disabled:opacity-50" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>Next <ArrowRight className="h-4 w-4" /></button>
-            : <button className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50" disabled={busy || !name.trim() || selected.size === 0 || preflightLoading || !preflightOk} onClick={launch}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneOutgoing className="h-4 w-4" />} Launch {num(estimatedCalls)} call{estimatedCalls === 1 ? '' : 's'}</button>}
+            ? <button className={BTN_PRIMARY} disabled={!canNext} onClick={() => setStep((s) => s + 1)}>Next <ArrowRight className="h-4 w-4" /></button>
+            : <button className="inline-flex items-center gap-2 rounded-xl bg-brand px-7 py-3 text-base font-bold text-white shadow-sm hover:bg-brand/90 disabled:opacity-40" disabled={busy || !name.trim() || selected.size === 0 || preflightLoading || !preflightOk} onClick={launch}>{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <PhoneOutgoing className="h-5 w-5" />} Launch {num(estimatedCalls)} call{estimatedCalls === 1 ? '' : 's'}</button>}
         </div>
       </div>
 
