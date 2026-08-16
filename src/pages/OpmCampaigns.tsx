@@ -489,7 +489,7 @@ function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; 
             </div>
 
             {/* Projection panel */}
-            <ProjectionPanel loading={projectionLoading} error={projectionErr} projection={projection} fallbackCalls={estimatedCalls} />
+            <ProjectionPanel loading={projectionLoading} error={projectionErr} projection={projection} fallbackCalls={estimatedCalls} numberCount={preflight?.number_count ?? (preflight?.numbers?.length ?? 0)} />
 
             {/* Fixed dialing policy */}
             <DialingPolicyCard />
@@ -524,11 +524,24 @@ function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; 
 }
 
 /* ---------------- Projection panel (renders defensively) ---------------- */
-function ProjectionPanel({ loading, error, projection, fallbackCalls }: { loading: boolean; error: string; projection: any; fallbackCalls: number }) {
+function ProjectionPanel({ loading, error, projection, fallbackCalls, numberCount = 0 }: { loading: boolean; error: string; projection: any; fallbackCalls: number; numberCount?: number }) {
   if (loading) return <div className="flex items-center gap-2 rounded-xl border border-brand/20 bg-brand-light/20 px-4 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Estimating calls, cost and duration…</div>;
 
   const calls = projection?.estimated_calls ?? fallbackCalls;
   const dur = projection?.estimated_duration || {};
+
+  // Duration is derived from the dialing policy so it stays correct: each assigned number
+  // places up to 100 calls/day, and the whole campaign is paced at 1 call / 15s inside the
+  // 9am–8pm window (~2,640/day). Effective daily throughput is the smaller of the two.
+  // e.g. 117 calls on 1 number = ceil(117 / 100) = 2 days (not 117).
+  const CAP_PER_NUMBER = 100;
+  const PACE_PER_DAY = Math.floor((11 * 3600) / 15); // 9am–8pm at 1 call / 15s
+  const numbers = Math.max(0, Number(numberCount) || 0);
+  const perDay = numbers > 0 ? Math.min(numbers * CAP_PER_NUMBER, PACE_PER_DAY) : 0;
+  const computedDays = perDay > 0 && calls > 0 ? Math.max(1, Math.ceil(calls / perDay)) : null;
+  const humanDuration = computedDays != null
+    ? `about ${num(computedDays)} day${computedDays === 1 ? '' : 's'}`
+    : (dur.human || null);
   const cr = projection?.cost_range || {};
   const dollars = (v: any) => (v && typeof v === 'object' ? v.billed_usd : v);
   const low = dollars(cr.low);
@@ -540,7 +553,7 @@ function ProjectionPanel({ loading, error, projection, fallbackCalls }: { loadin
     <div className="rounded-xl border border-brand/30 bg-brand-light/20 p-4">
       <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand"><PhoneOutgoing className="h-3.5 w-3.5" /> Projection <span className="font-normal text-slate-400">· estimate</span></div>
       <div className="text-lg font-extrabold text-ink">This campaign will place ~{num(calls)} call{calls === 1 ? '' : 's'}.</div>
-      {dur.human && <div className="mt-1 flex items-center gap-1.5 text-sm text-slate-600"><Clock className="h-3.5 w-3.5 text-slate-400" /> Estimated to finish in <span className="font-semibold text-ink">{dur.human}</span>.</div>}
+      {humanDuration && <div className="mt-1 flex items-center gap-1.5 text-sm text-slate-600"><Clock className="h-3.5 w-3.5 text-slate-400" /> Estimated to finish in <span className="font-semibold text-ink">{humanDuration}</span>.</div>}
       {error ? (
         <div className="mt-2 text-xs text-amber-600">Cost + timing estimate is unavailable right now — the campaign will still launch.</div>
       ) : hasCost ? (
