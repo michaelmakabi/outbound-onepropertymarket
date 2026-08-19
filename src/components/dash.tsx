@@ -183,15 +183,11 @@ function usePopover() {
 
 /* ------------------------------------------------------------------ workspace select */
 
-export function WorkspaceSelect({
-  workspaces, value, onChange,
-}: { workspaces: { slug: string; display_name: string }[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <select className="input w-auto min-w-[200px]" value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">All workspaces (global)</option>
-      {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
-    </select>
-  );
+// Per-page workspace pickers are intentionally removed. The whole app is HARD-locked to the active
+// workspace (see api.ts WS_SCOPED_ACTIONS) — you change scope only via the sidebar tenant switcher,
+// so no screen can show another tenant's data. This component is now a no-op kept for call-site compat.
+export function WorkspaceSelect(_props: { workspaces: { slug: string; display_name: string }[]; value: string; onChange: (v: string) => void }) {
+  return null;
 }
 
 /* ------------------------------------------------------------------ multi-select */
