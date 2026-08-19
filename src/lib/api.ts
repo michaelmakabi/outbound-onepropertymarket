@@ -19,6 +19,9 @@ async function call(action: string, opts: { method?: string; params?: Record<str
     if (v === undefined || v === null || v === '') continue;
     url.searchParams.set(k, Array.isArray(v) ? v.join(',') : String(v));
   }
+  // HARD workspace lock: force tenant-scoped analytics actions onto the active workspace, overriding
+  // whatever a page passed. Keeps every screen single-tenant; scope changes only via the sidebar switcher.
+  if (WS_SCOPED_ACTIONS.has(action) && activeWorkspace) url.searchParams.set('workspace', activeWorkspace);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = tokenStore.get();
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -78,6 +81,11 @@ export const workspaceStore = {
   get: () => activeWorkspace,
   set: (w: string | null) => { activeWorkspace = w; if (w) localStorage.setItem(WS_KEY, w); else localStorage.removeItem(WS_KEY); },
 };
+
+// Tenant-scoped analytics actions on the shared `api` function. When a workspace is active these are
+// HARD-locked to it, so no page can surface another tenant's data. Super-admins change scope by
+// switching the active workspace in the sidebar — never via per-page pickers (which are being removed).
+const WS_SCOPED_ACTIONS = new Set(['overview', 'workspace', 'dispositions', 'agents', 'calls', 'contacts', 'contact']);
 
 async function opmCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
   const url = new URL(OPM_BASE);
@@ -218,6 +226,9 @@ export const opm = {
   campaignPause: (id: string) => opmCampaignCall('campaign_pause', { method: 'POST', body: { id } }),
   campaignResume: (id: string) => opmCampaignCall('campaign_resume', { method: 'POST', body: { id } }),
   campaignCancel: (id: string) => opmCampaignCall('campaign_cancel', { method: 'POST', body: { id } }),
+  // Resolve phone numbers → matched CRM contact { name, email, lead_id, property_ref } (last-10 keyed),
+  // scoped to the active workspace. Powers the name/email + lead link on Call History and Call Detail.
+  resolveContacts: (phones: string[]) => opmCampaignCall('resolve_contacts', { method: 'POST', body: { phones } }),
   // Rich workspace call analytics (volume, dispositions, agents, cost, pickup/voicemail, duration,
   // daily trend, recent) computed from `calls`. `workspace` may be a comma-joined slug list;
   // from/to are epoch-ms bounds on start_timestamp. Authorized per the caller's workspace access.
