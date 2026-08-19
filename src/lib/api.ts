@@ -97,6 +97,30 @@ async function opmCall(action: string, opts: { method?: string; params?: Record<
   return data;
 }
 
+// ---- Campaign control plane (dedicated `opm-campaign` edge function): drip + preflight + lifecycle. ----
+// Split out of `opm` so the drip processor + pause/resume/cancel + credit-aware preflight can evolve
+// independently. Shares the same opaque-bearer auth + active-workspace scoping as opmCall.
+const OPMCAMPAIGN_BASE =
+  (import.meta as any).env?.VITE_OPMCAMPAIGN_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-campaign') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-campaign');
+
+async function opmCampaignCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMCAMPAIGN_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
 export const opm = {
   workspaces: () => opmCall('workspaces'),
   summary: () => opmCall('summary'),
@@ -170,10 +194,11 @@ export const opm = {
   // Create a tracked campaign, tag its leads (campaign:<slug>), and launch the first batch of AI calls.
   campaignLaunch: (b: { workspace?: string; name: string; agent_id: string; agent_name?: string; lead_ids: string[]; dial_mode?: 'primary' | 'all_numbers'; timezone?: string; drip_batch?: number | null; drip_minutes?: number | null }) =>
     opmCall('campaign_launch', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
-  // Pre-flight the launch: confirms the agent has assigned/dialable numbers and is callable.
-  // Returns { ok, numbers, number_count, agent_ok, issues[] }. Block Launch when !ok and show issues.
+  // Pre-flight the launch: confirms the agent has assigned/dialable numbers, is callable, AND that the
+  // dialer account has credit (live probe). Returns { ok, numbers, number_count, agent_ok, credit_ok,
+  // credit_reason, credit_message, issues[] }. Block Launch when !ok and show issues. Served by opm-campaign.
   campaignPreflight: (b: { workspace?: string; agent_id: string }) =>
-    opmCall('campaign_preflight', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
+    opmCampaignCall('campaign_preflight', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
   // Projected calls / duration / cost range for a chosen lead set + dial mode (render defensively).
   // Pass lead_ids[] (preferred) or count. Returns { estimated_calls, numbers, daily_throughput,
   // estimated_duration:{days,finish_local,human}, cost_range:{low,blended,high,*.billed_usd,basis,note} }.
@@ -185,8 +210,14 @@ export const opm = {
   campaignsList: (p: { workspace?: string; from?: string; to?: string } = {}) => opmCall('campaigns_list', { params: { workspace: p.workspace, from: p.from, to: p.to } }),
   // One campaign + its leads + KPIs (cost, pickup, voicemail, disposition breakdown) computed from `calls`.
   campaignDetail: (id: string) => opmCall('campaign_detail', { params: { id } }),
-  // Super-admin: manually advance any due drip batches (same processor pg_cron calls every 2 min).
-  campaignDripRun: () => opmCall('campaign_drip_run', { method: 'POST' }),
+  // Super-admin: manually advance any due drip batches (same processor pg_cron calls every minute). Served by opm-campaign.
+  campaignDripRun: () => opmCampaignCall('campaign_drip_run', { method: 'POST' }),
+  // ---- Campaign lifecycle controls (opm-campaign): pause / resume / cancel a running campaign. ----
+  // pause → stops new calls (resumable). resume → re-enters the drip. cancel → terminal (marks remaining
+  // pending leads canceled). In-flight calls already handed to the dialer cannot be recalled.
+  campaignPause: (id: string) => opmCampaignCall('campaign_pause', { method: 'POST', body: { id } }),
+  campaignResume: (id: string) => opmCampaignCall('campaign_resume', { method: 'POST', body: { id } }),
+  campaignCancel: (id: string) => opmCampaignCall('campaign_cancel', { method: 'POST', body: { id } }),
   // Rich workspace call analytics (volume, dispositions, agents, cost, pickup/voicemail, duration,
   // daily trend, recent) computed from `calls`. `workspace` may be a comma-joined slug list;
   // from/to are epoch-ms bounds on start_timestamp. Authorized per the caller's workspace access.
