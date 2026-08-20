@@ -11,6 +11,7 @@ const STATUS_PILL: Record<string, string> = {
   dripping: 'bg-amber-100 text-amber-700', throttled: 'bg-orange-100 text-orange-700',
   completed: 'bg-emerald-100 text-emerald-700', paused: 'bg-slate-200 text-slate-600',
   failed: 'bg-red-100 text-red-700', canceled: 'bg-slate-200 text-slate-500',
+  scheduled: 'bg-indigo-100 text-indigo-700',
 };
 const LEAD_PILL: Record<string, string> = {
   launched: 'bg-emerald-100 text-emerald-700', completed: 'bg-emerald-100 text-emerald-700',
@@ -46,14 +47,16 @@ export default function OpmCampaignDetail() {
   const canceledLeads = leads.filter((l) => l.status === 'canceled');
 
   const isActive = c.status === 'dripping' || c.status === 'throttled';
+  const isScheduled = c.status === 'scheduled';
   const isPausable = isActive;
   const isResumable = c.status === 'paused' || c.status === 'throttled';
-  const isCancelable = isActive || c.status === 'paused';
+  const isCancelable = isActive || c.status === 'paused' || isScheduled;
 
   const runDrip = async () => { setDripBusy(true); try { await opm.campaignDripRun(); load(); } catch (e: any) { setError(String(e?.message || e)); } finally { setDripBusy(false); } };
   const doAct = async (fn: () => Promise<any>, label: string) => { setBusyAct(label); setError(''); try { await fn(); await load(); } catch (e: any) { setError(String(e?.message || e)); } finally { setBusyAct(''); } };
   const pauseCampaign = () => doAct(() => opm.campaignPause(id), 'pause');
   const resumeCampaign = () => doAct(() => opm.campaignResume(id), 'resume');
+  const launchNow = () => { if (!window.confirm('Launch this scheduled campaign now instead of waiting? Dialing starts immediately (within the 9am–8pm window).')) return; doAct(() => opm.campaignResume(id), 'resume'); };
   const cancelCampaign = () => { if (!window.confirm('Cancel this campaign? Leads not yet dialed will be stopped and no new calls go out. Calls already placed cannot be recalled. This cannot be undone.')) return; doAct(() => opm.campaignCancel(id), 'cancel'); };
   const showAllLeads = () => nav(`/leads?tag=${encodeURIComponent(data.tag)}&ws=${encodeURIComponent(c.workspace)}`);
 
@@ -66,11 +69,23 @@ export default function OpmCampaignDetail() {
         description={`${c.workspace} · ${c.agent_name || 'agent'}${c.dial_mode ? ` · ${c.dial_mode === 'all_numbers' ? 'all numbers' : 'primary only'}` : ''}${c.timezone ? ` · ${c.timezone}` : ''} · created ${c.created_at ? new Date(c.created_at).toLocaleDateString() : ''}`}
         actions={<div className="flex flex-wrap items-center gap-2">
           <span className={`pill ${STATUS_PILL[c.status] || 'bg-slate-100 text-slate-600'}`}>{c.status}</span>
+          {isScheduled && <button className={BTN} disabled={busyAct !== ''} onClick={launchNow}>{busyAct === 'resume' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Launch now</button>}
           {isPausable && <button className={BTN} disabled={busyAct !== ''} onClick={pauseCampaign}>{busyAct === 'pause' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />} Pause</button>}
           {isResumable && <button className={BTN} disabled={busyAct !== ''} onClick={resumeCampaign}>{busyAct === 'resume' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Resume</button>}
           {isCancelable && <button className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={busyAct !== ''} onClick={cancelCampaign}>{busyAct === 'cancel' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Cancel</button>}
           {isSuper && c.status === 'dripping' && <button className={BTN} disabled={dripBusy} onClick={runDrip}>{dripBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PhoneOutgoing className="h-3.5 w-3.5" />} Process drip now</button>}
         </div>} />
+
+      {/* Scheduled banner — this campaign is waiting for its start time. */}
+      {isScheduled && (
+        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-700">
+          <Clock className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <div className="font-bold">Scheduled to launch{c.scheduled_at ? ` ${new Date(c.scheduled_at).toLocaleString()}` : ''}</div>
+            <div className="mt-0.5">No calls go out until then. Use “Launch now” to start immediately, or “Cancel” to call it off. Dialing always respects the 9am–8pm local window.</div>
+          </div>
+        </div>
+      )}
 
       {/* Failure / attention banner — surfaces the real reason a campaign stalled or died. */}
       {c.last_error && (c.status === 'failed' || c.status === 'throttled') && (
@@ -104,7 +119,9 @@ export default function OpmCampaignDetail() {
           <div className="rounded-lg border border-line p-3"><div className="text-[11px] font-semibold uppercase text-slate-500">{k.failed ? 'Failed' : 'Completed'}</div><div className={`text-xl font-extrabold ${k.failed ? 'text-red-600' : 'text-ink'}`}>{num(k.failed ? k.failed : (k.total_calls || 0))}</div></div>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-surface"><div className="h-full bg-brand transition-all" style={{ width: `${k.total_leads ? Math.min(100, (k.launched / k.total_leads) * 100) : 0}%` }} /></div>
-        {c.status === 'throttled'
+        {c.status === 'scheduled'
+          ? <p className="mt-2 flex items-center gap-1.5 text-xs text-indigo-600"><Clock className="h-3.5 w-3.5" /> Scheduled — starts automatically{c.scheduled_at ? ` ~${new Date(c.scheduled_at).toLocaleString()}` : ''}. No calls go out until then.</p>
+          : c.status === 'throttled'
           ? <p className="mt-2 flex items-center gap-1.5 text-xs text-orange-600"><AlertCircle className="h-3.5 w-3.5" /> All numbers hit their daily cap — dialing auto-pauses and resumes tomorrow morning{c.next_drip_at ? ` (~${new Date(c.next_drip_at).toLocaleString()})` : ''}.</p>
           : c.status === 'dripping'
             ? <p className="mt-2 text-xs text-amber-600">Dialing is dripping automatically — paced ~1 call/15s, rotating across the agent's numbers, 9am–8pm local{c.next_drip_at ? ` · next batch ~${new Date(c.next_drip_at).toLocaleString()}` : ''}.</p>
