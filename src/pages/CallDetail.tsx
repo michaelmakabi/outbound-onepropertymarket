@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, opm } from '../lib/api';
 import { KpiCard, SectionCard, LoadingBlock, AudioPlayer } from '../components/dash';
 import { usd, secs, dateTime, humanizeDisposition, humanizeProduct, dispositionColor } from '../lib/format';
 import { downloadCallMp3, saveBlob, transcriptText } from '../lib/download';
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Clock, DollarSign, Smile, CheckCircle2, Zap, ArrowDownToLine, FileText, Loader2, Repeat } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Clock, DollarSign, Smile, CheckCircle2, Zap, ArrowDownToLine, FileText, Loader2, Repeat, User } from 'lucide-react';
 
 export default function CallDetail() {
   const { callId } = useParams();
@@ -19,8 +19,9 @@ export default function CallDetail() {
   const [loading, setLoading] = useState(true);
   const [dlAudio, setDlAudio] = useState(false);
   const [thread, setThread] = useState<any[]>([]);
+  const [person, setPerson] = useState<any>(null);
 
-  useEffect(() => { setLoading(true); setThread([]); api.call(callId!).then((d) => setC(d.call)).finally(() => setLoading(false)); }, [callId]);
+  useEffect(() => { setLoading(true); setThread([]); setPerson(null); api.call(callId!).then((d) => setC(d.call)).finally(() => setLoading(false)); }, [callId]);
 
   // Load sibling calls for this contact number (repeat-call thread).
   useEffect(() => {
@@ -28,6 +29,14 @@ export default function CallDetail() {
     const n = c.direction === 'inbound' ? c.from_number : c.to_number;
     if (!n) return;
     api.contact(String(n)).then((r) => setThread(Array.isArray(r.calls) ? r.calls : [])).catch(() => setThread([]));
+  }, [c]);
+
+  // Cross-reference the call's number to the CRM contact (name / email / lead) in the active workspace.
+  useEffect(() => {
+    if (!c) return;
+    const n = c.direction === 'inbound' ? c.from_number : c.to_number;
+    if (!n) { setPerson(null); return; }
+    opm.resolveContacts([String(n)]).then((r) => { const m = r.map || {}; setPerson(m[String(n).replace(/\D/g, '').slice(-10)] || null); }).catch(() => setPerson(null));
   }, [c]);
 
   const goTo = (i: number) => { if (i >= 0 && i < ids.length) nav(`/calls/${ids[i]}`, { state: st }); };
@@ -64,7 +73,7 @@ export default function CallDetail() {
         <div>
           <h1 className="flex items-center gap-2 text-xl font-extrabold text-ink">
             {inbound ? <ChevronRight className="h-5 w-5 rotate-180 text-emerald-600" /> : null}
-            {contact || 'Call'}
+            {person?.name || contact || 'Call'}
             {c.disposition && <span className="pill" style={{ background: `${dispositionColor(c.disposition)}22`, color: dispositionColor(c.disposition) }}>{humanizeDisposition(c.disposition)}</span>}
           </h1>
           <p className="text-sm text-slate-500">{c.workspace} · {c.agent_name || '—'} · {dateTime(c.start_timestamp)}</p>
@@ -117,6 +126,20 @@ export default function CallDetail() {
         </div>
 
         <div className="flex flex-col gap-5">
+          <SectionCard title="Contact">
+            {person?.name || person?.email ? (
+              <div className="space-y-1.5 text-sm">
+                <div className="flex items-center gap-1.5 font-semibold text-ink"><User className="h-4 w-4 text-brand" /> {person.name || 'Contact'}</div>
+                <div className="font-mono text-xs text-slate-500">{contact || '—'}</div>
+                {person.email && <div className="text-xs text-slate-500">{person.email}</div>}
+                {person.property_ref && <div className="text-xs text-slate-400">{person.property_ref}</div>}
+                {person.lead_id && <Link to={`/leads/${encodeURIComponent(person.lead_id)}`} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"><ExternalLink className="h-3.5 w-3.5" /> Open contact record (calls + notes)</Link>}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">No matched CRM contact for {contact || 'this number'} — <span className="font-semibold text-slate-500">Unknown</span>.</p>
+            )}
+          </SectionCard>
+
           {c.call_summary && (
             <SectionCard title="AI Summary">
               <p className="text-sm leading-relaxed text-slate-700">{c.call_summary}</p>
