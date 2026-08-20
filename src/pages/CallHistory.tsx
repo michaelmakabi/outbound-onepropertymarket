@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, opm } from '../lib/api';
 import { useFilters } from '../lib/filters';
@@ -40,17 +40,22 @@ function sentimentBadge(s: string | null) {
 
 type ViewCfg = { ws: string; dispositions: string[]; directions: string[]; minDuration: number; search: string; sort: SortState | null; hidden: string[] };
 
+// Sticky page state — remembers the last filters/sort/page so navigating away (into a call, another
+// tab) and back restores the table exactly as it was. Only cleared when the user changes the filters.
+const STATE_KEY = 'opm_callhistory_state';
+const savedState: any = (() => { try { return JSON.parse(localStorage.getItem(STATE_KEY) || '{}'); } catch { return {}; } })();
+
 export default function CallHistory() {
   const { startMs, endMs } = useFilters();
   const nav = useNavigate();
   const [ws, setWs] = useState('');
-  const [dispositions, setDispositions] = useState<string[]>([]);
-  const [directions, setDirections] = useState<string[]>([]);
-  const [minDuration, setMinDuration] = useState(0);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortState | null>({ by: 'when', dir: 'desc' });
-  const [page, setPage] = useState(1);
+  const [dispositions, setDispositions] = useState<string[]>(savedState.dispositions ?? []);
+  const [directions, setDirections] = useState<string[]>(savedState.directions ?? []);
+  const [minDuration, setMinDuration] = useState(savedState.minDuration ?? 0);
+  const [searchInput, setSearchInput] = useState(savedState.search ?? '');
+  const [search, setSearch] = useState(savedState.search ?? '');
+  const [sort, setSort] = useState<SortState | null>(savedState.sort ?? { by: 'when', dir: 'desc' });
+  const [page, setPage] = useState(savedState.page ?? 1);
   const [data, setData] = useState<any>(null);
   const [dispOptions, setDispOptions] = useState<{ value: string; label: string; count: number }[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -67,7 +72,13 @@ export default function CallHistory() {
     api.dispositions({ start: startMs, end: endMs })
       .then((d) => setDispOptions((d.dispositions || []).map((x: any) => ({ value: x.disposition, label: humanizeDisposition(x.disposition), count: x.count }))));
   }, [startMs, endMs]);
-  useEffect(() => { setPage(1); }, [dispositions, directions, minDuration, search, sort, startMs, endMs]);
+  // Reset to page 1 when filters change — but NOT on the initial mount, so a restored page survives.
+  const mounted = useRef(false);
+  useEffect(() => { if (!mounted.current) { mounted.current = true; return; } setPage(1); }, [dispositions, directions, minDuration, search, sort, startMs, endMs]);
+  // Persist the sticky page state on every change.
+  useEffect(() => {
+    try { localStorage.setItem(STATE_KEY, JSON.stringify({ dispositions, directions, minDuration, search, sort, page })); } catch { /* ignore */ }
+  }, [dispositions, directions, minDuration, search, sort, page]);
 
   const query = (over: any = {}) => ({
     start: startMs, end: endMs,
