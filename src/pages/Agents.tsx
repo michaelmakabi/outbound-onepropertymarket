@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
-import { api } from '../lib/api';
+import { api, opm } from '../lib/api';
 import { useFilters } from '../lib/filters';
+import { useWorkspace } from '../lib/workspace';
 import {
-  PageHeader, SectionCard, LoadingBlock, EmptyState, WorkspaceSelect,
+  PageHeader, SectionCard, LoadingBlock, EmptyState,
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
 } from '../components/dash';
 import { usd, num, ratePct, secs, humanizeProduct } from '../lib/format';
-import { Search } from 'lucide-react';
+import { Search, ShieldCheck, Loader2, AlertTriangle } from 'lucide-react';
 
 type AgentRow = {
   agentId: string; agentName: string; calls: number; costDollars: number; costPerCallDollars: number;
@@ -25,6 +26,83 @@ const AGENT_COLUMNS: ColumnDef[] = [
   { key: 'llmProduct', label: 'LLM' },
   { key: 'ttsProduct', label: 'TTS' },
 ];
+
+// ---- Reliability: per-workspace Retell "Stable Server" opt-in. When ON, this tenant's outbound
+// campaign calls + the pre-launch credit probe route through Retell's stable cluster (delayed
+// feature rollouts = fewer surprises mid-campaign). The cluster must first be enabled on the Retell
+// account by Retell support ($0.02/min surcharge); this toggle only controls which host we call.
+function StableServerCard() {
+  const { active, activeName, viewAll } = useWorkspace();
+  const [loading, setLoading] = useState(true);
+  const [cfg, setCfg] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (viewAll) { setLoading(false); return; }
+    setLoading(true); setErr(null);
+    opm.dialerConfig().then(setCfg).catch((e) => setErr(String(e?.message || e))).finally(() => setLoading(false));
+  }, [active, viewAll]);
+
+  const on = !!cfg?.stable_server;
+
+  const toggle = async () => {
+    if (saving || viewAll) return;
+    const next = !on;
+    setSaving(true); setErr(null);
+    try {
+      const r = await opm.setStableServer(next);
+      setCfg((c: any) => ({ ...(c || {}), stable_server: !!r?.stable_server }));
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <SectionCard title="Reliability — Stable Server"
+      description="Route this workspace's calls through Retell's stable cluster for steadier, delayed-rollout reliability">
+      {viewAll ? (
+        <div className="flex items-start gap-2 rounded-lg border border-line bg-surface px-3 py-2.5 text-sm text-slate-600">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <span>Stable Server is configured per workspace. Pick a specific workspace in the sidebar switcher to turn it on or off.</span>
+        </div>
+      ) : loading ? (
+        <LoadingBlock label="Loading reliability settings…" />
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-line bg-white px-4 py-3">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className={`mt-0.5 h-5 w-5 shrink-0 ${on ? 'text-emerald-600' : 'text-slate-400'}`} />
+              <div>
+                <div className="text-sm font-semibold text-ink">Stable Server routing {on ? 'ON' : 'OFF'} for {activeName || active}</div>
+                <div className="text-xs text-slate-500">
+                  {cfg?.has_config
+                    ? (on
+                        ? 'Outbound calls + pre-launch checks for this workspace are sent to stable.retellai.com.'
+                        : 'Calls use the standard Retell endpoint. Turn on for delayed-rollout stability.')
+                    : 'No dialer routing is configured for this workspace yet — set up its agent + numbers first.'}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button" role="switch" aria-checked={on}
+              disabled={saving || !cfg?.has_config}
+              onClick={toggle}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 ${on ? 'bg-emerald-500' : 'bg-slate-300'}`}
+            >
+              <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${on ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              {saving && <Loader2 className="absolute -right-6 h-3.5 w-3.5 animate-spin text-slate-400" />}
+            </button>
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <span className="font-semibold">Before turning this on:</span> the Stable Server cluster must be enabled on this workspace's Retell account by Retell support, and it adds a <span className="font-semibold">$0.02/min surcharge</span> on calls. This toggle only changes which Retell host we route to — it does not enable the cluster itself.
+          </div>
+          {err && <div className="text-xs font-medium text-red-600">{err}</div>}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
 
 function Leaderboard({ rows }: { rows: AgentRow[] }) {
   const getValue = useCallback((r: AgentRow, key: string) => (r as any)[key], []);
@@ -95,21 +173,18 @@ function ModelTable({ rows }: { rows: any[] }) {
 
 export default function Agents() {
   const { startMs, endMs } = useFilters();
-  const [ws, setWs] = useState('');
-  const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [d, setD] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { api.bootstrap().then((b) => setWorkspaces(b.workspaces)); }, []);
   useEffect(() => {
     setLoading(true);
-    api.agents({ start: startMs, end: endMs, workspace: ws || undefined }).then(setD).finally(() => setLoading(false));
-  }, [startMs, endMs, ws]);
+    api.agents({ start: startMs, end: endMs }).then(setD).finally(() => setLoading(false));
+  }, [startMs, endMs]);
 
   return (
     <div>
-      <PageHeader title="Agents & Models" description="Performance by voice agent, LLM model, and TTS voice"
-        actions={<WorkspaceSelect workspaces={workspaces} value={ws} onChange={setWs} />} />
+      <PageHeader title="Agents & Models" description="Performance by voice agent, LLM model, and TTS voice" />
+      <div className="mb-5"><StableServerCard /></div>
       {loading || !d ? <LoadingBlock /> : (
         <div className="flex flex-col gap-5">
           <SectionCard title="Agent Leaderboard" description="Search, sort any column, toggle fields"><Leaderboard rows={d.agents} /></SectionCard>
