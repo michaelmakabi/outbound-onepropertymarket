@@ -35,7 +35,9 @@ export default function OpmCampaigns() {
   const nav = useNavigate();
   const { user } = useAuth();
   const isSuper = user?.role === 'super_admin';
-  const { workspaces } = useWorkspace();
+  const { workspaces, active, viewAll } = useWorkspace();
+  // Scope the campaigns list to the active workspace unless viewing All Workspaces.
+  const scopedWs = viewAll ? '' : (active || '');
 
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +52,7 @@ export default function OpmCampaigns() {
 
   const load = useCallback(() => {
     setLoading(true); setError('');
-    opm.campaignsList({ workspace: wsFilter || undefined, from: from || undefined, to: to || undefined })
+    opm.campaignsList({ workspace: scopedWs || wsFilter || undefined, from: from || undefined, to: to || undefined })
       .then((d: any) => setRows(d.campaigns || []))
       .catch((e: any) => setError(String(e?.message || e)))
       .finally(() => setLoading(false));
@@ -85,12 +87,14 @@ export default function OpmCampaigns() {
       {(isSuper || (workspaces || []).length > 1) && (
         <SectionCard title="Filters" description="Narrow campaigns by workspace and creation date" className="mb-4">
           <div className="flex flex-wrap items-end gap-3">
-            <label className="text-xs font-semibold text-slate-500">Workspace
-              <select value={wsFilter} onChange={(e) => setWsFilter(e.target.value)} className="input mt-1 block !py-1.5 text-sm">
-                <option value="">{isSuper ? 'All workspaces' : 'All my workspaces'}</option>
-                {(workspaces || []).map((w: any) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
-              </select>
-            </label>
+            {viewAll && (
+              <label className="text-xs font-semibold text-slate-500">Workspace
+                <select value={wsFilter} onChange={(e) => setWsFilter(e.target.value)} className="input mt-1 block !py-1.5 text-sm">
+                  <option value="">{isSuper ? 'All workspaces' : 'All my workspaces'}</option>
+                  {(workspaces || []).map((w: any) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
+                </select>
+              </label>
+            )}
             <label className="text-xs font-semibold text-slate-500">From
               <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="input mt-1 block !py-1.5 text-sm" />
             </label>
@@ -145,7 +149,7 @@ export default function OpmCampaigns() {
         )}
       </SectionCard>
 
-      {wizard && <LaunchWizard workspaces={workspaces || []} onClose={() => setWizard(false)} onLaunched={(id) => { setWizard(false); load(); if (id) nav(`/campaigns/${id}`); }} />}
+      {wizard && <LaunchWizard workspaces={workspaces || []} lockedWorkspace={viewAll ? undefined : (active || undefined)} onClose={() => setWizard(false)} onLaunched={(id) => { setWizard(false); load(); if (id) nav(`/campaigns/${id}`); }} />}
     </div>
   );
 }
@@ -167,9 +171,9 @@ function DialingPolicyCard() {
 }
 
 /* ---------------- Super-admin launch wizard ---------------- */
-function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; onClose: () => void; onLaunched: (id?: string) => void }) {
+function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { workspaces: any[]; lockedWorkspace?: string; onClose: () => void; onLaunched: (id?: string) => void }) {
   const [step, setStep] = useState(0);
-  const [ws, setWs] = useState('');
+  const [ws, setWs] = useState(lockedWorkspace || '');
   const [agents, setAgents] = useState<{ agent_id: string; agent_name: string }[]>([]);
   const [agentId, setAgentId] = useState('');
 
@@ -248,6 +252,9 @@ function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; 
     setPreflight(null); setProjection(null);
     if (slug) { fetchLeads(slug); loadLists(slug); } else { setLeads([]); setLists([]); }
   };
+
+  // Single-tenant mode: workspace is locked to the active tenant — load its leads + smart lists on mount.
+  useEffect(() => { if (lockedWorkspace) onPickWorkspace(lockedWorkspace); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -377,11 +384,15 @@ function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; 
         {step === 0 && (
           <div>
             <label className="mb-2 block text-base font-bold text-ink">Workspace to launch for</label>
-            <select autoFocus className="input !py-3.5 text-base" value={ws} onChange={(e) => onPickWorkspace(e.target.value)}>
-              <option value="">Select a workspace…</option>
-              {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
-            </select>
-            <p className="mt-3 text-sm text-slate-500">Leads, tagging and analytics all scope to this workspace. Calls are placed via the shared 1PropertyMarket dialer.</p>
+            {lockedWorkspace ? (
+              <div className="input !py-3.5 flex items-center bg-surface text-base font-semibold text-slate-700">{workspaces.find((w) => w.slug === lockedWorkspace)?.display_name || lockedWorkspace}</div>
+            ) : (
+              <select autoFocus className="input !py-3.5 text-base" value={ws} onChange={(e) => onPickWorkspace(e.target.value)}>
+                <option value="">Select a workspace…</option>
+                {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
+              </select>
+            )}
+            <p className="mt-3 text-sm text-slate-500">{lockedWorkspace ? 'Locked to your active workspace — leads, tagging and analytics all scope here. Switch workspaces from the sidebar to launch for a different tenant.' : 'Leads, tagging and analytics all scope to this workspace. Calls are placed via the shared 1PropertyMarket dialer.'}</p>
           </div>
         )}
 
@@ -506,7 +517,7 @@ function LaunchWizard({ workspaces, onClose, onLaunched }: { workspaces: any[]; 
                 </ul>
               </div>
             ) : preflight && preflightOk ? (
-              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Ready — {num(preflight.number_count || (preflight.numbers || []).length)} number{(preflight.number_count || (preflight.numbers || []).length) === 1 ? '' : 's'} assigned, agent reachable, dialer has credit.</div>
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Ready — {num(preflight.number_count || (preflight.numbers || []).length)} number{(preflight.number_count || (preflight.numbers || []).length) === 1 ? '' : 's'} assigned, agent reachable.</div>
             ) : null}
           </div>
         )}
