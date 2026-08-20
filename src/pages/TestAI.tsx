@@ -57,9 +57,9 @@ const nativeOf = (key: string) => NATIVE.find((n) => n.test.test(key)) || null;
 
 export default function TestAI() {
   const { workspaces, active, loading: wsLoading } = useWorkspace();
-  // Deep-link support: /test-ai?workspace=<slug>&agent=<id> pre-selects (e.g. the AI Agents "Test" button).
+  // Deep-link support: /test-ai?agent=<id> pre-selects an agent (e.g. the AI Agents "Test" button).
+  // The workspace is ALWAYS the active tenant — you cannot test another tenant's agents from here.
   const [sp] = useSearchParams();
-  const qpWorkspace = sp.get('workspace') || '';
   const qpAgent = sp.get('agent') || '';
   const [workspace, setWorkspace] = useState<string>('');
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -89,8 +89,8 @@ export default function TestAI() {
   const [placing, setPlacing] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  // Default the workspace selector to the query param (deep-link), else the active tenant.
-  useEffect(() => { if (!workspace && (qpWorkspace || active)) setWorkspace(qpWorkspace || active || ''); }, [active, workspace, qpWorkspace]);
+  // Workspace is HARD-locked to the active tenant (kept in sync when the sidebar switcher changes it).
+  useEffect(() => { setWorkspace(active || ''); }, [active]);
 
   // Load agents + caller-ID numbers whenever the workspace changes.
   useEffect(() => {
@@ -212,6 +212,7 @@ export default function TestAI() {
   }
 
   const agentName = agents.find((a) => a.agent_id === agentId)?.agent_name || agentId;
+  const activeName = workspaces.find((w) => w.slug === workspace)?.display_name || workspace || '—';
 
   if (wsLoading) return <Spinner label="Loading…" />;
 
@@ -236,10 +237,8 @@ export default function TestAI() {
           <h2 className="mb-4 text-sm font-bold text-ink">Call setup</h2>
 
           <label className="label">Workspace</label>
-          <select className="input mt-1" value={workspace} onChange={(e) => setWorkspace(e.target.value)}>
-            {workspaces.length === 0 && <option value="">No workspaces</option>}
-            {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
-          </select>
+          <div className="input mt-1 flex items-center bg-surface font-semibold text-slate-600">{activeName}</div>
+          <p className="mt-1 text-xs text-slate-400">Locked to your active workspace — switch workspaces from the sidebar to test a different tenant's agents.</p>
 
           <label className="label mt-4 block">Agent</label>
           <select className="input mt-1" value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={loadingMeta || !agents.length}>
