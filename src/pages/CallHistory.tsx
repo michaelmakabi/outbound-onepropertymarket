@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, opm } from '../lib/api';
 import { useFilters } from '../lib/filters';
 import {
-  PageHeader, SectionCard, LoadingBlock, EmptyState, WorkspaceSelect, MultiSelect, SavedViews, AudioPlayer,
+  PageHeader, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews, AudioPlayer,
   ColumnDef, ColumnToggleMenu, SortableHead, useColumnVisibility, SortState,
 } from '../components/dash';
 import AiPromptModal from '../components/AiPromptModal';
@@ -43,7 +43,6 @@ type ViewCfg = { ws: string; dispositions: string[]; directions: string[]; minDu
 export default function CallHistory() {
   const { startMs, endMs } = useFilters();
   const nav = useNavigate();
-  const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [ws, setWs] = useState('');
   const [dispositions, setDispositions] = useState<string[]>([]);
   const [directions, setDirections] = useState<string[]>([]);
@@ -64,15 +63,14 @@ export default function CallHistory() {
 
   const { hidden, isVisible, toggle, setHidden } = useColumnVisibility(PAGE_KEY, COLUMNS);
 
-  useEffect(() => { api.bootstrap().then((b) => setWorkspaces(b.workspaces)); }, []);
   useEffect(() => {
-    api.dispositions({ start: startMs, end: endMs, workspace: ws || undefined })
+    api.dispositions({ start: startMs, end: endMs })
       .then((d) => setDispOptions((d.dispositions || []).map((x: any) => ({ value: x.disposition, label: humanizeDisposition(x.disposition), count: x.count }))));
-  }, [startMs, endMs, ws]);
-  useEffect(() => { setPage(1); }, [ws, dispositions, directions, minDuration, search, sort, startMs, endMs]);
+  }, [startMs, endMs]);
+  useEffect(() => { setPage(1); }, [dispositions, directions, minDuration, search, sort, startMs, endMs]);
 
   const query = (over: any = {}) => ({
-    start: startMs, end: endMs, workspace: ws || undefined,
+    start: startMs, end: endMs,
     dispositions: dispositions.length ? dispositions : undefined,
     directions: directions.length ? directions : undefined,
     minDuration: minDuration || undefined,
@@ -84,19 +82,20 @@ export default function CallHistory() {
   useEffect(() => {
     setLoading(true);
     api.calls(query()).then(setData).finally(() => setLoading(false));
-  }, [startMs, endMs, ws, dispositions, directions, minDuration, search, sort, page]);
+  }, [startMs, endMs, dispositions, directions, minDuration, search, sort, page]);
 
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rows: any[] = data?.items ?? [];
   const hasFilters = dispositions.length > 0 || directions.length > 0 || !!search || minDuration > 0;
 
-  // Enrich calls with the matched seller contact (name + property) from the OPM campaign data.
+  // Enrich each call with its matched CRM contact (name + email + lead link + property), by phone,
+  // scoped to the active workspace. Unmatched numbers stay "Unknown".
   const [resolveMap, setResolveMap] = useState<Record<string, any>>({});
   useEffect(() => {
     const nums = rows.map((c: any) => (c.direction === 'inbound' ? c.from_number : c.to_number)).filter(Boolean);
     if (!nums.length) { setResolveMap({}); return; }
-    opm.resolve(nums).then((d) => setResolveMap(d.map || {})).catch(() => setResolveMap({}));
+    opm.resolveContacts(nums).then((d) => setResolveMap(d.map || {})).catch(() => setResolveMap({}));
   }, [data]);
   const resolveInfo = (num: string) => resolveMap[String(num || '').replace(/\D/g, '').slice(-10)];
   const selectedCalls = () => Array.from(selected).map((id) => rows.find((r) => r.call_id === id) || { call_id: id });
@@ -128,13 +127,13 @@ export default function CallHistory() {
       const all = await api.calls(query({ page: 1, pageSize: 5000 }));
       let items: any[] = all.items || [];
       if (selected.size) items = items.filter((c) => selected.has(c.call_id));
-      const cols = ['When', 'Direction', 'Contact', 'Name', 'Property', 'Agent', 'Disposition', 'Duration(s)', 'Cost($)', 'Sentiment', 'Summary', 'CallID'];
+      const cols = ['When', 'Direction', 'Contact', 'Name', 'Email', 'Property', 'Agent', 'Disposition', 'Duration(s)', 'Cost($)', 'Sentiment', 'Summary', 'CallID'];
       const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
       const lines = [cols.join(',')];
       for (const c of items) {
         const contact = c.direction === 'inbound' ? c.from_number : c.to_number;
         const info = resolveInfo(contact) || {};
-        lines.push([c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '', info.name || '', info.property_ref || '', c.agent_name || '', c.disposition || '', c.duration_seconds || 0, (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id].map(esc).join(','));
+        lines.push([c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '', info.name || '', info.email || '', info.property_ref || '', c.agent_name || '', c.disposition || '', c.duration_seconds || 0, (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id].map(esc).join(','));
       }
       const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
@@ -155,8 +154,7 @@ export default function CallHistory() {
 
   return (
     <div>
-      <PageHeader title="Call History" description="Every call across your workspaces — click a row for the recording & transcript"
-        actions={<WorkspaceSelect workspaces={workspaces} value={ws} onChange={setWs} />} />
+      <PageHeader title="Call History" description="Every call in this workspace — click a row for the recording & transcript" />
 
       <SectionCard title="Filters" description={`${total.toLocaleString()} call${total === 1 ? '' : 's'} match the current filters`} className="mb-4"
         action={<div className="flex items-center gap-2">
@@ -251,8 +249,13 @@ export default function CallHistory() {
                       {isVisible('direction') && <td className="px-3 py-2.5"><span className="inline-flex items-center gap-1.5 text-xs">{inbound ? <PhoneIncoming className="h-3.5 w-3.5 text-emerald-600" /> : <PhoneOutgoing className="h-3.5 w-3.5 text-brand" />}{inbound ? 'Inbound' : 'Outbound'}</span></td>}
                       {isVisible('contact') && (() => { const info = resolveInfo(contact); return (
                         <td className="px-3 py-2.5">
-                          <div className="whitespace-nowrap font-mono text-xs text-ink">{contact || '—'}</div>
-                          {info?.name && <div className="text-xs font-semibold text-brand">{info.name}</div>}
+                          {info?.name
+                            ? (info.lead_id
+                                ? <button onClick={(e) => { e.stopPropagation(); nav(`/leads/${encodeURIComponent(info.lead_id)}`); }} className="text-xs font-semibold text-brand hover:underline">{info.name}</button>
+                                : <div className="text-xs font-semibold text-ink">{info.name}</div>)
+                            : <div className="text-xs font-semibold text-slate-400">Unknown</div>}
+                          <div className="whitespace-nowrap font-mono text-[11px] text-slate-500">{contact || '—'}</div>
+                          {info?.email && <div className="max-w-[200px] truncate text-[10px] text-slate-400">{info.email}</div>}
                           {info?.property_ref && <div className="max-w-[200px] truncate text-[10px] text-slate-400">{info.property_ref}</div>}
                         </td>
                       ); })()}
