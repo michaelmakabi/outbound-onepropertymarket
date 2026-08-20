@@ -229,6 +229,11 @@ export const opm = {
   // Resolve phone numbers → matched CRM contact { name, email, lead_id, property_ref } (last-10 keyed),
   // scoped to the active workspace. Powers the name/email + lead link on Call History and Call Detail.
   resolveContacts: (phones: string[]) => opmCampaignCall('resolve_contacts', { method: 'POST', body: { phones } }),
+  // Reliability: read / toggle Retell "Stable Server" routing for a workspace. When ON, that tenant's
+  // outbound calls + preflight probe route through Retell's stable cluster. The toggle only changes
+  // routing — the stable cluster must first be enabled on that Retell account by Retell support.
+  dialerConfig: (workspace?: string) => opmCampaignCall('dialer_config', workspace ? { params: { workspace } } : {}),
+  setStableServer: (on: boolean, workspace?: string) => opmCampaignCall('set_stable_server', { method: 'POST', ...(workspace ? { params: { workspace } } : {}), body: { stable_server: on } }),
   // Rich workspace call analytics (volume, dispositions, agents, cost, pickup/voicemail, duration,
   // daily trend, recent) computed from `calls`. `workspace` may be a comma-joined slug list;
   // from/to are epoch-ms bounds on start_timestamp. Authorized per the caller's workspace access.
