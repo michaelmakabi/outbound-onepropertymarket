@@ -17,7 +17,15 @@ const STATUS_PILL: Record<string, string> = {
   dripping: 'bg-amber-100 text-amber-700', throttled: 'bg-orange-100 text-orange-700',
   completed: 'bg-emerald-100 text-emerald-700', paused: 'bg-slate-200 text-slate-600',
   failed: 'bg-red-100 text-red-700', canceled: 'bg-slate-200 text-slate-500',
+  scheduled: 'bg-indigo-100 text-indigo-700',
 };
+
+// Local now (+5 min) formatted for an <input type="datetime-local"> min attribute (prevents past times).
+function minLocalDateTime() {
+  const d = new Date(Date.now() + 5 * 60000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 // Shared, generously-sized button styles for the launch wizard footer + actions.
 const BTN_GHOST = 'inline-flex items-center gap-2 rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-surface disabled:opacity-40';
@@ -28,7 +36,7 @@ const STEP_INTRO: { title: string; desc: string }[] = [
   { title: 'Choose a workspace', desc: 'Pick which workspace this campaign belongs to. Its leads, tags and analytics are all scoped here.' },
   { title: 'Pick your AI voice agent', desc: 'Select the AI agent that will place and handle every call in this campaign.' },
   { title: 'Build your call list', desc: 'Add leads with a smart list, search & select, or import a fresh file. Then choose how many numbers to dial per lead.' },
-  { title: 'Name it & review', desc: 'Give the campaign a name and review the projected calls, cost and timing before you launch.' },
+  { title: 'Name it & review', desc: 'Give the campaign a name, choose to launch now or schedule it, and review the projected calls, cost and timing.' },
 ];
 
 export default function OpmCampaigns() {
@@ -134,7 +142,7 @@ export default function OpmCampaigns() {
                       <td className="px-3 py-2.5"><span className="font-semibold text-ink">{c.name}</span><div className="text-[11px] text-slate-400">{c.slug}</div></td>
                       {isSuper && <td className="px-3 py-2.5 text-slate-600">{wsName[c.workspace] || c.workspace}</td>}
                       <td className="max-w-[160px] truncate px-3 py-2.5 text-slate-600">{c.agent_name || '—'}</td>
-                      <td className="px-3 py-2.5"><span className={`pill ${STATUS_PILL[c.status] || 'bg-slate-100 text-slate-600'}`}>{c.status}</span>{c.status === 'throttled' ? <div className="text-[10px] text-orange-600">numbers maxed · resumes next day</div> : null}</td>
+                      <td className="px-3 py-2.5"><span className={`pill ${STATUS_PILL[c.status] || 'bg-slate-100 text-slate-600'}`}>{c.status}</span>{c.status === 'throttled' ? <div className="text-[10px] text-orange-600">numbers maxed · resumes next day</div> : null}{c.status === 'scheduled' && c.scheduled_at ? <div className="text-[10px] text-indigo-600">launches {new Date(c.scheduled_at).toLocaleString()}</div> : null}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-xs">{num(launched)} / {num(total)}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-xs text-emerald-600">{num(r.answered || 0)}</td>
                       <td className="px-3 py-2.5 text-right font-mono">{fmt.money((r.cost_cents || 0) / 100)}</td>
@@ -196,6 +204,9 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
 
   const [dialMode, setDialMode] = useState<'primary' | 'all_numbers'>('primary');
   const [name, setName] = useState('');
+  // Launch timing: 'now' starts immediately; 'schedule' holds the campaign until scheduleAt.
+  const [launchMode, setLaunchMode] = useState<'now' | 'schedule'>('now');
+  const [scheduleAt, setScheduleAt] = useState(''); // <input type="datetime-local"> value (local time)
 
   // Pre-flight + projection.
   const [preflight, setPreflight] = useState<any>(null);
@@ -338,12 +349,16 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
   }, [step, ws, agentId, dialMode, selected.size]);
 
   const preflightOk = !!preflight?.ok;
+  // When scheduling, require a valid future time before the button enables.
+  const scheduleReady = launchMode === 'now' || (!!scheduleAt && new Date(scheduleAt).getTime() > Date.now());
 
   const launch = async () => {
-    if (busy || !preflightOk) return;
+    if (busy || !preflightOk || !scheduleReady) return;
     setErr(''); setBusy(true);
     try {
-      const r = await opm.campaignLaunch({ workspace: ws, name: name.trim(), agent_id: agentId, agent_name: agentName, lead_ids: [...selected], dial_mode: dialMode, timezone });
+      const payload: any = { workspace: ws, name: name.trim(), agent_id: agentId, agent_name: agentName, lead_ids: [...selected], dial_mode: dialMode, timezone };
+      if (launchMode === 'schedule' && scheduleAt) payload.scheduled_at = new Date(scheduleAt).toISOString();
+      const r = await opm.campaignLaunch(payload);
       onLaunched(r?.campaign?.id);
     } catch (e: any) { setErr(String(e?.message || e)); setBusy(false); }
   };
@@ -500,6 +515,27 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
               <div className="flex justify-between"><span className="text-slate-500">Dial mode</span><span className="font-semibold text-ink">{dialMode === 'all_numbers' ? 'All numbers on each lead' : 'Primary number only'}</span></div>
             </div>
 
+            {/* When to launch: now or scheduled */}
+            <div>
+              <div className="mb-2 text-base font-bold text-ink">When should this campaign start?</div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button type="button" onClick={() => setLaunchMode('now')} className={`rounded-2xl border-2 p-4 text-left transition ${launchMode === 'now' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
+                  <div className="flex items-center gap-2 text-base font-bold text-ink"><PhoneOutgoing className="h-5 w-5 text-brand" /> Launch now</div>
+                  <div className="mt-1.5 text-sm text-slate-500">Start dialing right away (within the 9am–8pm window).</div>
+                </button>
+                <button type="button" onClick={() => setLaunchMode('schedule')} className={`rounded-2xl border-2 p-4 text-left transition ${launchMode === 'schedule' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
+                  <div className="flex items-center gap-2 text-base font-bold text-ink"><Clock className="h-5 w-5 text-brand" /> Schedule for later</div>
+                  <div className="mt-1.5 text-sm text-slate-500">Pick a future date &amp; time — it starts automatically then.</div>
+                </button>
+              </div>
+              {launchMode === 'schedule' && (
+                <div className="mt-3">
+                  <input type="datetime-local" className="input !py-3 text-base" value={scheduleAt} min={minLocalDateTime()} onChange={(e) => setScheduleAt(e.target.value)} />
+                  <p className="mt-2 text-sm text-slate-500">{scheduleAt ? `Starts ${new Date(scheduleAt).toLocaleString()} (your local time). Dialing still respects each lead's 9am–8pm window.` : 'Choose when the campaign should begin. It stays idle until then, then starts on its own — you can cancel or launch it early anytime.'}</p>
+                </div>
+              )}
+            </div>
+
             {/* Projection panel */}
             <ProjectionPanel loading={projectionLoading} error={projectionErr} projection={projection} fallbackCalls={estimatedCalls} />
 
@@ -526,7 +562,7 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
           <button className={BTN_GHOST} disabled={step === 0 || busy} onClick={() => setStep((s) => s - 1)}><ArrowLeft className="h-4 w-4" /> Back</button>
           {step < 3
             ? <button className={BTN_PRIMARY} disabled={!canNext} onClick={() => setStep((s) => s + 1)}>Next <ArrowRight className="h-4 w-4" /></button>
-            : <button className="inline-flex items-center gap-2 rounded-xl bg-brand px-7 py-3 text-base font-bold text-white shadow-sm hover:bg-brand/90 disabled:opacity-40" disabled={busy || !name.trim() || selected.size === 0 || preflightLoading || !preflightOk} onClick={launch}>{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <PhoneOutgoing className="h-5 w-5" />} Launch {num(estimatedCalls)} call{estimatedCalls === 1 ? '' : 's'}</button>}
+            : <button className="inline-flex items-center gap-2 rounded-xl bg-brand px-7 py-3 text-base font-bold text-white shadow-sm hover:bg-brand/90 disabled:opacity-40" disabled={busy || !name.trim() || selected.size === 0 || preflightLoading || !preflightOk || !scheduleReady} onClick={launch}>{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : launchMode === 'schedule' ? <Clock className="h-5 w-5" /> : <PhoneOutgoing className="h-5 w-5" />} {launchMode === 'schedule' ? 'Schedule campaign' : `Launch ${num(estimatedCalls)} call${estimatedCalls === 1 ? '' : 's'}`}</button>}
         </div>
       </div>
 
