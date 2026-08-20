@@ -1,35 +1,41 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { useWorkspace } from '../lib/workspace';
+import { useWorkspace, ALL_WORKSPACES } from '../lib/workspace';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare, Layers,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
 function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
-  const { workspaces, active, activeName, setActive } = useWorkspace();
+  const { workspaces, active, activeName, viewAll, setActive } = useWorkspace();
   const [open, setOpen] = useState(false);
   if (workspaces.length <= 1) return null; // single tenant → nothing to switch
   return (
     <div className="relative mb-3">
       <button onClick={() => setOpen((o) => !o)} title="Switch workspace"
         className={`flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-left text-sm font-semibold text-white hover:bg-white/10 ${collapsed ? 'justify-center' : ''}`}>
-        <Building2 className="h-4 w-4 shrink-0 text-slate-300" />
+        {viewAll ? <Layers className="h-4 w-4 shrink-0 text-slate-300" /> : <Building2 className="h-4 w-4 shrink-0 text-slate-300" />}
         {!collapsed && <><span className="min-w-0 flex-1 truncate">{activeName || 'Workspace'}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400" /></>}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute left-0 top-full z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded-lg border border-line bg-white py-1 shadow-xl">
+            {/* All-Workspaces: one aggregate view across every tenant (analytics span all). */}
+            <button onClick={() => { setOpen(false); if (!viewAll) setActive(ALL_WORKSPACES); }}
+              className="flex w-full items-center gap-2 border-b border-line px-3 py-1.5 text-left text-sm font-semibold text-ink hover:bg-surface">
+              <span className="w-4 shrink-0">{viewAll && <Check className="h-3.5 w-3.5 text-brand" />}</span>
+              <span className="flex items-center gap-1.5 truncate"><Layers className="h-3.5 w-3.5 text-slate-400" /> All Workspaces</span>
+            </button>
             {workspaces.map((w) => (
-              <button key={w.slug} onClick={() => { setOpen(false); if (w.slug !== active) setActive(w.slug); }}
+              <button key={w.slug} onClick={() => { setOpen(false); if (viewAll || w.slug !== active) setActive(w.slug); }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-ink hover:bg-surface">
-                <span className="w-4 shrink-0">{w.slug === active && <Check className="h-3.5 w-3.5 text-brand" />}</span>
+                <span className="w-4 shrink-0">{!viewAll && w.slug === active && <Check className="h-3.5 w-3.5 text-brand" />}</span>
                 <span className="truncate">{w.display_name}</span>
               </button>
             ))}
@@ -50,7 +56,7 @@ const NAV = [
   { to: '/workspaces', label: 'Workspaces', icon: Building2, op: true },
   { to: '/dispositions', label: 'Dispositions', icon: PieChart },
   { to: '/calls', label: 'Call History', icon: PhoneCall },
-  { to: '/compare', label: 'Compare', icon: GitCompare, op: true },
+  { to: '/compare', label: 'Compare', icon: GitCompare, op: true, allOnly: true },
   { to: '/agents', label: 'Agents & Models', icon: Bot, op: true },
   { to: '/ai-agents', label: 'AI Agents', icon: Headset },
   { to: '/test-ai', label: 'Test AI', icon: PhoneOutgoing },
@@ -67,7 +73,7 @@ const COLLAPSE_KEY = 'opm_sidebar_collapsed';
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout, isAdmin, impersonating, stopImpersonation } = useAuth();
-  const { active: activeWs, roles, isStaff, ownsActive } = useWorkspace();
+  const { active: activeWs, roles, isStaff, ownsActive, viewAll } = useWorkspace();
   const isCustomer = user?.role === 'user';
   // Lead Routing is management tooling: owner/admin/manager (workspace role) or platform admin/staff.
   const canRoute = isAdmin || isStaff || ownsActive || (activeWs ? ['owner', 'admin', 'manager'].includes(roles[activeWs] || '') : false);
@@ -112,7 +118,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </div>
       <WorkspaceSwitcher collapsed={collapsed} />
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto">
-        {NAV.filter((n) => !isCustomer || !n.op).map(item)}
+        {NAV.filter((n) => !isCustomer || !n.op).filter((n) => !n.allOnly || viewAll).map(item)}
         {canRoute && item({ to: '/routing', label: 'Lead Routing', icon: Waypoints })}
         {canRoute && item({ to: '/notifications', label: 'Notifications', icon: Bell })}
         {isCustomer && item({ to: '/account', label: 'Account & Billing', icon: CreditCard })}
