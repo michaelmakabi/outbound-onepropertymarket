@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   Loader2, LucideIcon, SlidersHorizontal, ArrowUp, ArrowDown, ChevronsUpDown,
-  Search, Check, X, RefreshCw, Bookmark, Plus, Play, Pause,
+  Search, Check, X, RefreshCw, Bookmark, Plus, Play, Pause, Calendar as CalendarIcon,
 } from 'lucide-react';
 import { useFilters, RangePreset } from '../lib/filters';
 import { OUTCOME_ORDER, outcomeLabel, outcomeColor, num as fnum, pct as fpct } from '../lib/format';
@@ -125,21 +125,57 @@ const PRESETS: { key: RangePreset; label: string }[] = [
 ];
 
 export function DateRangePicker() {
-  const { preset, setPreset } = useFilters();
+  const { preset, setPreset, customStart, customEnd, setCustom } = useFilters();
+  const [open, setOpen] = useState(false);
+  const [s, setS] = useState(customStart);
+  const [e, setE] = useState(customEnd);
+  useEffect(() => { setS(customStart); setE(customEnd); }, [customStart, customEnd]);
+  const apply = () => { if (s && e) { setCustom(s, e); setOpen(false); } };
   return (
-    <div className="inline-flex items-center rounded-lg border border-line bg-white p-0.5">
-      {PRESETS.map((p) => (
+    <div className="relative inline-flex items-center gap-1.5">
+      <div className="inline-flex items-center rounded-lg border border-line bg-white p-0.5">
+        {PRESETS.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => { setPreset(p.key); setOpen(false); }}
+            className={cx(
+              'rounded-md px-3 py-1.5 text-xs font-semibold transition',
+              preset === p.key ? 'bg-brand text-white' : 'text-slate-600 hover:bg-surface',
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
         <button
-          key={p.key}
-          onClick={() => setPreset(p.key)}
+          onClick={() => setOpen((o) => !o)}
+          title="Custom date range"
           className={cx(
-            'rounded-md px-3 py-1.5 text-xs font-semibold transition',
-            preset === p.key ? 'bg-brand text-white' : 'text-slate-600 hover:bg-surface',
+            'ml-0.5 inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold transition',
+            preset === 'custom' ? 'bg-brand text-white' : 'text-slate-600 hover:bg-surface',
           )}
         >
-          {p.label}
+          <CalendarIcon className="h-3.5 w-3.5" />
+          {preset === 'custom' && customStart && customEnd ? `${customStart} → ${customEnd}` : 'Custom'}
         </button>
-      ))}
+      </div>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full z-40 mt-1 w-72 rounded-xl border border-line bg-white p-3 shadow-xl">
+            <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Custom date range</div>
+            <label className="mb-2 block text-xs font-semibold text-slate-500">From
+              <input type="date" value={s} max={e || undefined} onChange={(ev) => setS(ev.target.value)} className="input mt-1 block !py-1.5 text-sm" />
+            </label>
+            <label className="mb-3 block text-xs font-semibold text-slate-500">To
+              <input type="date" value={e} min={s || undefined} onChange={(ev) => setE(ev.target.value)} className="input mt-1 block !py-1.5 text-sm" />
+            </label>
+            <div className="flex items-center justify-end gap-2">
+              <button className="btn-ghost !py-1.5 text-xs" onClick={() => setOpen(false)}>Cancel</button>
+              <button className="btn-primary !py-1.5 text-xs disabled:opacity-40" disabled={!s || !e} onClick={apply}>Apply</button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
