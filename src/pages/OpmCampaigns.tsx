@@ -8,8 +8,6 @@ import { PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState } from '../c
 import { num } from '../lib/format';
 import { Radio, Plus, PhoneOutgoing, Users, CheckCircle2, Loader2, ChevronRight, ChevronLeft, DollarSign, Search, X, ArrowRight, ArrowLeft, Upload, ListFilter, AlertTriangle, Clock, Phone, Timer } from 'lucide-react';
 
-// The Retell dialer workspace whose agents/keys place these outbound calls (matches the bulk launcher).
-const DIAL_WORKSPACE = '1propertymarket';
 const LEADS_PAGE_SIZE = 50;
 
 const STATUS_PILL: Record<string, string> = {
@@ -157,7 +155,7 @@ export default function OpmCampaigns() {
         )}
       </SectionCard>
 
-      {wizard && <LaunchWizard workspaces={workspaces || []} lockedWorkspace={viewAll ? undefined : (active || undefined)} onClose={() => setWizard(false)} onLaunched={(id) => { setWizard(false); load(); if (id) nav(`/campaigns/${id}`); }} />}
+      {wizard && <LaunchWizard workspaces={workspaces || []} lockedWorkspace={active || undefined} onClose={() => setWizard(false)} onLaunched={(id) => { setWizard(false); load(); if (id) nav(`/campaigns/${id}`); }} />}
     </div>
   );
 }
@@ -221,8 +219,26 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  // Agents come from the shared dialer workspace (where the outbound keys + agents live).
-  useEffect(() => { testai.agents(DIAL_WORKSPACE).then((d: any) => { const list = d.agents || []; setAgents(list); if (list.length) setAgentId(list[0].agent_id); }).catch(() => {}); }, []);
+  // Agents come from THIS workspace's own dialer account (its Retell subaccount) — never the shared
+  // 1PM account. We resolve the tenant's dialer routing first (dialer_slug + the agent configured to
+  // actually place its calls), list that account's agents, and preselect the configured agent so the
+  // wizard shows exactly the agents that will dial for this workspace.
+  const loadAgents = useCallback((slug: string) => {
+    if (!slug) { setAgents([]); setAgentId(''); return; }
+    opm.dialerConfig(slug).then((cfg: any) => {
+      const dialerSlug = cfg?.dialer_slug || slug;
+      const configured = cfg?.agent_id || '';
+      testai.agents(dialerSlug).then((d: any) => {
+        const list = d.agents || [];
+        setAgents(list);
+        const pick = configured && list.some((a: any) => a.agent_id === configured) ? configured : (list[0]?.agent_id || '');
+        setAgentId(pick);
+      }).catch(() => { setAgents([]); setAgentId(''); });
+    }).catch(() => {
+      // No dialer config row — fall back to listing the workspace's own account directly.
+      testai.agents(slug).then((d: any) => { const list = d.agents || []; setAgents(list); if (list.length) setAgentId(list[0].agent_id); }).catch(() => { setAgents([]); setAgentId(''); });
+    });
+  }, []);
 
   const phoneCountById = useMemo(() => {
     const m: Record<string, number> = {};
@@ -262,6 +278,7 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
   const onPickWorkspace = (slug: string) => {
     setWs(slug); setSelected(new Set()); setActiveLists(new Set()); setSearch(''); setPage(1);
     setPreflight(null); setProjection(null);
+    loadAgents(slug);
     if (slug) { fetchLeads(slug); loadLists(slug); } else { setLeads([]); setLists([]); }
   };
 
@@ -414,7 +431,7 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
                 {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
               </select>
             )}
-            <p className="mt-3 text-sm text-slate-500">{lockedWorkspace ? 'Locked to your active workspace — leads, tagging and analytics all scope here. Switch workspaces from the sidebar to launch for a different tenant.' : 'Leads, tagging and analytics all scope to this workspace. Calls are placed via the shared 1PropertyMarket dialer.'}</p>
+            <p className="mt-3 text-sm text-slate-500">{lockedWorkspace ? 'Locked to your active workspace — leads, tagging and analytics all scope here. Switch workspaces from the sidebar to launch for a different tenant.' : 'Leads, tagging and analytics all scope to this workspace. Calls are placed via this workspace’s configured dialer account.'}</p>
           </div>
         )}
 
@@ -425,7 +442,7 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
               {!agents.length && <option value="">Loading agents…</option>}
               {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
             </select>
-            <p className="mt-3 text-sm text-slate-500">This agent's script, voice and assigned phone numbers will be used for every call in the campaign.</p>
+            <p className="mt-3 text-sm text-slate-500">These are the agents on this workspace’s own dialer account. Its script, voice and assigned phone numbers will be used for every call in the campaign.</p>
           </div>
         )}
 
