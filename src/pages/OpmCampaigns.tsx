@@ -172,6 +172,7 @@ function DialingPolicyCard() {
         <li className="flex gap-2"><span className="text-brand">•</span> Dialing <span className="font-semibold text-ink">rotates across the agent's assigned numbers</span> to stay healthy.</li>
         <li className="flex gap-2"><span className="text-brand">•</span> Each number places at most <span className="font-semibold text-ink">100 calls per day</span>.</li>
         <li className="flex gap-2"><span className="text-brand">•</span> Calls only go out between <span className="font-semibold text-ink">9:00am and 8:00pm</span> in the lead's local time.</li>
+        <li className="flex gap-2"><span className="text-brand">•</span> Leads are dialed <span className="font-semibold text-ink">East Coast first, then westward</span> — by area code, so each person is reached during their own local hours.</li>
         <li className="flex gap-2"><span className="text-brand">•</span> If every number is maxed for the day it <span className="font-semibold text-ink">auto-pauses and resumes the next morning</span> — no action needed.</li>
       </ul>
     </div>
@@ -349,8 +350,14 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
   }, [step, ws, agentId, dialMode, selected.size]);
 
   const preflightOk = !!preflight?.ok;
-  // When scheduling, require a valid future time before the button enables.
-  const scheduleReady = launchMode === 'now' || (!!scheduleAt && new Date(scheduleAt).getTime() > Date.now());
+  // Calls only go out 9am-8pm local, so a scheduled START must also fall inside that window.
+  const BH_START = 9, BH_END = 20;
+  const schedDate = scheduleAt ? new Date(scheduleAt) : null;
+  const schedHour = schedDate ? schedDate.getHours() : null;
+  const scheduleHourOk = schedHour == null || (schedHour >= BH_START && schedHour < BH_END);
+  const scheduleFuture = !!scheduleAt && !!schedDate && schedDate.getTime() > Date.now();
+  // When scheduling, require a valid FUTURE time that is also inside calling hours.
+  const scheduleReady = launchMode === 'now' || (scheduleFuture && scheduleHourOk);
 
   const launch = async () => {
     if (busy || !preflightOk || !scheduleReady) return;
@@ -529,9 +536,22 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
                 </button>
               </div>
               {launchMode === 'schedule' && (
-                <div className="mt-3">
+                <div className="mt-3 space-y-2">
                   <input type="datetime-local" className="input !py-3 text-base" value={scheduleAt} min={minLocalDateTime()} onChange={(e) => setScheduleAt(e.target.value)} />
-                  <p className="mt-2 text-sm text-slate-500">{scheduleAt ? `Starts ${new Date(scheduleAt).toLocaleString()} (your local time). Dialing still respects each lead's 9am–8pm window.` : 'Choose when the campaign should begin. It stays idle until then, then starts on its own — you can cancel or launch it early anytime.'}</p>
+                  <p className="text-xs text-slate-500">Your timezone: <span className="font-semibold text-ink">{timezone}</span> (auto-detected). Times are shown and scheduled in your local timezone.</p>
+                  {scheduleAt && !scheduleHourOk ? (
+                    <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>Campaigns can only start between <span className="font-semibold">9:00 AM and 8:00 PM</span>. Please pick a start time inside that window.</span>
+                    </div>
+                  ) : scheduleAt && !scheduleFuture ? (
+                    <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>Please pick a start time in the future.</span>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">{scheduleAt ? `Starts ${new Date(scheduleAt).toLocaleString()}. Then leads dial East Coast first and move West — each person is called within their own 9am–8pm local window.` : 'Choose when the campaign should begin (between 9:00 AM and 8:00 PM). It stays idle until then, then starts on its own — you can cancel or launch it early anytime.'}</p>
+                  )}
                 </div>
               )}
             </div>
