@@ -480,19 +480,16 @@ export default function LeadDetail() {
                 <input value={newNum.phone} onChange={(e) => setNewNum((n) => ({ ...n, phone: e.target.value }))} placeholder="Phone number" className="input h-8 w-full text-xs" />
                 <div className="flex gap-1.5">
                   <input value={newNum.phone_label} onChange={(e) => setNewNum((n) => ({ ...n, phone_label: e.target.value }))} placeholder="Label" className="input h-8 flex-1 text-xs" />
-                  <select value={newNum.contact_kind} onChange={(e) => setNewNum((n) => ({ ...n, contact_kind: e.target.value }))} className="input h-8 flex-1 text-xs">
-                    <option value="owner">Owner</option>
-                    <option value="relative">Relative</option>
-                  </select>
+                  <select value={newNum.contact_kind} onChange={(e) => setNewNum((n) => ({ ...n, contact_kind: e.target.value }))} className="input h-8 flex-1 text-xs"><option value="owner">Owner</option><option value="relative">Relative</option></select>
                 </div>
-                {newNum.contact_kind === 'relative' && <input value={newNum.related_name} onChange={(e) => setNewNum((n) => ({ ...n, related_name: e.target.value }))} placeholder="Related name" className="input h-8 w-full text-xs" />}
+                {newNum.contact_kind === 'relative' && <input value={newNum.related_name} onChange={(e) => setNewNum((n) => ({ ...n, related_name: e.target.value }))} placeholder="Related person's name" className="input h-8 w-full text-xs" />}
                 <div className="flex justify-end gap-1">
                   <button onClick={() => setAddNumOpen(false)} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-white">Cancel</button>
-                  <button onClick={addNumber} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110"><Plus className="h-3.5 w-3.5" /> Add</button>
+                  <button onClick={addNumber} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:brightness-110"><Plus className="h-3.5 w-3.5" /> Add</button>
                 </div>
               </div>
             ) : (
-              <button onClick={() => setAddNumOpen(true)} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"><Plus className="h-3.5 w-3.5" /> Add number</button>
+              <button onClick={() => setAddNumOpen(true)} className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line py-1.5 text-xs font-semibold text-slate-500 transition hover:border-brand hover:text-brand"><Plus className="h-3.5 w-3.5" /> Add number</button>
             )}
           </Card>
 
@@ -584,96 +581,147 @@ export default function LeadDetail() {
               </div>
               {moveOpen && (
                 <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface/60 p-2.5">
-                  <select value={mp} onChange={(e) => { setMp(e.target.value); setMs(''); }} className="input h-8 w-full text-xs">
-                    <option value="">Select pipeline…</option>
-                    {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                  <select value={ms} onChange={(e) => setMs(e.target.value)} disabled={!movePipeline} className="input h-8 w-full text-xs disabled:opacity-50">
-                    <option value="">Select stage…</option>
-                    {(movePipeline?.stages || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                  <div className="flex justify-end gap-1">
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Pipeline</label>
+                    <select value={mp} onChange={(e) => { setMp(e.target.value); const p = pipelines.find((x) => String(x.id) === e.target.value); setMs(p?.stages?.[0]?.id ?? ''); }} className="input w-full text-sm">
+                      {pipelines.length === 0 && <option value="">Loading…</option>}
+                      {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Stage</label>
+                    <select value={ms} onChange={(e) => setMs(e.target.value)} className="input w-full text-sm">
+                      {(movePipeline?.stages || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex justify-end gap-2">
                     <button onClick={() => setMoveOpen(false)} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-white">Cancel</button>
-                    <button onClick={doMove} disabled={moving || !mp || !ms} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{moving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Move</button>
+                    <button onClick={doMove} disabled={moving || !mp || !ms} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
+                      {moving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
+                    </button>
                   </div>
                 </div>
               )}
             </div>
-            <EditRow k="Our Value" value={lead.deal_price} type="number" display={money(lead.deal_price)} onSave={(v) => saveLead({ deal_price: v })} />
-            <EditRow k="Lead Source" value={lead.lead_source} onSave={(v) => saveLead({ lead_source: v })} />
-            <Row k="Property" v={lead.property_ref || '—'} />
-            {/* Address editor */}
-            <div className="border-b border-dashed border-line py-2">
-              <div className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Home className="h-3 w-3" /> Address</div>
-              <div className="grid grid-cols-1 gap-1.5">
-                <input value={addr.Street} onChange={(e) => setAddr((a) => ({ ...a, Street: e.target.value }))} onBlur={saveAddr} placeholder="Street" className="input h-8 w-full text-xs" />
-                <div className="grid grid-cols-3 gap-1.5">
-                  <input value={addr.City} onChange={(e) => setAddr((a) => ({ ...a, City: e.target.value }))} onBlur={saveAddr} placeholder="City" className="input h-8 text-xs" />
-                  <input value={addr.State} onChange={(e) => setAddr((a) => ({ ...a, State: e.target.value }))} onBlur={saveAddr} placeholder="State" className="input h-8 text-xs" />
-                  <input value={addr.Zip} onChange={(e) => setAddr((a) => ({ ...a, Zip: e.target.value }))} onBlur={saveAddr} placeholder="Zip" className="input h-8 text-xs" />
-                </div>
-              </div>
-            </div>
+
             {/* Tags */}
-            <div className="py-2">
-              <div className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Tag className="h-3 w-3" /> Tags</div>
+            <div className="border-b border-dashed border-line py-2">
+              <div className="mb-1.5 flex items-center gap-1.5 text-slate-500"><Tag className="h-3 w-3" /> Tags</div>
               <div className="flex flex-wrap items-center gap-1.5">
+                {tags.length === 0 && <span className="text-xs text-slate-400">No tags</span>}
                 {tags.map((t) => (
                   <span key={t} className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs font-semibold text-brand">
-                    {t}<button onClick={() => removeTag(t)} className="text-brand/60 hover:text-brand"><X className="h-3 w-3" /></button>
+                    {t}
+                    <button onClick={() => removeTag(t)} title="Remove tag" className="text-brand/60 hover:text-brand"><X className="h-3 w-3" /></button>
                   </span>
                 ))}
-                <input value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') addTag(); }} placeholder="+ tag" className="input h-7 w-20 text-xs" />
+              </div>
+              <div className="mt-1.5 flex items-center gap-1">
+                <input
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
+                  placeholder="Add tag + Enter"
+                  className="input h-8 w-full text-xs"
+                />
+                <button onClick={addTag} disabled={!tagInput.trim()} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line text-slate-500 transition hover:border-brand hover:text-brand disabled:opacity-40"><Plus className="h-4 w-4" /></button>
               </div>
             </div>
-          </Card>
 
-          {/* Background */}
-          <Card title="Background">
-            <textarea value={bg} onChange={(e) => setBg(e.target.value)} onBlur={saveBg} rows={4} placeholder="Notes about this seller / property…" className="input w-full resize-y text-sm" />
-          </Card>
+            {/* Editable core rows */}
+            <dl>
+              <EditRow k="Our Value" type="number" value={lead.deal_price} display={money(lead.deal_price)} onSave={(v) => saveLead({ deal_price: v })} />
+              <EditRow k="Listing price" type="number" value={lead.listing_price} display={money(lead.listing_price)} onSave={(v) => saveLead({ listing_price: v })} />
+              <EditRow k="Assigned" value={lead.assigned_to} onSave={(v) => saveLead({ assigned_to: v })} />
+              <EditRow k="Source" value={lead.lead_source} onSave={(v) => saveLead({ lead_source: v })} />
+              <EditRow k="Property ref" value={lead.property_ref} onSave={(v) => saveLead({ property_ref: v })} />
+              <EditRow k="Email" value={lead.emails?.[0]?.email || lead.emails?.[0] || ''} onSave={(v) => saveLead({ emails: v ? [v] : [] })} />
+            </dl>
 
-          {/* Custom fields */}
-          {customFields.length > 0 && (
-            <Card title="Custom Fields">
-              <div className="space-y-2">
-                {customFields.map((f) => (
-                  <div key={f.key} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="shrink-0 text-slate-500">{f.label || f.key}</span>
-                    <input value={customDraft[f.key] ?? ''} onChange={(e) => setCustomDraft((d) => ({ ...d, [f.key]: e.target.value }))} className="input h-8 w-40 text-right text-xs" />
-                  </div>
-                ))}
-                <button onClick={saveCustom} disabled={savingCustom} className="mt-1 inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{savingCustom ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save custom fields</button>
+            {/* Property address (structured) */}
+            <div className="mt-2 border-t border-line pt-2">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Home className="h-3 w-3" /> Property address</div>
+              <input value={addr.Street} onChange={(e) => setAddr((a) => ({ ...a, Street: e.target.value }))} placeholder="Street" className="input h-8 w-full text-xs" />
+              <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                <input value={addr.City} onChange={(e) => setAddr((a) => ({ ...a, City: e.target.value }))} placeholder="City" className="input h-8 text-xs" />
+                <input value={addr.State} onChange={(e) => setAddr((a) => ({ ...a, State: e.target.value }))} placeholder="State" className="input h-8 text-xs" />
+                <input value={addr.Zip} onChange={(e) => setAddr((a) => ({ ...a, Zip: e.target.value }))} placeholder="Zip" className="input h-8 text-xs" />
               </div>
-            </Card>
-          )}
+              <div className="mt-1.5 flex justify-end">
+                <button onClick={saveAddr} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:brightness-110"><Save className="h-3.5 w-3.5" /> Save address</button>
+              </div>
+            </div>
+
+            {/* Background */}
+            <div className="mt-2 border-t border-line pt-2">
+              <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Background</div>
+              <textarea value={bg} onChange={(e) => setBg(e.target.value)} rows={3} placeholder="Notes about this lead…" className="input w-full text-xs" />
+              <div className="mt-1.5 flex justify-end">
+                <button onClick={saveBg} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:brightness-110"><Save className="h-3.5 w-3.5" /> Save background</button>
+              </div>
+            </div>
+
+            {/* Custom fields */}
+            {customFields.length > 0 && (
+              <div className="mt-2 border-t border-line pt-2">
+                <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Custom Fields</div>
+                <div className="space-y-2">
+                  {customFields.map((f) => (
+                    <div key={f.id} className="flex items-center justify-between gap-3 text-sm">
+                      <label className="shrink-0 text-slate-500">{f.label}</label>
+                      {f.field_type === 'bool' ? (
+                        <input type="checkbox" checked={!!customDraft[f.field_key]} onChange={(e) => setCustomDraft((d) => ({ ...d, [f.field_key]: e.target.checked }))} className="h-4 w-4 accent-[#1f6feb]" />
+                      ) : f.field_type === 'select' ? (
+                        <select value={customDraft[f.field_key] ?? ''} onChange={(e) => setCustomDraft((d) => ({ ...d, [f.field_key]: e.target.value }))} className="input h-8 w-40 text-xs">
+                          <option value="">—</option>
+                          {(Array.isArray(f.options) ? f.options : String(f.options || '').split(',').map((s) => s.trim()).filter(Boolean)).map((o: string) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          type={f.field_type === 'number' ? 'number' : f.field_type === 'date' ? 'date' : 'text'}
+                          value={customDraft[f.field_key] ?? ''}
+                          onChange={(e) => setCustomDraft((d) => ({ ...d, [f.field_key]: e.target.value }))}
+                          className="input h-8 w-40 text-right text-xs"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <button onClick={saveCustom} disabled={savingCustom} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
+                    {savingCustom ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save custom fields
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button onClick={() => setTab('property')} className="mt-2 text-xs font-semibold text-brand hover:underline">View all property & parcel data →</button>
+          </Card>
         </div>
 
-        {/* RIGHT column — activity + tabs */}
+        {/* RIGHT column */}
         <div className="space-y-4">
           {/* composer */}
-          <div className="rounded-2xl border border-line bg-white p-4">
-            <div className="mb-3 flex flex-wrap items-center gap-1.5">
-              {COMPOSE_TABS.map((t) => {
-                const Icon = t.icon;
-                return (
-                  <button key={t.k} onClick={() => setMode(t.k)} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${mode === t.k ? 'bg-brand text-white' : 'text-slate-500 hover:bg-surface'}`}>
-                    <Icon className="h-3.5 w-3.5" /> {t.label}
-                  </button>
-                );
-              })}
-              <button onClick={aiCallBrief} title="Copy the AI context brief for this lead" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><Sparkles className="h-3.5 w-3.5" /> Copy brief</button>
+          <div className="rounded-2xl border border-line bg-white">
+            <div className="flex items-center gap-1 border-b border-line px-2 pt-2">
+              {COMPOSE_TABS.map((t) => (
+                <button key={t.k} onClick={() => setMode(t.k)} className={`inline-flex items-center gap-1.5 rounded-t-lg px-3 py-2 text-sm font-semibold transition ${mode === t.k ? 'bg-brand/5 text-brand' : 'text-slate-500 hover:text-ink'}`}>
+                  <t.icon className="h-3.5 w-3.5" /> {t.label}
+                </button>
+              ))}
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 p-3">
               {mode === 'email' && <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="input w-full text-sm" />}
               {mode === 'call' && (
-                <select value={callOutcome} onChange={(e) => setCallOutcome(e.target.value)} className="input w-full text-sm">
-                  <option value="">Call outcome…</option>
-                  {CALL_OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <div className="flex flex-wrap gap-1.5">
+                  {CALL_OUTCOMES.map((o) => <button key={o} onClick={() => setCallOutcome(o)} className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${callOutcome === o ? 'border-brand bg-brand text-white' : 'border-line text-slate-600 hover:border-brand'}`}>{o}</button>)}
+                </div>
               )}
-              <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} placeholder={mode === 'call' ? 'Call notes (optional)…' : mode === 'email' ? 'Email body…' : mode === 'text' ? 'Text message…' : 'Write a note…'} className="input w-full resize-y text-sm" />
-              <div className="flex items-center justify-end gap-2">
+              <textarea value={body} onChange={(e) => setBody(e.target.value)}
+                placeholder={mode === 'note' ? 'Add a note… (saved with your name + timestamp)' : mode === 'email' ? 'Email body — logged to the timeline' : mode === 'text' ? 'Text message — logged to the timeline' : 'Call notes (optional)'}
+                className="input min-h-[80px] w-full resize-y text-sm" />
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">{mode === 'note' ? 'Saved as a note' : mode === 'call' ? 'Logs a call activity' : `Logs ${mode === 'email' ? 'an email' : 'a text'} touch`}</span>
                 <div className="flex gap-2">
                   {mode === 'note' && <button onClick={aiNote} disabled={saving || !body.trim()} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> AI Note</button>}
                   <button onClick={saveActivity} disabled={saving} className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{saving ? 'Saving…' : COMPOSE_TABS.find((t) => t.k === mode)!.label}</button>
