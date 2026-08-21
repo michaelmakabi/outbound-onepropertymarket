@@ -54,6 +54,13 @@ export default function OpmCampaigns() {
   const [wizard, setWizard] = useState(false);
   const [dripBusy, setDripBusy] = useState(false);
 
+  // Retail pricing: campaign costs are stored as raw hard cost. A customer (or a super_admin
+  // impersonating one) must see hard × their workspace's billing multiplier; true staff see raw cost.
+  // `apply` is false for staff, true otherwise; `mult` is keyed by workspace slug.
+  const [retail, setRetail] = useState<{ apply: boolean; mult: Record<string, number> }>({ apply: false, mult: {} });
+  useEffect(() => { opm.retailMult().then((d: any) => setRetail({ apply: !!d?.apply, mult: d?.mult || {} })).catch(() => {}); }, []);
+  const scaleCents = useCallback((cents: number, workspace: string) => (retail.apply ? Math.round((cents || 0) * (retail.mult[workspace] ?? 1)) : (cents || 0)), [retail]);
+
   const wsName = useMemo(() => Object.fromEntries((workspaces || []).map((w: any) => [w.slug, w.display_name])), [workspaces]);
 
   const load = useCallback(() => {
@@ -67,9 +74,9 @@ export default function OpmCampaigns() {
 
   const totals = useMemo(() => {
     let cost = 0, launched = 0, answered = 0, completed = 0;
-    for (const c of rows) { const r = c.rollup || {}; cost += r.cost_cents || 0; launched += r.launched || 0; answered += r.answered || 0; completed += r.completed || 0; }
+    for (const c of rows) { const r = c.rollup || {}; cost += scaleCents(r.cost_cents || 0, c.workspace); launched += r.launched || 0; answered += r.answered || 0; completed += r.completed || 0; }
     return { cost, launched, answered, completed, count: rows.length };
-  }, [rows]);
+  }, [rows, scaleCents]);
 
   const runDrip = async () => {
     setDripBusy(true);
@@ -143,7 +150,7 @@ export default function OpmCampaigns() {
                       <td className="px-3 py-2.5"><span className={`pill ${STATUS_PILL[c.status] || 'bg-slate-100 text-slate-600'}`}>{c.status}</span>{c.status === 'throttled' ? <div className="text-[10px] text-orange-600">numbers maxed · resumes next day</div> : null}{c.status === 'scheduled' && c.scheduled_at ? <div className="text-[10px] text-indigo-600">launches {new Date(c.scheduled_at).toLocaleString()}</div> : null}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-xs">{num(launched)} / {num(total)}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-xs text-emerald-600">{num(r.answered || 0)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono">{fmt.money((r.cost_cents || 0) / 100)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono">{fmt.money(scaleCents(r.cost_cents || 0, c.workspace) / 100)}</td>
                       <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-500">{c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</td>
                       <td className="px-3 py-2.5 text-right"><ChevronRight className="h-4 w-4 text-slate-300" /></td>
                     </tr>
