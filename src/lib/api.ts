@@ -218,6 +218,12 @@ export const opm = {
   campaignsList: (p: { workspace?: string; from?: string; to?: string } = {}) => opmCall('campaigns_list', { params: { workspace: p.workspace, from: p.from, to: p.to } }),
   // One campaign + its leads + KPIs (cost, pickup, voicemail, disposition breakdown) computed from `calls`.
   campaignDetail: (id: string) => opmCall('campaign_detail', { params: { id } }),
+  // Retail multiplier map for the caller (opm-campaign). Campaign costs are stored as raw hard cost;
+  // customers (and a super_admin impersonating one) must see hard × the workspace's billing multiplier,
+  // while true platform staff see the raw cost. Returns { apply:boolean, mult:{ [workspace]:number } }:
+  // `apply` is false for staff (show true cost) and true otherwise. Applied client-side on the campaign
+  // pages so we didn't have to re-emit the large `opm` function.
+  retailMult: () => opmCampaignCall('retail_mult'),
   // Super-admin: manually advance any due drip batches (same processor pg_cron calls every minute). Served by opm-campaign.
   campaignDripRun: () => opmCampaignCall('campaign_drip_run', { method: 'POST' }),
   // ---- Campaign lifecycle controls (opm-campaign): pause / resume / cancel a running campaign. ----
