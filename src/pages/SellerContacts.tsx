@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState, useCallback, Fragment } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { opm, testai } from '../lib/api';
+import { opm, testai, tokenStore, workspaceStore } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
 import CustomFieldsModal from '../components/CustomFieldsModal';
 import SmartLists from '../components/SmartLists';
 import {
-  PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews,
+  PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews, AudioPlayer,
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
 } from '../components/dash';
-import { num } from '../lib/format';
+import { num, dateTime, secs, humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
+import { StageIcon } from '../lib/statusIcons';
 import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star, UserCheck } from 'lucide-react';
 
 const PAGE_KEY = 'opm-crm';
@@ -27,6 +28,21 @@ function fmtNum(n: string) {
 }
 const digits10 = (n: string) => String(n || '').replace(/\D/g, '').slice(-10);
 
+// Last-communication resolver (opm-campaign `last_calls`): lead_id -> most recent call
+// { date, duration_seconds, recording_url, disposition, direction }. Scoped to the active workspace.
+const CAMPAIGN_BASE =
+  (import.meta as any).env?.VITE_OPMCAMPAIGN_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-campaign') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-campaign');
+async function fetchLastCalls(): Promise<Record<string, any>> {
+  const url = new URL(CAMPAIGN_BASE); url.searchParams.set('action', 'last_calls');
+  const ws = workspaceStore.get(); if (ws) url.searchParams.set('workspace', ws);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const t = tokenStore.get(); if (t) headers['Authorization'] = `Bearer ${t}`;
+  const res = await fetch(url.toString(), { method: 'POST', headers, body: JSON.stringify({}) });
+  const d = await res.json().catch(() => ({}));
+  return d.map || {};
+}
+
 // Record-level columns (grain = lead_id). Dynamic LEAD custom fields are appended after these.
 const COLUMNS: ColumnDef[] = [
   { key: 'name', label: 'Record', required: true, sortKey: 'name' },
@@ -37,6 +53,10 @@ const COLUMNS: ColumnDef[] = [
   { key: 'deal_price', label: 'Deal Price', sortKey: 'deal_price', align: 'right' },
   { key: 'lead_source', label: 'Source', sortKey: 'lead_source' },
   { key: 'assigned_to', label: 'Assigned', sortKey: 'assigned_to' },
+  { key: 'last_comm', label: 'Last comm' },
+  { key: 'last_duration', label: 'Duration', align: 'right' },
+  { key: 'last_rec', label: 'Recording' },
+  { key: 'last_disp', label: 'Last disposition' },
   { key: 'tags', label: 'Tags' },
 ];
 
@@ -119,6 +139,11 @@ export default function SellerContacts() {
 
   const loadFields = useCallback(() => { opm.customFields().then((d: any) => setCustomFields(d.fields || [])).catch(() => setCustomFields([])); }, []);
   useEffect(() => { loadFields(); }, [loadFields]);
+
+  // Last communication per record (date / duration / recording / disposition), for the new columns
+  // and the lead-detail block. Re-fetched when the workspace changes or contacts (re)load.
+  const [lastCalls, setLastCalls] = useState<Record<string, any>>({});
+  useEffect(() => { fetchLastCalls().then(setLastCalls).catch(() => setLastCalls({})); }, [active, contactRows.length]);
 
   // Deep link from a campaign ("Show all leads for this campaign"): ?tag=campaign:<slug>&ws=<slug>.
   // Switch to that workspace (if allowed) and pre-apply the campaign tag filter, then clear the params.
@@ -586,6 +611,10 @@ export default function SellerContacts() {
                         {isVisible('deal_price') && <td className="px-3 py-2.5 text-right">{r.deal_price ? `$${num(r.deal_price)}` : '—'}</td>}
                         {isVisible('lead_source') && <td className="max-w-[150px] truncate px-3 py-2.5 text-xs text-slate-500">{r.lead_source || '—'}</td>}
                         {isVisible('assigned_to') && <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{r.assigned_to || '—'}</td>}
+                        {isVisible('last_comm') && (() => { const lc = lastCalls[r.lead_id]; return <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600">{lc?.date ? <>{dateTime(lc.date)}{lc.direction && <span className="ml-1 text-[10px] text-slate-400">{lc.direction === 'inbound' ? '↙' : '↗'}</span>}</> : <span className="text-slate-300">—</span>}</td>; })()}
+                        {isVisible('last_duration') && (() => { const lc = lastCalls[r.lead_id]; return <td className="px-3 py-2.5 text-right font-mono text-xs text-slate-600">{lc ? secs(Number(lc.duration_seconds || 0)) : <span className="text-slate-300">—</span>}</td>; })()}
+                        {isVisible('last_rec') && (() => { const lc = lastCalls[r.lead_id]; return <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>{lc?.recording_url ? <AudioPlayer src={lc.recording_url} compact /> : <span className="text-xs text-slate-300">—</span>}</td>; })()}
+                        {isVisible('last_disp') && (() => { const lc = lastCalls[r.lead_id]; return <td className="whitespace-nowrap px-3 py-2.5">{lc?.disposition ? <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(lc.disposition) }}><StageIcon name={dispositionIconName(lc.disposition)} color={dispositionColor(lc.disposition)} className="h-3.5 w-3.5" />{humanizeDisposition(lc.disposition)}</span> : <span className="text-xs text-slate-400">—</span>}</td>; })()}
                         {isVisible('tags') && <td className="max-w-[220px] px-3 py-2.5"><div className="flex flex-wrap gap-1">{(r.tags || []).slice(0, 4).map((t: string) => <span key={t} className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-slate-500">{t}</span>)}{(r.tags || []).length > 4 && <span className="text-[10px] text-slate-400">+{r.tags.length - 4}</span>}</div></td>}
                         {customCols.filter((c) => isVisible(c.key)).map((c) => <td key={c.key} className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600">{cfValue(r, c.key) || '—'}</td>)}
                       </tr>
