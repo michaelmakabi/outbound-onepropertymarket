@@ -28,6 +28,10 @@ export default function OpmCampaignDetail() {
   const [error, setError] = useState('');
   const [dripBusy, setDripBusy] = useState(false);
   const [busyAct, setBusyAct] = useState('');
+  // Retail pricing: campaign/disposition/per-lead costs are stored as raw hard cost. A customer (or a
+  // super_admin impersonating one) must see hard × their workspace's billing multiplier; true staff see raw.
+  const [retail, setRetail] = useState<{ apply: boolean; mult: Record<string, number> }>({ apply: false, mult: {} });
+  useEffect(() => { opm.retailMult().then((d: any) => setRetail({ apply: !!d?.apply, mult: d?.mult || {} })).catch(() => {}); }, []);
 
   const load = useCallback(() => {
     setLoading(true); setError('');
@@ -39,6 +43,10 @@ export default function OpmCampaignDetail() {
   if (error || !data?.campaign) return <div className="card p-10 text-center text-slate-400">{error || 'Campaign not found.'}</div>;
 
   const c = data.campaign;
+  // Scale every cost on this page to the customer's retail price when impersonating / logged in as a
+  // customer; true staff see the raw hard cost (priceMult = 1).
+  const priceMult = retail.apply ? (retail.mult[c.workspace] ?? 1) : 1;
+  const money = (cents: number) => fmt.money(((cents || 0) * priceMult) / 100);
   const k = data.kpis || {};
   const leads: any[] = data.leads || [];
   const launchedLeads = leads.filter((l) => l.status === 'launched' || l.status === 'completed' || l.call_id);
@@ -102,8 +110,8 @@ export default function OpmCampaignDetail() {
 
       {/* KPIs — cost is shown clearly here (customer-facing) */}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Total cost" value={fmt.money((k.total_cost_cents || 0) / 100)} sub={`${num(k.total_calls || 0)} calls`} icon={DollarSign} accent="blue" />
-        <KpiCard label="Avg call cost" value={fmt.money((k.avg_cost_cents || 0) / 100)} sub="per completed call" icon={DollarSign} accent="default" />
+        <KpiCard label="Total cost" value={money(k.total_cost_cents || 0)} sub={`${num(k.total_calls || 0)} calls`} icon={DollarSign} accent="blue" />
+        <KpiCard label="Avg call cost" value={money(k.avg_cost_cents || 0)} sub="per completed call" icon={DollarSign} accent="default" />
         <KpiCard label="Pickup rate" value={`${((k.pickup_rate || 0) * 100).toFixed(0)}%`} sub={`${num(k.answered || 0)} answered`} icon={PhoneCall} accent="green" />
         <KpiCard label="Voicemail rate" value={`${((k.voicemail_rate || 0) * 100).toFixed(0)}%`} sub={`${num(k.voicemail || 0)} voicemails`} icon={Voicemail} accent="amber" />
       </div>
@@ -145,7 +153,7 @@ export default function OpmCampaignDetail() {
                   <tr key={d.disposition} className="border-t border-line">
                     <td className="px-3 py-2 font-medium text-ink">{fmt.title(d.disposition)}</td>
                     <td className="px-3 py-2 text-right font-mono">{num(d.count)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmt.money((d.cost_cents || 0) / 100)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{money(d.cost_cents || 0)}</td>
                     <td className="px-3 py-2 text-right text-slate-500">{k.total_calls ? `${((d.count / k.total_calls) * 100).toFixed(0)}%` : '—'}</td>
                   </tr>
                 ))}
@@ -165,7 +173,7 @@ export default function OpmCampaignDetail() {
                   <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
                   <button className="min-w-0 truncate font-medium text-ink hover:text-brand" onClick={() => nav(`/leads/${encodeURIComponent(l.lead_id)}`)}>{l.lead_name || l.lead_id}</button>
                   {l.disposition && <span className="ml-auto whitespace-nowrap text-xs text-slate-500">{fmt.title(l.disposition)}</span>}
-                  {l.cost_cents != null && <span className="whitespace-nowrap font-mono text-xs text-slate-400">{fmt.money(l.cost_cents / 100)}</span>}
+                  {l.cost_cents != null && <span className="whitespace-nowrap font-mono text-xs text-slate-400">{money(l.cost_cents)}</span>}
                 </div>
               ))}
             </div>
