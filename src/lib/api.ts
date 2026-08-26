@@ -129,6 +129,30 @@ async function opmCampaignCall(action: string, opts: { method?: string; params?:
   return data;
 }
 
+// ---- CRM write helpers open to all workspace members (dedicated `opm-import` function): smart import
+// + custom-field management. Split out of `opm` so these are no longer owner-only. Shares OPM auth +
+// active-workspace scoping. ----
+const OPMIMPORT_BASE =
+  (import.meta as any).env?.VITE_OPMIMPORT_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-import') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-import');
+
+async function opmImportCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMIMPORT_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
 export const opm = {
   workspaces: () => opmCall('workspaces'),
   summary: () => opmCall('summary'),
@@ -159,12 +183,15 @@ export const opm = {
   importLeads: (b: { target_workspace: string; rows: any[]; allow_pitman?: boolean }) =>
     opmCall('import_leads', { method: 'POST', params: { workspace: '' }, body: b }),
   // Smart import: consolidate/dedupe by phone. mode:'preview' returns stats only; 'commit' writes.
-  smartImport: (b: { target_workspace: string; records: any[]; mode: 'preview' | 'commit' }) =>
-    opmCall('smart_import', { method: 'POST', params: { workspace: '' }, body: b }),
+  // Served by the dedicated `opm-import` function so ANY workspace member can import (not just owners).
+  // On commit, an optional list_name tags every imported lead and auto-creates a saved smart list.
+  smartImport: (b: { target_workspace: string; records: any[]; mode: 'preview' | 'commit'; list_name?: string }) =>
+    opmImportCall('import_smart', { method: 'POST', body: b }),
   addContact: (b: any) => opmCall('add_contact', { method: 'POST', body: b }),
   customFields: () => opmCall('custom_fields'),
-  saveCustomField: (b: any) => opmCall('save_custom_field', { method: 'POST', body: b }),
-  deleteCustomField: (id: number) => opmCall('delete_custom_field', { method: 'POST', body: { id } }),
+  // Custom-field management — served by `opm-import` so any workspace member can manage the account's fields.
+  saveCustomField: (b: any) => opmImportCall('custom_field_save', { method: 'POST', body: b }),
+  deleteCustomField: (id: number) => opmImportCall('custom_field_delete', { method: 'POST', body: { id } }),
   // Billing console (super-admin). Global, so suppress the active-tenant param.
   billingOverview: () => opmCall('billing_overview', { params: { workspace: '' } }),
   billingSetConfig: (b: any) => opmCall('billing_set_config', { method: 'POST', params: { workspace: '' }, body: b }),
