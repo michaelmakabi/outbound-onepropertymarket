@@ -212,7 +212,7 @@ export const opm = {
   // Smart import: consolidate/dedupe by phone. mode:'preview' returns stats only; 'commit' writes.
   // Served by the dedicated `opm-import` function so ANY workspace member can import (not just owners).
   // On commit, an optional list_name tags every imported lead and auto-creates a saved smart list.
-  smartImport: (b: { target_workspace: string; records: any[]; mode: 'preview' | 'commit'; list_name?: string }) =>
+  smartImport: (b: { target_workspace: string; records: any[]; mode: 'preview' | 'commit'; list_name?: string; extra_tags?: string[] }) =>
     opmImportCall('import_smart', { method: 'POST', body: b }),
   addContact: (b: any) => opmCall('add_contact', { method: 'POST', body: b }),
   customFields: () => opmCall('custom_fields'),
@@ -261,6 +261,10 @@ export const opm = {
   // credit_reason, credit_message, issues[] }. Block Launch when !ok and show issues. Served by opm-campaign.
   campaignPreflight: (b: { workspace?: string; agent_id: string }) =>
     opmCampaignCall('campaign_preflight', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
+  // Caller-ID numbers assigned to a workspace's dialer + usage (total calls, last used), most-used first.
+  // Powers the launch wizard's "which numbers this agent uses" panel. Served by opm-campaign.
+  campaignNumberUsage: (workspace?: string) =>
+    opmCampaignCall('number_usage', { method: 'POST', params: workspace ? { workspace } : undefined, body: workspace ? { workspace } : {} }),
   // Projected calls / duration / cost range for a chosen lead set + dial mode (render defensively).
   // Pass lead_ids[] (preferred) or count. Returns { estimated_calls, numbers, daily_throughput,
   // estimated_duration:{days,finish_local,human}, cost_range:{low,blended,high,*.billed_usd,basis,note} }.
