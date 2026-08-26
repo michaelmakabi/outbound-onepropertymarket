@@ -153,8 +153,35 @@ async function opmImportCall(action: string, opts: { method?: string; params?: R
   return data;
 }
 
+// ---- CUE report engine (dedicated `opm-cue` function): Comping · Underwriting · Evaluation.
+// Pulls subject + comps + AVM + HUD rents from RealEstateAPI and caches per lead. `cueGet` is a free
+// cached read; `cueGenerate` hits the paid API. Shares OPM auth + active-workspace scoping. ----
+const OPMCUE_BASE =
+  (import.meta as any).env?.VITE_OPMCUE_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-cue') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-cue');
+
+async function opmCueCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMCUE_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
 export const opm = {
   workspaces: () => opmCall('workspaces'),
+  // CUE report (Comping · Underwriting · Evaluation) for a lead's property.
+  cueGet: (leadId: string) => opmCueCall('cue_get', { params: { lead_id: leadId } }),
+  cueGenerate: (leadId: string) => opmCueCall('cue_generate', { method: 'POST', body: { lead_id: leadId } }),
   summary: () => opmCall('summary'),
   pipelines: () => opmCall('pipelines'),
   // Snapshots: list a specific workspace's pipelines/custom fields (source picker), and clone across.
