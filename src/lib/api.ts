@@ -219,6 +219,13 @@ export const opm = {
   // Custom-field management — served by `opm-import` so any workspace member can manage the account's fields.
   saveCustomField: (b: any) => opmImportCall('custom_field_save', { method: 'POST', body: b }),
   deleteCustomField: (id: number) => opmImportCall('custom_field_delete', { method: 'POST', body: { id } }),
+  // ---- Tag vocabulary management (opm-import; role-gated server-side) ----
+  // tagsList returns { tags:[{tag,cnt}], can_edit, can_delete } for the active workspace.
+  // rename/add need owner/admin/manager; delete needs owner/admin (or platform staff).
+  tagsList: () => opmImportCall('tags_list', { method: 'POST', body: {} }),
+  tagRename: (from: string, to: string) => opmImportCall('tag_rename', { method: 'POST', body: { from, to } }),
+  tagDelete: (tag: string) => opmImportCall('tag_delete', { method: 'POST', body: { tag } }),
+  tagAdd: (tag: string, lead_ids: string[]) => opmImportCall('tag_add', { method: 'POST', body: { tag, lead_ids } }),
   // Billing console (super-admin). Global, so suppress the active-tenant param.
   billingOverview: () => opmCall('billing_overview', { params: { workspace: '' } }),
   billingSetConfig: (b: any) => opmCall('billing_set_config', { method: 'POST', params: { workspace: '' }, body: b }),
