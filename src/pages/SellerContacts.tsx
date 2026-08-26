@@ -4,6 +4,7 @@ import { opm, testai, tokenStore, workspaceStore } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
 import CustomFieldsModal from '../components/CustomFieldsModal';
+import TagManagerModal from '../components/TagManagerModal';
 import SmartLists from '../components/SmartLists';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews, AudioPlayer,
@@ -11,7 +12,7 @@ import {
 } from '../components/dash';
 import { num, dateTime, secs, humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
-import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star, UserCheck } from 'lucide-react';
+import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star, UserCheck, Tag } from 'lucide-react';
 
 const PAGE_KEY = 'opm-crm';
 const PAGE_SIZE = 50;
@@ -84,6 +85,7 @@ export default function SellerContacts() {
   const [showImport, setShowImport] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showFields, setShowFields] = useState(false);
+  const [showTags, setShowTags] = useState(false);
   const [customFields, setCustomFields] = useState<any[]>([]);
 
   // ---- Bulk AI caller → tracked Campaign ----
@@ -437,6 +439,9 @@ export default function SellerContacts() {
             <button className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={() => setShowFields(true)}>
               <SlidersHorizontal className="h-4 w-4" /> Custom fields
             </button>
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={() => setShowTags(true)}>
+              <Tag className="h-4 w-4" /> Manage tags
+            </button>
             <button className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={() => setShowAdd(true)}>
               <Plus className="h-4 w-4" /> Add contact
             </button>
@@ -450,6 +455,7 @@ export default function SellerContacts() {
       {showImport && <ImportWizard onClose={() => { setShowImport(false); load(); setSmartKey((k) => k + 1); }} lockedWorkspace={active || undefined} />}
       {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {showFields && <CustomFieldsModal onClose={() => setShowFields(false)} onChanged={loadFields} />}
+      {showTags && <TagManagerModal onClose={() => setShowTags(false)} onChanged={() => load()} />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Records" value={num(records.length)} sub="one per seller / property" icon={Contact} accent="blue" />
