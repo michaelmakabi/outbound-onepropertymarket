@@ -49,20 +49,38 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
   const leads = useMemo(() => (headers.length ? explodeSkipTrace(headers, rows, map) : []), [headers, rows, map]);
   const records = useMemo(() => leads.map((l) => ({ name: l.ownerName, email: l.email, street: l.address, numbers: l.numbers, custom: l.fields })), [leads]);
 
-  function onFile(file: File) {
+  // Accepts CSV/TSV/text AND Excel (.xls/.xlsx/.xlsm/.ods). Spreadsheets are converted to CSV in the
+  // browser via SheetJS (loaded on demand), so any format the user has works without a pre-convert.
+  async function onFile(file: File) {
     setParseErr('');
-    const reader = new FileReader();
-    reader.onload = () => {
+    const finish = (csvText: string) => {
       try {
-        const { headers: hdr, rows: body } = parseCsv(String(reader.result || ''));
+        const { headers: hdr, rows: body } = parseCsv(csvText);
         if (!hdr.length || !body.length) { setParseErr('That file has no data rows.'); return; }
         setFileName(file.name); setHeaders(hdr); setRows(body); setMap(autoMatch(hdr));
         const base = file.name.replace(/\.[^.]+$/, '').trim();
         if (!tenantName && !lockedWorkspace) setTenantName(base);
         if (!listName) { const stamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); setListName(`${base || 'Imported leads'} · ${stamp}`); }
         setStep(2);
-      } catch (e: any) { setParseErr(e?.message || 'Could not parse this CSV.'); }
+      } catch (e: any) { setParseErr(e?.message || 'Could not parse this file.'); }
     };
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (['xlsx', 'xls', 'xlsm', 'ods'].includes(ext)) {
+      try {
+        const buf = await file.arrayBuffer();
+        // Variable specifier keeps TS from resolving the URL module; @vite-ignore keeps Vite from bundling it.
+        const sheetjsUrl = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs';
+        const XLSX: any = await import(/* @vite-ignore */ sheetjsUrl);
+        const wb = XLSX.read(buf, { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        finish(XLSX.utils.sheet_to_csv(sheet));
+      } catch (_e) {
+        setParseErr('Could not read that spreadsheet in the browser. Please export it as CSV and upload that.');
+      }
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => finish(String(reader.result || ''));
     reader.onerror = () => setParseErr('Could not read that file.');
     reader.readAsText(file);
   }
@@ -132,10 +150,10 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
             <div>
               <label className="flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed border-line bg-surface/50 px-8 py-16 text-center transition hover:border-brand/50 hover:bg-brand-light/30">
                 <UploadCloud className="mb-4 h-16 w-16 text-brand" />
-                <span className="text-xl font-bold text-ink">Choose a CSV file</span>
-                <span className="mt-1.5 text-sm text-slate-500">or drag it onto this box</span>
+                <span className="text-xl font-bold text-ink">Choose a file</span>
+                <span className="mt-1.5 text-sm text-slate-500">CSV or Excel (.csv, .xlsx, .xls) — or drag it onto this box</span>
                 <span className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white">Browse files</span>
-                <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+                <input type="file" accept=".csv,.tsv,.txt,.xls,.xlsx,.xlsm,.ods,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
               </label>
               <div className="mt-5 flex items-start gap-3 rounded-2xl bg-surface px-5 py-4 text-sm leading-relaxed text-slate-500">
                 <Layers className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
