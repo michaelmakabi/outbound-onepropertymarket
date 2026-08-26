@@ -93,6 +93,8 @@ export default function SellerContacts() {
   const [dripMinutes, setDripMinutes] = useState(30);
   const [launching, setLaunching] = useState(false);
   const [launchResult, setLaunchResult] = useState<{ id?: string; launched: number; total: number; pending: number; name: string } | null>(null);
+  // Bumped after an import so the SmartLists dropdown remounts and picks up a freshly created list.
+  const [smartKey, setSmartKey] = useState(0);
   // Select-all-across-pages: when set, `selected` holds the FULL server-resolved matching set.
   const [matchAll, setMatchAll] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -419,7 +421,7 @@ export default function SellerContacts() {
         )}
       </div>
 
-      {showImport && <ImportWizard onClose={() => setShowImport(false)} lockedWorkspace={active || undefined} />}
+      {showImport && <ImportWizard onClose={() => { setShowImport(false); load(); setSmartKey((k) => k + 1); }} lockedWorkspace={active || undefined} />}
       {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {showFields && <CustomFieldsModal onClose={() => setShowFields(false)} onChanged={loadFields} />}
 
@@ -432,7 +434,7 @@ export default function SellerContacts() {
 
       <SectionCard title="Filters" description={`${total.toLocaleString()} record${total === 1 ? '' : 's'} match`} className="mb-4"
         action={<div className="flex items-center gap-2">
-          <SmartLists<ViewCfg> page="crm" current={currentCfg} onApply={applyView} />
+          <SmartLists<ViewCfg> key={smartKey} page="crm" current={currentCfg} onApply={applyView} />
           <SavedViews<ViewCfg> pageKey={PAGE_KEY} current={currentCfg} onApply={applyView} />
           <ColumnToggleMenu columns={visibleColumns} isVisible={isVisible} onToggle={toggle} />
         </div>}>
