@@ -395,8 +395,9 @@ export default function SellerContacts() {
     } finally { setLaunching(false); }
   }
 
-  // Staff can import into any tenant; a company owner can import into their own tenant only.
-  const canImport = isStaff || ownsActive;
+  // Everyone with a workspace in view can add contacts, import CSVs, and manage custom fields —
+  // imports always target the workspace currently in view (never a phantom filename workspace).
+  const canImport = isStaff || !!active;
   const colSpan = 3 + visibleColumns.filter((c) => isVisible(c.key)).length;
 
   return (
@@ -418,7 +419,7 @@ export default function SellerContacts() {
         )}
       </div>
 
-      {showImport && <ImportWizard onClose={() => setShowImport(false)} lockedWorkspace={!isStaff && ownsActive ? (active || undefined) : undefined} />}
+      {showImport && <ImportWizard onClose={() => setShowImport(false)} lockedWorkspace={active || undefined} />}
       {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load(); }} />}
       {showFields && <CustomFieldsModal onClose={() => setShowFields(false)} onChanged={loadFields} />}
 
