@@ -26,6 +26,9 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
   const [preview, setPreview] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
   const [err, setErr] = useState('');
+  // Auto smart-list: every import is saved as a named smart list so the batch is instantly usable
+  // (tap it in Contacts or the campaign wizard). Defaults from the file name; the user can rename it.
+  const [listName, setListName] = useState('');
 
   const slug = lockedWorkspace || slugify(tenantName);
 
@@ -47,7 +50,9 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
         const { headers: hdr, rows: body } = parseCsv(String(reader.result || ''));
         if (!hdr.length || !body.length) { setParseErr('That file has no data rows.'); return; }
         setFileName(file.name); setHeaders(hdr); setRows(body); setMap(autoMatch(hdr));
-        if (!tenantName && !lockedWorkspace) setTenantName(file.name.replace(/\.[^.]+$/, ''));
+        const base = file.name.replace(/\.[^.]+$/, '').trim();
+        if (!tenantName && !lockedWorkspace) setTenantName(base);
+        if (!listName) { const stamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); setListName(`${base || 'Imported leads'} · ${stamp}`); }
         setStep(2);
       } catch (e: any) { setParseErr(e?.message || 'Could not parse this CSV.'); }
     };
@@ -66,7 +71,7 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
   const runCommit = async () => {
     setErr(''); setBusy(true);
     try {
-      const r = await opm.smartImport({ target_workspace: slug, records, mode: 'commit' });
+      const r = await opm.smartImport({ target_workspace: slug, records, mode: 'commit', list_name: listName.trim() || undefined });
       setResult(r); setStep(4);
     } catch (e: any) { setErr(e?.message || 'Import failed.'); } finally { setBusy(false); }
   };
@@ -177,6 +182,13 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
                 </div>
               )}
 
+              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">Save as smart list</label>
+              <div className="mb-5 flex items-center gap-2">
+                <Layers className="h-5 w-5 text-slate-400" />
+                <input value={listName} onChange={(e) => setListName(e.target.value)} placeholder="e.g. Miami Off-Market · Aug" className="input flex-1 !py-2.5" />
+              </div>
+              <p className="-mt-3 mb-5 text-xs text-slate-500">These leads are tagged and saved as a smart list you can open in Contacts or drop straight into a campaign. Leave blank to skip.</p>
+
               {!p ? (
                 <div className="py-10 text-center text-sm text-slate-400"><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /> Analyzing…</div>
               ) : (
@@ -225,6 +237,11 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
                 Added <span className="font-bold text-ink">{(result.committed?.contacts || 0).toLocaleString()}</span> dialable contact{result.committed?.contacts === 1 ? '' : 's'} across <span className="font-bold text-ink">{(result.committed?.leads || 0).toLocaleString()}</span> propert{result.committed?.leads === 1 ? 'y' : 'ies'} into <span className="font-mono font-semibold text-ink">{slug}</span>.
               </p>
               {result.stats?.duplicates_in_upload > 0 && <p className="mt-1.5 text-xs text-slate-500">{result.stats.duplicates_in_upload} duplicate number(s) were collapsed, {result.stats.already_in_workspace} already existed.</p>}
+              {result.list?.name && (
+                <div className="mx-auto mt-4 flex max-w-md items-center justify-center gap-2 rounded-xl border border-brand/30 bg-brand-light/30 px-4 py-3 text-sm font-semibold text-brand">
+                  <Layers className="h-4 w-4" /> Saved as smart list “{result.list.name}” ({(result.list.count || 0).toLocaleString()} leads)
+                </div>
+              )}
             </div>
           )}
         </div>
