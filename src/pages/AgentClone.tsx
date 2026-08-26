@@ -26,9 +26,12 @@ export function AgentClonePanel({ embedded }: { embedded?: boolean } = {}) {
   const [err, setErr] = useState('');
   const [result, setResult] = useState<any>(null);
 
-  useEffect(() => {
-    agentTools.workspaces().then((d) => setWss(d.workspaces || [])).catch((e) => setErr(e.message)).finally(() => setLoading(false));
-  }, []);
+  const [refreshing, setRefreshing] = useState(false);
+  const loadWorkspaces = (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true); else setLoading(true);
+    agentTools.workspaces().then((d) => setWss(d.workspaces || [])).catch((e) => setErr(e.message)).finally(() => { setLoading(false); setRefreshing(false); });
+  };
+  useEffect(() => { loadWorkspaces(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadAgents = (slug: string) => {
     setAgents([]); setAgentId('');
@@ -63,6 +66,11 @@ export function AgentClonePanel({ embedded }: { embedded?: boolean } = {}) {
         )}
 
         <div className="card p-5">
+          <div className="mb-3 flex items-center justify-end">
+            <button className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline disabled:opacity-50" disabled={refreshing} onClick={() => loadWorkspaces(true)}>
+              <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} /> Refresh workspaces
+            </button>
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="label mb-1 block">Clone from (source)</label>
