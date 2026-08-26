@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { opm } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import { parseCsv, autoMatch, explodeSkipTrace, CANONICAL_FIELDS } from '../lib/dispatch';
-import { UploadCloud, X, ArrowRight, ArrowLeft, CheckCircle2, Loader2, AlertCircle, Building2, FileSpreadsheet, Users, Phone, Copy, Layers } from 'lucide-react';
+import { UploadCloud, X, ArrowRight, ArrowLeft, CheckCircle2, Loader2, AlertCircle, Building2, FileSpreadsheet, Users, Phone, Copy, Layers, Tag } from 'lucide-react';
 
 const slugify = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
 
@@ -29,6 +29,13 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
   // Auto smart-list: every import is saved as a named smart list so the batch is instantly usable
   // (tap it in Contacts or the campaign wizard). Defaults from the file name; the user can rename it.
   const [listName, setListName] = useState('');
+  // Optional extra tags the user wants applied to every imported lead (on top of the automatic
+  // City/State/Zip/County/Type tags). Comma-separated free text → array.
+  const [extraTagsRaw, setExtraTagsRaw] = useState('');
+  const extraTags = useMemo(
+    () => extraTagsRaw.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 20),
+    [extraTagsRaw],
+  );
 
   const slug = lockedWorkspace || slugify(tenantName);
 
@@ -63,7 +70,7 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
   const runPreview = async () => {
     setErr(''); setBusy(true); setPreview(null);
     try {
-      const r = await opm.smartImport({ target_workspace: slug, records, mode: 'preview' });
+      const r = await opm.smartImport({ target_workspace: slug, records, mode: 'preview', list_name: listName.trim() || undefined, extra_tags: extraTags });
       setPreview(r); setStep(3);
     } catch (e: any) { setErr(e?.message || 'Preview failed.'); } finally { setBusy(false); }
   };
@@ -71,7 +78,7 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
   const runCommit = async () => {
     setErr(''); setBusy(true);
     try {
-      const r = await opm.smartImport({ target_workspace: slug, records, mode: 'commit', list_name: listName.trim() || undefined });
+      const r = await opm.smartImport({ target_workspace: slug, records, mode: 'commit', list_name: listName.trim() || undefined, extra_tags: extraTags });
       setResult(r); setStep(4);
     } catch (e: any) { setErr(e?.message || 'Import failed.'); } finally { setBusy(false); }
   };
@@ -188,6 +195,28 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
                 <input value={listName} onChange={(e) => setListName(e.target.value)} placeholder="e.g. Miami Off-Market · Aug" className="input flex-1 !py-2.5" />
               </div>
               <p className="-mt-3 mb-5 text-xs text-slate-500">These leads are tagged and saved as a smart list you can open in Contacts or drop straight into a campaign. Leave blank to skip.</p>
+
+              {/* Auto-tags + optional extra tags */}
+              <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">Tags</label>
+              <div className="mb-2 flex items-start gap-2">
+                <Tag className="mt-2.5 h-5 w-5 shrink-0 text-slate-400" />
+                <div className="flex-1">
+                  <input value={extraTagsRaw} onChange={(e) => setExtraTagsRaw(e.target.value)} placeholder="Add your own tags, comma-separated (e.g. Hot list, Absentee owner)" className="input w-full !py-2.5" />
+                  <p className="mt-1.5 text-xs text-slate-500">Every lead is <span className="font-semibold text-slate-600">auto-tagged</span> by city, state, ZIP, county and property type. Add any extra tags here to make the list more specific.</p>
+                </div>
+              </div>
+              {(() => {
+                const autoFromPreview: string[] = Array.isArray(preview?.auto_tags) ? preview.auto_tags : [];
+                const shown = [...new Set([...(listName.trim() ? [listName.trim()] : []), ...extraTags, ...autoFromPreview])].slice(0, 40);
+                return shown.length ? (
+                  <div className="mb-5 flex flex-wrap gap-1.5">
+                    {shown.map((t) => {
+                      const isExtra = extraTags.includes(t) || t === listName.trim();
+                      return <span key={t} className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${isExtra ? 'bg-brand-light text-brand' : 'bg-surface text-slate-600'}`}>{t}</span>;
+                    })}
+                  </div>
+                ) : <div className="mb-5" />;
+              })()}
 
               {!p ? (
                 <div className="py-10 text-center text-sm text-slate-400"><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /> Analyzing…</div>
