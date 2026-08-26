@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { api, opm } from '../lib/api';
 import { KpiCard, SectionCard, LoadingBlock, AudioPlayer } from '../components/dash';
@@ -20,6 +20,11 @@ export default function CallDetail() {
   const [dlAudio, setDlAudio] = useState(false);
   const [thread, setThread] = useState<any[]>([]);
   const [person, setPerson] = useState<any>(null);
+  // Transcript ↔ recording sync: current audio time, an imperative seek handle, and refs for auto-scroll.
+  const [audioTime, setAudioTime] = useState(0);
+  const seekRef = useRef<((t: number) => void) | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setLoading(true); setThread([]); setPerson(null); api.call(callId!).then((d) => setC(d.call)).finally(() => setLoading(false)); }, [callId]);
 
@@ -40,6 +45,29 @@ export default function CallDetail() {
   }, [c]);
 
   const goTo = (i: number) => { if (i >= 0 && i < ids.length) nav(`/calls/${ids[i]}`, { state: st }); };
+
+  // ---- Transcript follows the recording ----
+  // Each turn's start time (seconds) comes from its first word or its own `start`. The "active" turn is
+  // the latest one whose start is at/behind the playhead; it's highlighted and auto-scrolled into view.
+  const turnsForSync = useMemo<any[]>(() => (c && Array.isArray(c.transcript_object) ? c.transcript_object : []), [c]);
+  const turnStartSec = (t: any): number | null => {
+    const w = Array.isArray(t?.words) && t.words.length ? t.words[0].start : (typeof t?.start === 'number' ? t.start : null);
+    return typeof w === 'number' ? w : null;
+  };
+  const activeIdx = useMemo(() => {
+    let a = -1;
+    for (let i = 0; i < turnsForSync.length; i++) {
+      const s = turnStartSec(turnsForSync[i]);
+      if (s == null) continue;
+      if (s <= audioTime + 0.25) a = i; else break;
+    }
+    return a;
+  }, [turnsForSync, audioTime]);
+  // Keep the active line centered in the scrollable transcript panel (scrolls the panel, not the page).
+  useEffect(() => {
+    const cont = scrollRef.current, el = activeRef.current;
+    if (cont && el) cont.scrollTo({ top: el.offsetTop - cont.clientHeight / 2 + el.clientHeight / 2, behavior: 'smooth' });
+  }, [activeIdx]);
 
   if (loading) return <LoadingBlock />;
   if (!c) return <div className="card p-10 text-center text-slate-400">Call not found.</div>;
@@ -99,28 +127,42 @@ export default function CallDetail() {
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="flex flex-col gap-5 lg:col-span-2">
           <SectionCard title="Recording" description={contact ? `${inbound ? 'From' : 'To'} ${contact}` : undefined}>
-            {c.recording_url ? <AudioPlayer src={c.recording_url} /> : <p className="text-sm text-slate-400">No recording available for this call.</p>}
+            {c.recording_url ? <AudioPlayer src={c.recording_url} onTime={setAudioTime} seekRef={seekRef} /> : <p className="text-sm text-slate-400">No recording available for this call.</p>}
+            {c.recording_url && turns.length > 0 && <p className="mt-2 text-xs text-slate-400">Tip: the transcript below follows the recording as it plays — click any line to jump the audio there.</p>}
           </SectionCard>
 
           <SectionCard title="Transcript" description={`${turns.length} turns`}>
             {turns.length ? (
-              <div className="space-y-3">
+              <div ref={scrollRef} className="relative max-h-[560px] space-y-3 overflow-y-auto pr-1">
                 {turns.map((t: any, i: number) => {
                   const agent = t.role === 'agent';
                   const time = turnTime(t);
+                  const startSec = turnStartSec(t);
+                  const isActive = i === activeIdx;
+                  const canSeek = startSec != null && !!c.recording_url;
                   return (
-                    <div key={i} className={`flex flex-col ${agent ? 'items-start' : 'items-end'}`}>
-                      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    <div key={i} ref={isActive ? activeRef : undefined} className={`flex flex-col ${agent ? 'items-start' : 'items-end'}`}>
+                      <div className="mb-0.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">
                         <span className={`h-1.5 w-1.5 rounded-full ${agent ? 'bg-slate-400' : 'bg-emerald-500'}`} />
                         {agent ? 'Agent' : 'Caller'} {time && <span className="font-mono text-slate-400">{time}</span>}
                       </div>
-                      <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${agent ? 'bg-surface text-ink' : 'bg-brand text-white'}`}>{t.content}</div>
+                      <button
+                        type="button"
+                        disabled={!canSeek}
+                        onClick={() => { if (startSec != null) seekRef.current?.(startSec); }}
+                        title={canSeek ? 'Jump the recording to this line' : undefined}
+                        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-left text-[15px] leading-relaxed transition ${canSeek ? 'cursor-pointer' : 'cursor-default'} ${
+                          agent ? 'bg-surface text-ink' : 'bg-brand text-white'
+                        } ${isActive ? 'ring-2 ring-amber-400 ring-offset-1' : canSeek ? 'hover:brightness-95' : ''}`}
+                      >
+                        {t.content}
+                      </button>
                     </div>
                   );
                 })}
               </div>
             ) : c.transcript ? (
-              <pre className="whitespace-pre-wrap font-sans text-sm text-slate-700">{c.transcript}</pre>
+              <pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed text-slate-700">{c.transcript}</pre>
             ) : <p className="text-sm text-slate-400">No transcript available for this call.</p>}
           </SectionCard>
         </div>
@@ -128,21 +170,21 @@ export default function CallDetail() {
         <div className="flex flex-col gap-5">
           <SectionCard title="Contact">
             {person?.name || person?.email ? (
-              <div className="space-y-1.5 text-sm">
-                <div className="flex items-center gap-1.5 font-semibold text-ink"><User className="h-4 w-4 text-brand" /> {person.name || 'Contact'}</div>
-                <div className="font-mono text-xs text-slate-500">{contact || '—'}</div>
-                {person.email && <div className="text-xs text-slate-500">{person.email}</div>}
-                {person.property_ref && <div className="text-xs text-slate-400">{person.property_ref}</div>}
-                {person.lead_id && <Link to={`/leads/${encodeURIComponent(person.lead_id)}`} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"><ExternalLink className="h-3.5 w-3.5" /> Open contact record (calls + notes)</Link>}
+              <div className="space-y-2 text-base">
+                <div className="flex items-center gap-2 text-lg font-bold text-ink"><User className="h-5 w-5 text-brand" /> {person.name || 'Contact'}</div>
+                {contact && <a href={`tel:${contact}`} className="block font-mono text-base font-semibold text-brand hover:underline">{contact}</a>}
+                {person.email && <div className="text-base text-slate-600">{person.email}</div>}
+                {person.property_ref && <div className="text-sm text-slate-500">{person.property_ref}</div>}
+                {person.lead_id && <Link to={`/leads/${encodeURIComponent(person.lead_id)}`} className="mt-1 inline-flex items-center gap-1.5 text-sm font-semibold text-brand hover:underline"><ExternalLink className="h-4 w-4" /> Open contact record (calls + notes)</Link>}
               </div>
             ) : (
-              <p className="text-sm text-slate-400">No matched CRM contact for {contact || 'this number'} — <span className="font-semibold text-slate-500">Unknown</span>.</p>
+              <div className="text-base text-slate-500">No matched CRM contact for {contact ? <a href={`tel:${contact}`} className="font-mono font-semibold text-brand hover:underline">{contact}</a> : 'this number'} — <span className="font-semibold">Unknown</span>.</div>
             )}
           </SectionCard>
 
           {c.call_summary && (
             <SectionCard title="AI Summary">
-              <p className="text-sm leading-relaxed text-slate-700">{c.call_summary}</p>
+              <p className="text-base leading-relaxed text-slate-700">{c.call_summary}</p>
             </SectionCard>
           )}
 
