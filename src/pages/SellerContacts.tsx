@@ -53,11 +53,11 @@ const COLUMNS: ColumnDef[] = [
   { key: 'deal_price', label: 'Deal Price', sortKey: 'deal_price', align: 'right' },
   { key: 'lead_source', label: 'Source', sortKey: 'lead_source' },
   { key: 'assigned_to', label: 'Assigned', sortKey: 'assigned_to' },
-  { key: 'last_comm', label: 'Last comm' },
-  { key: 'last_duration', label: 'Duration', align: 'right' },
+  { key: 'last_comm', label: 'Last comm', sortKey: 'last_comm' },
+  { key: 'last_duration', label: 'Duration', align: 'right', sortKey: 'last_duration' },
   { key: 'last_rec', label: 'Recording' },
-  { key: 'last_disp', label: 'Last disposition' },
-  { key: 'tags', label: 'Tags' },
+  { key: 'last_disp', label: 'Last disposition', sortKey: 'last_disp' },
+  { key: 'tags', label: 'Tags', sortKey: 'tags' },
 ];
 
 type ViewCfg = { pipelineId: string; stageId: string; verified: string; tags: string[]; search: string; sort: any };
@@ -74,6 +74,10 @@ export default function SellerContacts() {
   const [stageId, setStageId] = useState('');
   const [verified, setVerified] = useState('');
   const [tagFilter, setTagFilter] = useState<string[]>([]);
+  // Last-interaction (most recent call) filters: date range (YYYY-MM-DD, inclusive) + direction.
+  const [commFrom, setCommFrom] = useState('');
+  const [commTo, setCommTo] = useState('');
+  const [commDir, setCommDir] = useState(''); // '' | 'inbound' | 'outbound' | 'none' (never contacted)
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -275,14 +279,31 @@ export default function SellerContacts() {
     return Array.from(s).sort().map((t) => ({ value: t, label: t }));
   }, [records]);
 
+  // Inclusive [from 00:00, to 23:59:59.999] epoch bounds for the last-interaction date filter.
+  const commFromMs = useMemo(() => (commFrom ? new Date(commFrom + 'T00:00:00').getTime() : null), [commFrom]);
+  const commToMs = useMemo(() => (commTo ? new Date(commTo + 'T23:59:59.999').getTime() : null), [commTo]);
+
   const preFiltered = useMemo(() => records.filter((r) => {
     if (pipelineId && String(r.pipeline_id) !== pipelineId) return false;
     if (stageId && String(r.stage_id) !== stageId) return false;
     if (verified === 'yes' && !r.hasVerified) return false;
     if (verified === 'no' && r.hasVerified) return false;
     if (tagFilter.length && !tagFilter.every((t) => (r.tags || []).includes(t))) return false;
+    // Last-interaction filters (most recent call for the record).
+    if (commDir || commFromMs != null || commToMs != null) {
+      const lc = lastCalls[r.lead_id];
+      if (commDir === 'none') { if (lc) return false; }
+      else {
+        if (!lc || !lc.date) return false;
+        if (commDir && commDir !== 'inbound' && commDir !== 'outbound') { /* ignore unknown */ }
+        else if (commDir && (lc.direction || 'outbound') !== commDir) return false;
+        const t = new Date(lc.date).getTime();
+        if (commFromMs != null && t < commFromMs) return false;
+        if (commToMs != null && t > commToMs) return false;
+      }
+    }
     return true;
-  }), [records, pipelineId, stageId, verified, tagFilter]);
+  }), [records, pipelineId, stageId, verified, tagFilter, lastCalls, commDir, commFromMs, commToMs]);
 
   const getValue = useCallback((r: any, key: string): string | number => {
     switch (key) {
@@ -295,11 +316,16 @@ export default function SellerContacts() {
       case 'lead_source': return r.lead_source || '';
       case 'assigned_to': return r.assigned_to || '';
       case 'tags': return (r.tags || []).join(' ');
+      // Last-communication columns are sourced from the separate lastCalls map (keyed by lead_id).
+      // Dates/durations return numbers so they SORT chronologically/numerically; disposition is text.
+      case 'last_comm': { const lc = lastCalls[r.lead_id]; return lc?.date ? new Date(lc.date).getTime() : 0; }
+      case 'last_duration': { const lc = lastCalls[r.lead_id]; return lc ? Number(lc.duration_seconds || 0) : -1; }
+      case 'last_disp': { const lc = lastCalls[r.lead_id]; return lc?.disposition ? String(lc.disposition) : ''; }
       // hidden search-only key: every phone number's digits, so search matches phones too
       case '__phones': return (r.numbers || []).map((n: any) => (n.phone || '').replace(/\D/g, '')).join(' ');
       default: return key.startsWith('cf_lead_') ? cfValue(r, key) : '';
     }
-  }, [cfValue]);
+  }, [cfValue, lastCalls]);
 
   const visibleColumns = useMemo<ColumnDef[]>(() => [...COLUMNS, ...customCols], [customCols]);
   // Include a hidden "__phones" column so useClientTable's search also scans phone digits.
@@ -309,13 +335,13 @@ export default function SellerContacts() {
     pageKey: PAGE_KEY, columns: searchColumns, rows: preFiltered, getValue, initialSort: { by: 'name', dir: 'asc' },
   });
 
-  useEffect(() => { setPage(1); setMatchAll(false); }, [pipelineId, stageId, verified, tagFilter, search, sort]);
+  useEffect(() => { setPage(1); setMatchAll(false); }, [pipelineId, stageId, verified, tagFilter, search, sort, commFrom, commTo, commDir]);
 
   const total = rows.length;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const orderedIds = useMemo(() => rows.map((r) => r.lead_id), [rows]);
-  const hasFilters = !!pipelineId || !!stageId || !!verified || tagFilter.length > 0 || !!search;
+  const hasFilters = !!pipelineId || !!stageId || !!verified || tagFilter.length > 0 || !!search || !!commFrom || !!commTo || !!commDir;
 
   const dialableNumbers = records.reduce((s, r) => s + r.numbersCount, 0);
   const verifiedNumbers = records.reduce((s, r) => s + r.verifiedCount, 0);
@@ -453,9 +479,26 @@ export default function SellerContacts() {
           <MultiSelect options={allTags} value={tagFilter} onChange={setTagFilter} placeholder="All tags" width={180} />
           <div className="relative w-full sm:w-auto">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, property, address, phone, source…" className="input w-full sm:w-[300px] pl-8" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, property, address, phone, source, disposition…" className="input w-full sm:w-[300px] pl-8" />
           </div>
-          {hasFilters && <button className="btn-ghost !py-1.5" onClick={() => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setSearch(''); }}><X className="h-3.5 w-3.5" /> Clear</button>}
+          {hasFilters && <button className="btn-ghost !py-1.5" onClick={() => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setSearch(''); setCommFrom(''); setCommTo(''); setCommDir(''); }}><X className="h-3.5 w-3.5" /> Clear</button>}
+        </div>
+        {/* Last-interaction filters: filter records by the date + direction of their most recent call. */}
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500"><History className="h-3.5 w-3.5" /> Last interaction</span>
+          <select value={commDir} onChange={(e) => setCommDir(e.target.value)} className="input !py-1.5 text-sm">
+            <option value="">Any interaction</option>
+            <option value="outbound">Outbound (we called)</option>
+            <option value="inbound">Inbound (they called)</option>
+            <option value="none">Never contacted</option>
+          </select>
+          <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">From
+            <input type="date" value={commFrom} onChange={(e) => setCommFrom(e.target.value)} disabled={commDir === 'none'} className="input !py-1.5 text-sm disabled:opacity-50" />
+          </label>
+          <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">To
+            <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)} disabled={commDir === 'none'} className="input !py-1.5 text-sm disabled:opacity-50" />
+          </label>
+          {(commFrom || commTo || commDir) && <button className="btn-ghost !py-1.5" onClick={() => { setCommFrom(''); setCommTo(''); setCommDir(''); }}><X className="h-3.5 w-3.5" /> Clear dates</button>}
         </div>
       </SectionCard>
 
