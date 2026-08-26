@@ -22,6 +22,7 @@ import Suggestions from './pages/Suggestions';
 import PromptStudio from './pages/PromptStudio';
 import Reports from './pages/Reports';
 import LeadDetail from './pages/LeadDetail';
+import CueReport from './pages/CueReport';
 import Pipelines from './pages/Pipelines';
 import SellerContacts from './pages/SellerContacts';
 import TestAI from './pages/TestAI';
@@ -95,6 +96,7 @@ export default function App() {
       <Route path="/contacts/:number" element={<Protected><ContactDetail /></Protected>} />
       <Route path="/leads" element={<Protected><SellerContacts /></Protected>} />
       <Route path="/leads/:id" element={<Protected><LeadDetail /></Protected>} />
+      <Route path="/leads/:id/cue" element={<Protected><CueReport /></Protected>} />
       <Route path="/seller-contacts" element={<Protected><SellerContacts /></Protected>} />
       <Route path="/pipelines" element={<Protected><Pipelines /></Protected>} />
       <Route path="/routing" element={<Protected><LeadRouting /></Protected>} />
