@@ -464,6 +464,7 @@ export default function LeadDetail() {
             <Stat icon={User} label="Assigned" value={assignees.primary?.name || lead.assigned_to || '—'} />
             <Stat icon={PhoneCall} label="Calls" value={`${leadCalls.length} · ${contacts.length}#`} />
           </div>
+          <button onClick={() => nav(`/leads/${encodeURIComponent(id)}/cue`)} title="Comping · Underwriting · Evaluation report for this property" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><Home className="h-4 w-4" /> CUE Report</button>
           <button onClick={openCallModal} title="Launch a live AI voice call to this lead" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white transition hover:brightness-125"><Bot className="h-4 w-4" /> AI Call</button>
         </div>
       </div>
