@@ -53,6 +53,10 @@ export default function OpmCampaignDetail() {
   const pendingLeads = leads.filter((l) => l.status === 'pending');
   const failedLeads = leads.filter((l) => l.status === 'failed');
   const canceledLeads = leads.filter((l) => l.status === 'canceled');
+  // Auto-stop savings: numbers we skipped because another number for that lead already came back
+  // favorable (interested / gave a price / booked). Each skipped call is spend we avoided.
+  const autoStopped = leads.filter((l) => l.error === 'auto_stopped').length;
+  const savedCents = autoStopped * (k.avg_cost_cents || 0);
 
   const isActive = c.status === 'dripping' || c.status === 'throttled';
   const isScheduled = c.status === 'scheduled';
@@ -107,6 +111,17 @@ export default function OpmCampaignDetail() {
       )}
 
       {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+
+      {/* Auto-stop savings — we found the owner on one number and skipped the rest to save spend. */}
+      {autoStopped > 0 && (
+        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+          <DollarSign className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+          <div>
+            <div className="font-bold">Auto-stopped {num(autoStopped)} extra call{autoStopped === 1 ? '' : 's'}{savedCents > 0 ? ` — saved ~${money(savedCents)}` : ''}</div>
+            <div className="mt-0.5">Once a lead came back interested (or gave a price) on one number, we skipped their other queued numbers — no need to keep dialing once we've reached the owner.</div>
+          </div>
+        </div>
+      )}
 
       {/* KPIs — cost is shown clearly here (customer-facing) */}
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
