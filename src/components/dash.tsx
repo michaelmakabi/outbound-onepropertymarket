@@ -287,13 +287,24 @@ export function MultiSelect({
 
 /* ------------------------------------------------------------------ audio player */
 
-export function AudioPlayer({ src, compact }: { src?: string | null; compact?: boolean }) {
+export function AudioPlayer({ src, compact, onTime, seekRef }: { src?: string | null; compact?: boolean; onTime?: (t: number) => void; seekRef?: { current: ((t: number) => void) | null } }) {
   const ref = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [cur, setCur] = useState(0);
   const [dur, setDur] = useState(0);
   const [rate, setRate] = useState(1);
   const RATES = [1, 1.5, 2];
+
+  // Expose an imperative seek() to the parent (e.g. click a transcript line to jump the audio there).
+  useEffect(() => {
+    if (!seekRef) return;
+    seekRef.current = (t: number) => {
+      const a = ref.current; if (!a) return;
+      a.currentTime = t; setCur(t);
+      a.play().then(() => setPlaying(true)).catch(() => {});
+    };
+    return () => { if (seekRef) seekRef.current = null; };
+  }, [seekRef]);
 
   if (!src) return <span className="text-xs text-slate-300">No recording</span>;
 
@@ -317,7 +328,7 @@ export function AudioPlayer({ src, compact }: { src?: string | null; compact?: b
   return (
     <div className={cx('flex items-center gap-2', compact ? 'w-[210px]' : 'w-full')} onClick={(e) => e.stopPropagation()}>
       <audio ref={ref} src={src} preload="none"
-        onTimeUpdate={(e) => setCur((e.target as HTMLAudioElement).currentTime)}
+        onTimeUpdate={(e) => { const t = (e.target as HTMLAudioElement).currentTime; setCur(t); onTime?.(t); }}
         onLoadedMetadata={(e) => setDur((e.target as HTMLAudioElement).duration)}
         onEnded={() => setPlaying(false)} />
       <button onClick={toggle} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-light text-brand hover:bg-brand hover:text-white">
