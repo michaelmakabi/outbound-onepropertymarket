@@ -6,7 +6,7 @@ import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
 import { PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState } from '../components/dash';
 import { num } from '../lib/format';
-import { Radio, Plus, PhoneOutgoing, Users, CheckCircle2, Loader2, ChevronRight, ChevronLeft, DollarSign, Search, X, ArrowRight, ArrowLeft, Upload, ListFilter, AlertTriangle, Clock, Phone, Timer } from 'lucide-react';
+import { Radio, Plus, PhoneOutgoing, Users, CheckCircle2, Loader2, ChevronRight, ChevronLeft, DollarSign, Search, X, ArrowRight, ArrowLeft, Upload, ListFilter, AlertTriangle, Clock, Phone, Timer, Info, Hash } from 'lucide-react';
 
 const LEADS_PAGE_SIZE = 50;
 
@@ -190,6 +190,10 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
   const [ws, setWs] = useState(lockedWorkspace || '');
   const [agents, setAgents] = useState<{ agent_id: string; agent_name: string }[]>([]);
   const [agentId, setAgentId] = useState('');
+  // Rich per-agent info (description/voice/type) for the "what does this agent do" tooltip, keyed by agent_id.
+  const [agentInfo, setAgentInfo] = useState<Record<string, any>>({});
+  // Caller-ID numbers assigned to this workspace's dialer + usage (most/last used) for the agent panel.
+  const [numUsage, setNumUsage] = useState<{ phone: string; total_calls: number; last_used: string | null }[]>([]);
 
   // Loaded leads for the chosen workspace (source for search+select and the calls estimate).
   const [leads, setLeads] = useState<any[]>([]);
@@ -231,10 +235,15 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
   // actually place its calls), list that account's agents, and preselect the configured agent so the
   // wizard shows exactly the agents that will dial for this workspace.
   const loadAgents = useCallback((slug: string) => {
-    if (!slug) { setAgents([]); setAgentId(''); return; }
+    if (!slug) { setAgents([]); setAgentId(''); setAgentInfo({}); setNumUsage([]); return; }
+    // Rich agent descriptions (best-effort) so the wizard can explain what each agent does.
+    const loadInfo = (s: string) => testai.agentsDetailed(s)
+      .then((d: any) => { const m: Record<string, any> = {}; for (const a of d.agents || []) m[a.agent_id] = a; setAgentInfo(m); })
+      .catch(() => setAgentInfo({}));
     opm.dialerConfig(slug).then((cfg: any) => {
       const dialerSlug = cfg?.dialer_slug || slug;
       const configured = cfg?.agent_id || '';
+      loadInfo(dialerSlug);
       testai.agents(dialerSlug).then((d: any) => {
         const list = d.agents || [];
         setAgents(list);
@@ -243,8 +252,11 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
       }).catch(() => { setAgents([]); setAgentId(''); });
     }).catch(() => {
       // No dialer config row — fall back to listing the workspace's own account directly.
+      loadInfo(slug);
       testai.agents(slug).then((d: any) => { const list = d.agents || []; setAgents(list); if (list.length) setAgentId(list[0].agent_id); }).catch(() => { setAgents([]); setAgentId(''); });
     });
+    // Caller-ID numbers + usage for this workspace's dialer (independent of which agent is picked).
+    opm.campaignNumberUsage(slug).then((d: any) => setNumUsage(Array.isArray(d?.numbers) ? d.numbers : [])).catch(() => setNumUsage([]));
   }, []);
 
   const phoneCountById = useMemo(() => {
@@ -450,6 +462,42 @@ function LaunchWizard({ workspaces, lockedWorkspace, onClose, onLaunched }: { wo
               {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
             </select>
             <p className="mt-3 text-sm text-slate-500">These are the agents on this workspace’s own dialer account. Its script, voice and assigned phone numbers will be used for every call in the campaign.</p>
+
+            {/* What this agent does — pulled from the AI Agents directory. */}
+            {agentId && agentInfo[agentId] && (
+              <div className="mt-4 rounded-2xl border border-brand/20 bg-brand-light/20 p-4">
+                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand"><Info className="h-3.5 w-3.5" /> What this agent does</div>
+                <div className="mt-1.5 text-sm leading-relaxed text-slate-700">{agentInfo[agentId].description || 'No description on file for this agent yet — open AI Agents to add one.'}</div>
+                <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                  {agentInfo[agentId].type && <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">{agentInfo[agentId].type}</span>}
+                  {agentInfo[agentId].voice_name && <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">Voice: {agentInfo[agentId].voice_name}</span>}
+                </div>
+              </div>
+            )}
+
+            {/* Which caller-ID numbers this agent will dial from + how heavily each has been used. */}
+            <div className="mt-4 rounded-2xl border border-line bg-surface p-4">
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500"><Hash className="h-3.5 w-3.5" /> Numbers this agent dials from</div>
+              {numUsage.length === 0 ? (
+                <div className="mt-2 flex items-center gap-2 text-sm text-amber-700"><AlertTriangle className="h-4 w-4 shrink-0" /> No caller-ID numbers are assigned to this workspace yet — assign numbers before launching.</div>
+              ) : (
+                <>
+                  <p className="mt-1.5 text-xs text-slate-500">Dialing rotates across these numbers to stay healthy. Ordered by most used; “last used” shows recent activity.</p>
+                  <div className="mt-2.5 space-y-1.5">
+                    {numUsage.slice(0, 8).map((n, i) => (
+                      <div key={n.phone} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm">
+                        <span className="flex items-center gap-2 font-mono text-slate-700">
+                          {n.phone}
+                          {i === 0 && n.total_calls > 0 && <span className="rounded bg-brand-light px-1.5 py-0.5 text-[10px] font-semibold text-brand">most used</span>}
+                        </span>
+                        <span className="text-xs text-slate-500">{num(n.total_calls)} call{n.total_calls === 1 ? '' : 's'}{n.last_used ? ` · last ${n.last_used}` : ' · never used'}</span>
+                      </div>
+                    ))}
+                    {numUsage.length > 8 && <div className="text-xs text-slate-400">+ {numUsage.length - 8} more number{numUsage.length - 8 === 1 ? '' : 's'}</div>}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 
