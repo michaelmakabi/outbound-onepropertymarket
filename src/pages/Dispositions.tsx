@@ -22,6 +22,21 @@ const COLUMNS: ColumnDef[] = [
 const isPositive = (d: string) => /appointment|booked|transfer|interested|completed/.test(d.toLowerCase()) && !d.toLowerCase().includes('not_interested');
 const isNoContact = (d: string) => /no_answer|busy|voicemail|inactivity|failed/.test(d.toLowerCase());
 
+// The full disposition vocabulary that should ALWAYS be visible (even at zero) on every account:
+// the 20 Standard 1PM pipeline statuses, plus the standard dispositions the voice platform (Retell)
+// reports natively. Actual call counts are merged in; any not seen in the range render as 0.
+const STANDARD_1PM = [
+  'new_lead', 'no_answer_attempt_1', 'no_answer_attempt_2', 'no_answer_attempt_3', 'voicemail_left',
+  'call_back', 'scheduled', 'wrong_number', 'do_not_call', 'not_interested', 'tire_kicker',
+  'possibly_interested', 'very_interested', 'appointment_booked', 'offer_sent', 'pending_negotiation',
+  'offer_accepted', 'rejected', 'deal_closed_successfully', 'deal_canceled',
+];
+const RETELL_STANDARD = [
+  'no_answer', 'busy', 'failed', 'ivr_reached', 'user_hangup', 'agent_hangup', 'completed',
+  'inactivity', 'machine_detected', 'voicemail_reached', 'spam', 'unlabeled',
+];
+const CANONICAL_DISPOSITIONS = [...new Set([...STANDARD_1PM, ...RETELL_STANDARD])];
+
 function DispTable({ rows }: { rows: Row[] }) {
   const getValue = useCallback((r: Row, key: string) => (r as any)[key], []);
   const t = useClientTable<Row>({ pageKey: 'dispositions', columns: COLUMNS, rows, getValue, initialSort: { by: 'count', dir: 'desc' } });
@@ -81,10 +96,19 @@ export default function Dispositions() {
     api.dispositions({ start: startMs, end: endMs, workspace: ws || undefined }).then(setD).finally(() => setLoading(false));
   }, [startMs, endMs, ws]);
 
-  const rows: Row[] = d?.dispositions ?? [];
-  const chartData = useMemo(() => rows.slice(0, 12).map((r) => ({ ...r, name: humanizeDisposition(r.disposition) })), [rows]);
-  const positive = rows.filter((r) => isPositive(r.disposition)).reduce((s, r) => s + r.count, 0);
-  const noContact = rows.filter((r) => isNoContact(r.disposition)).reduce((s, r) => s + r.count, 0);
+  const actualRows: Row[] = d?.dispositions ?? [];
+  // Always surface the full canonical vocabulary — merge in zero-count rows for anything not seen.
+  const rows: Row[] = useMemo(() => {
+    const seen = new Set(actualRows.map((r) => r.disposition));
+    const zeros = CANONICAL_DISPOSITIONS.filter((s) => !seen.has(s))
+      .map((s) => ({ disposition: s, count: 0, percentage: 0, costDollars: 0, avgCostPerCallDollars: 0 }));
+    return [...actualRows, ...zeros];
+  }, [actualRows]);
+  // Chart shows only dispositions that actually have calls (top 12) — zero rows would clutter it.
+  const chartData = useMemo(() => actualRows.filter((r) => r.count > 0).slice(0, 12).map((r) => ({ ...r, name: humanizeDisposition(r.disposition) })), [actualRows]);
+  const positive = actualRows.filter((r) => isPositive(r.disposition)).reduce((s, r) => s + r.count, 0);
+  const noContact = actualRows.filter((r) => isNoContact(r.disposition)).reduce((s, r) => s + r.count, 0);
+  const activeTypes = actualRows.filter((r) => r.count > 0).length;
   const total = d?.total ?? 0;
 
   return (
@@ -96,7 +120,7 @@ export default function Dispositions() {
         <div className="flex flex-col gap-5">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <KpiCard label="Total Calls" value={num(total)} icon={PhoneOff} accent="blue" />
-            <KpiCard label="Disposition Types" value={num(rows.length)} icon={ListChecks} />
+            <KpiCard label="Disposition Types" value={num(activeTypes)} sub={`of ${num(rows.length)} tracked`} icon={ListChecks} />
             <KpiCard label="Positive Outcomes" value={num(positive)} sub="booked / transfer / interested" icon={CheckCircle2} accent="green" />
             <KpiCard label="No Contact" value={num(noContact)} sub="no answer / voicemail / busy" icon={PieChart} accent="amber" />
           </div>
@@ -126,7 +150,7 @@ export default function Dispositions() {
             )}
           </SectionCard>
 
-          <SectionCard title="All Dispositions" description="Search, sort any column, toggle fields">
+          <SectionCard title="All Dispositions" description="Every standard 1PM + voice-platform disposition — search, sort, toggle fields">
             {rows.length === 0 ? <EmptyState text="No dispositions in this range." /> : <DispTable rows={rows} />}
           </SectionCard>
         </div>
