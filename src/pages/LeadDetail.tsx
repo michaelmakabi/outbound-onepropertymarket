@@ -91,7 +91,7 @@ export default function LeadDetail() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<'activity' | 'notes' | 'calls' | 'property' | 'ledger'>('activity');
+  const [tab, setTab] = useState<'activity' | 'notes' | 'calls' | 'property' | 'ledger' | 'details' | 'team'>('activity');
   const [ids, setIds] = useState<string[]>((location.state as any)?.ids || []);
   const [toast, setToast] = useState('');
 
@@ -404,7 +404,7 @@ export default function LeadDetail() {
     } finally { setCalling(false); }
   }
 
-  if (loading) return <div className="mx-auto max-w-[1400px]"><LoadingBlock label="Loading lead…" /></div>;
+  if (loading) return <div className="mx-auto max-w-[1200px]"><LoadingBlock label="Loading lead…" /></div>;
   if (!lead) return <EmptyState text="Lead not found." />;
 
   const initials = (lead.name || '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('');
@@ -413,15 +413,16 @@ export default function LeadDetail() {
   const movePipeline = pipelines.find((p) => String(p.id) === String(mp));
   const TABS = [
     { k: 'activity', label: 'Activity', n: notes.length },
-    { k: 'notes', label: 'Notes', n: null },
     { k: 'calls', label: 'Calls', n: leadCalls.length },
+    { k: 'details', label: 'Details', n: null },
+    { k: 'property', label: 'Property', n: null },
+    { k: 'team', label: 'Team', n: comments.length },
     { k: 'ledger', label: 'History', n: ledger.length },
-    { k: 'property', label: 'Property & Details', n: null },
   ] as const;
   const activityList = tab === 'notes' ? notes.filter((n) => n.source !== 'call') : notes;
 
   return (
-    <div className="mx-auto max-w-[1400px] text-sm">
+    <div className="mx-auto max-w-[1200px] text-sm">
       {/* top bar */}
       <div className="mb-4 flex items-center justify-between gap-3">
         <button onClick={() => nav('/leads', { state: { ids } })} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 transition hover:text-brand"><ArrowLeft className="h-4 w-4" /> All leads</button>
@@ -471,7 +472,7 @@ export default function LeadDetail() {
 
       {toast && <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700"><Check className="h-4 w-4" /> {toast}</div>}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         {/* LEFT column — dialing essentials only */}
         <div className="space-y-4">
           <Card title="Phone Numbers" count={owners.length}>
@@ -567,7 +568,51 @@ export default function LeadDetail() {
             </div>
           </Card>
 
-          <Card title="Details">
+        </div>
+
+        {/* RIGHT column */}
+        <div className="space-y-4">
+          {/* composer */}
+          <div className="rounded-2xl border border-line bg-white">
+            <div className="flex items-center gap-1 border-b border-line px-2 pt-2">
+              {COMPOSE_TABS.map((t) => (
+                <button key={t.k} onClick={() => setMode(t.k)} className={`inline-flex items-center gap-1.5 rounded-t-lg px-3 py-2 text-sm font-semibold transition ${mode === t.k ? 'bg-brand/5 text-brand' : 'text-slate-500 hover:text-ink'}`}>
+                  <t.icon className="h-3.5 w-3.5" /> {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2 p-3">
+              {mode === 'email' && <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="input w-full text-sm" />}
+              {mode === 'call' && (
+                <div className="flex flex-wrap gap-1.5">
+                  {CALL_OUTCOMES.map((o) => <button key={o} onClick={() => setCallOutcome(o)} className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${callOutcome === o ? 'border-brand bg-brand text-white' : 'border-line text-slate-600 hover:border-brand'}`}>{o}</button>)}
+                </div>
+              )}
+              <textarea value={body} onChange={(e) => setBody(e.target.value)}
+                placeholder={mode === 'note' ? 'Add a note… (saved with your name + timestamp)' : mode === 'email' ? 'Email body — logged to the timeline' : mode === 'text' ? 'Text message — logged to the timeline' : 'Call notes (optional)'}
+                className="input min-h-[80px] w-full resize-y text-sm" />
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">{mode === 'note' ? 'Saved as a note' : mode === 'call' ? 'Logs a call activity' : `Logs ${mode === 'email' ? 'an email' : 'a text'} touch`}</span>
+                <div className="flex gap-2">
+                  {mode === 'note' && <button onClick={aiNote} disabled={saving || !body.trim()} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> AI Note</button>}
+                  <button onClick={saveActivity} disabled={saving} className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{saving ? 'Saving…' : COMPOSE_TABS.find((t) => t.k === mode)!.label}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* tabbed panel */}
+          <div className="rounded-2xl border border-line bg-white">
+            <div className="flex flex-wrap items-center gap-1 border-b border-line px-2 pt-1">
+              {TABS.map((t) => (
+                <button key={t.k} onClick={() => setTab(t.k)} className={`rounded-t-lg px-3 py-2.5 text-sm font-semibold transition ${tab === t.k ? 'border-b-2 border-brand text-ink' : 'text-slate-500 hover:text-ink'}`}>
+                  {t.label}{t.n != null && <span className="ml-1 text-xs text-slate-400">{t.n}</span>}
+                </button>
+              ))}
+            </div>
+            <div className="p-4">
+              {tab === 'details' ? (
+                <div className="space-y-0">
             {/* Pipeline / Stage + inline Move editor */}
             <div className="border-b border-dashed border-line py-2">
               <div className="flex items-center justify-between gap-2">
@@ -697,51 +742,19 @@ export default function LeadDetail() {
             )}
 
             <button onClick={() => setTab('property')} className="mt-2 text-xs font-semibold text-brand hover:underline">View all property & parcel data →</button>
-          </Card>
-        </div>
-
-        {/* RIGHT column */}
-        <div className="space-y-4">
-          {/* composer */}
-          <div className="rounded-2xl border border-line bg-white">
-            <div className="flex items-center gap-1 border-b border-line px-2 pt-2">
-              {COMPOSE_TABS.map((t) => (
-                <button key={t.k} onClick={() => setMode(t.k)} className={`inline-flex items-center gap-1.5 rounded-t-lg px-3 py-2 text-sm font-semibold transition ${mode === t.k ? 'bg-brand/5 text-brand' : 'text-slate-500 hover:text-ink'}`}>
-                  <t.icon className="h-3.5 w-3.5" /> {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="space-y-2 p-3">
-              {mode === 'email' && <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="input w-full text-sm" />}
-              {mode === 'call' && (
-                <div className="flex flex-wrap gap-1.5">
-                  {CALL_OUTCOMES.map((o) => <button key={o} onClick={() => setCallOutcome(o)} className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition ${callOutcome === o ? 'border-brand bg-brand text-white' : 'border-line text-slate-600 hover:border-brand'}`}>{o}</button>)}
                 </div>
-              )}
-              <textarea value={body} onChange={(e) => setBody(e.target.value)}
-                placeholder={mode === 'note' ? 'Add a note… (saved with your name + timestamp)' : mode === 'email' ? 'Email body — logged to the timeline' : mode === 'text' ? 'Text message — logged to the timeline' : 'Call notes (optional)'}
-                className="input min-h-[80px] w-full resize-y text-sm" />
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400">{mode === 'note' ? 'Saved as a note' : mode === 'call' ? 'Logs a call activity' : `Logs ${mode === 'email' ? 'an email' : 'a text'} touch`}</span>
-                <div className="flex gap-2">
-                  {mode === 'note' && <button onClick={aiNote} disabled={saving || !body.trim()} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> AI Note</button>}
-                  <button onClick={saveActivity} disabled={saving} className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{saving ? 'Saving…' : COMPOSE_TABS.find((t) => t.k === mode)!.label}</button>
+              ) : tab === 'team' ? (
+                <div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-100 text-indigo-600"><MessagesSquare className="h-4 w-4" /></span>
+                    <div>
+                      <h3 className="text-sm font-bold text-ink">Team discussion — internal</h3>
+                      <p className="text-[11px] text-slate-500">Private to your workspace. The customer never sees this. @mention a teammate to notify them.</p>
+                    </div>
+                  </div>
+                  <MentionThread members={teamMembers} messages={comments} loading={commentsLoading} onPost={postComment} heightClass="max-h-[520px]" placeholder="Discuss this lead with your team… type @ to mention a teammate" emptyText="No internal comments yet. Start the discussion — @mention a teammate to loop them in." />
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {/* tabbed panel */}
-          <div className="rounded-2xl border border-line bg-white">
-            <div className="flex items-center gap-1 border-b border-line px-2 pt-1">
-              {TABS.map((t) => (
-                <button key={t.k} onClick={() => setTab(t.k)} className={`rounded-t-lg px-3 py-2.5 text-sm font-semibold transition ${tab === t.k ? 'border-b-2 border-brand text-ink' : 'text-slate-500 hover:text-ink'}`}>
-                  {t.label}{t.n != null && <span className="ml-1 text-xs text-slate-400">{t.n}</span>}
-                </button>
-              ))}
-            </div>
-            <div className="p-4">
-              {tab === 'property' ? (
+              ) : tab === 'property' ? (
                 parcelEntries.length === 0 ? <EmptyState text="No property data on this lead." /> : (
                   <dl className="grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
                     {parcelEntries.map(([k, v]) => (
@@ -877,27 +890,6 @@ export default function LeadDetail() {
         </div>
       </div>
 
-      {/* Team discussion — internal (distinct from customer-facing notes & the activity ledger) */}
-      <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50/40 p-4">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-100 text-indigo-600"><MessagesSquare className="h-4 w-4" /></span>
-          <div>
-            <h3 className="text-sm font-bold text-ink">Team discussion — internal</h3>
-            <p className="text-[11px] text-slate-500">Private to your workspace. The customer never sees this. Mention teammates with @ to notify them.</p>
-          </div>
-        </div>
-        <div className="mt-3">
-          <MentionThread
-            members={teamMembers}
-            messages={comments}
-            loading={commentsLoading}
-            onPost={postComment}
-            heightClass="max-h-[460px]"
-            placeholder="Discuss this lead with your team… type @ to mention a teammate"
-            emptyText="No internal comments yet. Start the discussion — @mention a teammate to loop them in."
-          />
-        </div>
-      </div>
 
       {callOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setCallOpen(false)}>
