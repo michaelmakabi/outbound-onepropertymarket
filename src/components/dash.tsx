@@ -568,6 +568,86 @@ export function ColumnFilterStack({
   );
 }
 
+/* --------------------------------------------- right-side slide-over drawer (GHL-style) */
+
+// A right-anchored panel that slides in over a dimmed backdrop. Used to tuck Filters / Columns /
+// Manage-fields UIs away so the page stays compact instead of stretching controls edge-to-edge.
+export function SlideOver({
+  open, onClose, title, subtitle, icon: Icon, children, footer, width = 'w-full sm:max-w-md',
+}: {
+  open: boolean; onClose: () => void; title: string; subtitle?: string; icon?: LucideIcon;
+  children: ReactNode; footer?: ReactNode; width?: string;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[60]">
+      <div className="absolute inset-0 bg-ink/30 backdrop-blur-[1px]" onClick={onClose} />
+      <div className={cx('absolute right-0 top-0 flex h-full flex-col bg-white shadow-2xl', width)} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div className="flex items-center gap-2.5">
+            {Icon && <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand"><Icon className="h-4 w-4" /></span>}
+            <div>
+              <h3 className="text-base font-bold text-ink">{title}</h3>
+              {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-surface hover:text-ink"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {footer && <div className="border-t border-line px-5 py-3">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+// Toolbar button with an optional active-count badge — the compact triggers that open a SlideOver.
+export function ToolbarButton({
+  icon: Icon, label, count, active, onClick,
+}: { icon?: LucideIcon; label: string; count?: number; active?: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className={cx('inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-semibold transition', active ? 'border-brand/40 bg-brand-light/50 text-brand' : 'border-line text-slate-600 hover:bg-surface')}>
+      {Icon && <Icon className="h-3.5 w-3.5" />} {label}
+      {typeof count === 'number' && count > 0 && <span className="rounded-full bg-brand px-1.5 py-0.5 text-[10px] font-bold text-white">{count}</span>}
+    </button>
+  );
+}
+
+// Searchable column visibility panel (GHL "Manage fields" style) — rendered inside a SlideOver.
+export function ColumnsDrawer({
+  open, onClose, columns, isVisible, onToggle,
+}: { open: boolean; onClose: () => void; columns: ColumnDef[]; isVisible: (k: string) => boolean; onToggle: (k: string) => void }) {
+  const [q, setQ] = useState('');
+  const shown = columns.filter((c) => c.label.toLowerCase().includes(q.trim().toLowerCase()));
+  const onCount = columns.filter((c) => isVisible(c.key)).length;
+  return (
+    <SlideOver open={open} onClose={onClose} title="Columns" subtitle={`${onCount} of ${columns.length} shown`} icon={SlidersHorizontal}>
+      <div className="relative mb-3">
+        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search fields…" className="input w-full pl-8" />
+      </div>
+      <div className="flex flex-col">
+        {shown.length === 0 && <div className="py-6 text-center text-xs text-slate-400">No fields match “{q}”.</div>}
+        {shown.map((c) => {
+          const on = isVisible(c.key);
+          return (
+            <button key={c.key} disabled={c.required} onClick={() => onToggle(c.key)} className={cx('flex items-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm', c.required ? 'cursor-not-allowed text-slate-300' : 'hover:bg-surface')}>
+              <span className={cx('flex h-4 w-4 shrink-0 items-center justify-center rounded border', on ? 'border-brand bg-brand text-white' : 'border-slate-300')}>{on && <Check className="h-3 w-3" />}</span>
+              <span className={cx('flex-1 truncate', on ? 'font-medium text-ink' : 'text-slate-600')}>{c.label || c.key}</span>
+              {c.required && <span className="text-[10px] font-semibold uppercase text-slate-300">locked</span>}
+            </button>
+          );
+        })}
+      </div>
+    </SlideOver>
+  );
+}
+
 /** Client-side searchable + sortable + column-toggle table state. */
 export function useClientTable<T>({
   pageKey, columns, rows, getValue, initialSort, rowFilter,
