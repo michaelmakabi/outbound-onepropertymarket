@@ -191,6 +191,13 @@ export default function SellerContacts() {
     pipelines.forEach((p: any) => (p.stages || []).forEach((s: any) => { m[String(s.id)] = s.name; }));
     return m;
   }, [pipelines]);
+  // Stages of a given pipeline (sorted). Used so the inline Stage selector offers the lead's OWN
+  // pipeline's stages — a Pitman lead picks Pitman stages; a Standard lead picks the 20 standard ones.
+  const stagesByPipeline = useMemo(() => {
+    const m: Record<string, any[]> = {};
+    pipelines.forEach((p: any) => { m[String(p.id)] = (p.stages || []).slice().sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)); });
+    return m;
+  }, [pipelines]);
   // Optimistic per-lead stage edits (applied over the loaded data until the next refresh).
   const [stageOverrides, setStageOverrides] = useState<Record<string, { id: number | null; name: string }>>({});
   // Resolve a record's current stage → { id, name } honoring any optimistic override, then stage_id, then legacy crm_stage text.
@@ -203,7 +210,8 @@ export default function SellerContacts() {
   const changeStage = useCallback(async (r: any, val: string) => {
     const stage_id = val ? Number(val) : null;
     const name = stage_id != null ? (stageNameById[val] || '') : '';
-    const pipeline_id = stage_id != null ? (stdPipeline?.id ?? r.pipeline_id ?? null) : (r.pipeline_id ?? null);
+    // Move within the lead's OWN pipeline; fall back to the Standard pipeline when it has none.
+    const pipeline_id = r.pipeline_id ?? stdPipeline?.id ?? null;
     const prev = stageOverrides[r.lead_id];
     setStageOverrides((s) => ({ ...s, [r.lead_id]: { id: stage_id, name } }));
     try {
@@ -737,18 +745,21 @@ export default function SellerContacts() {
                         {isVisible('crm_stage') && (() => {
                           const st = stageOf(r);
                           const color = statusColor(st.name) || '#64748b';
-                          const inStd = stdStages.some((s: any) => String(s.id) === String(st.id));
+                          // Offer the lead's OWN pipeline's stages (Pitman lead → Pitman stages);
+                          // fall back to the Standard 20 when the lead has no pipeline yet.
+                          const rowStages = stagesByPipeline[String(r.pipeline_id)] || stdStages;
+                          const inRow = rowStages.some((s: any) => String(s.id) === String(st.id));
                           return (
                             <td className="whitespace-nowrap px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                              <div className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2 py-1 hover:border-brand/40" title="Set stage — mirrors the call-disposition set">
+                              <div className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2 py-1 hover:border-brand/40" title="Set stage">
                                 <StageIcon name={statusIconName(st.name)} color={color} className="h-3.5 w-3.5 shrink-0" />
                                 <select value={st.id != null ? String(st.id) : ''} onChange={(e) => changeStage(r, e.target.value)}
                                   className="max-w-[150px] cursor-pointer border-0 bg-transparent p-0 pr-4 text-xs font-semibold focus:outline-none focus:ring-0"
                                   style={{ color }}>
                                   <option value="">— No stage —</option>
-                                  {/* Preserve a legacy stage that isn't on the Standard board so its label still shows. */}
-                                  {!inStd && st.name && <option value={st.id != null ? String(st.id) : ''}>{st.name}</option>}
-                                  {stdStages.map((s: any) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+                                  {/* Preserve the current stage as an option if it isn't in the listed set. */}
+                                  {!inRow && st.name && <option value={st.id != null ? String(st.id) : ''}>{st.name}</option>}
+                                  {rowStages.map((s: any) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
                                 </select>
                               </div>
                             </td>
