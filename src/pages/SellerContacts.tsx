@@ -11,6 +11,7 @@ import {
   ColumnDef, SortableHead, useClientTable, ColumnFilterStack, useColumnFilters, SlideOver, ToolbarButton, ColumnsDrawer,
 } from '../components/dash';
 import { num, dateTime, secs, humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
+import { statusColor, statusIconName } from '../lib/statuses';
 import { StageIcon } from '../lib/statusIcons';
 import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star, UserCheck, Tag, Filter } from 'lucide-react';
 
@@ -148,6 +149,9 @@ export default function SellerContacts() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // Once fresh lead data lands (import/assign/delete → load()), drop optimistic stage overrides.
+  useEffect(() => { setStageOverrides({}); }, [leadRows]);
+
   const loadFields = useCallback(() => { opm.customFields().then((d: any) => setCustomFields(d.fields || [])).catch(() => setCustomFields([])); }, []);
   useEffect(() => { loadFields(); }, [loadFields]);
 
@@ -176,6 +180,39 @@ export default function SellerContacts() {
   }, []);
 
   const pipeName = useMemo(() => Object.fromEntries(pipelines.map((p) => [p.id, p.name])), [pipelines]);
+
+  // Stage taxonomy: the "Standard 1PM Pipeline" is the canonical board whose 20 stages match the
+  // call-disposition set 1:1 (see src/lib/statuses.ts). The Stage column renders + is edited against it,
+  // so a lead's stage reads the same vocabulary as its Call History dispositions.
+  const stdPipeline = useMemo(() => pipelines.find((p: any) => p.name === 'Standard 1PM Pipeline') || null, [pipelines]);
+  const stdStages = useMemo<any[]>(() => (stdPipeline?.stages || []).slice().sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)), [stdPipeline]);
+  const stageNameById = useMemo(() => {
+    const m: Record<string, string> = {};
+    pipelines.forEach((p: any) => (p.stages || []).forEach((s: any) => { m[String(s.id)] = s.name; }));
+    return m;
+  }, [pipelines]);
+  // Optimistic per-lead stage edits (applied over the loaded data until the next refresh).
+  const [stageOverrides, setStageOverrides] = useState<Record<string, { id: number | null; name: string }>>({});
+  // Resolve a record's current stage → { id, name } honoring any optimistic override, then stage_id, then legacy crm_stage text.
+  const stageOf = useCallback((r: any): { id: number | null; name: string } => {
+    const ov = stageOverrides[r.lead_id];
+    if (ov) return ov;
+    if (r.stage_id != null && stageNameById[String(r.stage_id)]) return { id: r.stage_id, name: stageNameById[String(r.stage_id)] };
+    return { id: r.stage_id ?? null, name: r.crm_stage || '' };
+  }, [stageOverrides, stageNameById]);
+  const changeStage = useCallback(async (r: any, val: string) => {
+    const stage_id = val ? Number(val) : null;
+    const name = stage_id != null ? (stageNameById[val] || '') : '';
+    const pipeline_id = stage_id != null ? (stdPipeline?.id ?? r.pipeline_id ?? null) : (r.pipeline_id ?? null);
+    const prev = stageOverrides[r.lead_id];
+    setStageOverrides((s) => ({ ...s, [r.lead_id]: { id: stage_id, name } }));
+    try {
+      await opm.moveLead({ lead_id: r.lead_id, stage_id, pipeline_id });
+    } catch (e: any) {
+      setStageOverrides((s) => { const n = { ...s }; if (prev) n[r.lead_id] = prev; else delete n[r.lead_id]; return n; });
+      window.alert(e?.message || 'Could not update the stage.');
+    }
+  }, [stageNameById, stdPipeline, stageOverrides]);
 
   // ---- Build record-centric rows keyed by lead_id ----
   // Group the per-number contact rows under their lead, then merge in the per-record
@@ -315,7 +352,7 @@ export default function SellerContacts() {
       case 'name': return r.lead_name || '';
       case 'numbers': return r.numbersCount || 0;
       case 'property': return `${r.property_ref || ''} ${r.address || ''}`;
-      case 'crm_stage': return r.crm_stage || '';
+      case 'crm_stage': return stageOf(r).name || '';
       case 'pipeline': return r.pipeline_name || '';
       case 'deal_price': return Number(r.deal_price) || 0;
       case 'lead_source': return r.lead_source || '';
@@ -330,7 +367,7 @@ export default function SellerContacts() {
       case '__phones': return (r.numbers || []).map((n: any) => (n.phone || '').replace(/\D/g, '')).join(' ');
       default: return key.startsWith('cf_lead_') ? cfValue(r, key) : '';
     }
-  }, [cfValue, lastCalls]);
+  }, [cfValue, lastCalls, stageOf]);
 
   const visibleColumns = useMemo<ColumnDef[]>(() => [...COLUMNS, ...customCols], [customCols]);
   // Include a hidden "__phones" column so useClientTable's search also scans phone digits.
@@ -391,7 +428,7 @@ export default function SellerContacts() {
     const src = selected.size ? rows.filter((r) => selected.has(r.lead_id)) : rows;
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = [cols.join(',')];
-    src.forEach((r, i) => lines.push([i + 1, r.lead_name, r.numbersCount, r.primary ? r.primary.phone : '', r.property_ref, r.address, r.crm_stage, r.pipeline_name, r.deal_price || '', r.lead_source, r.assigned_to, (r.tags || []).join('; '), r.lead_id].map(esc).join(',')));
+    src.forEach((r, i) => lines.push([i + 1, r.lead_name, r.numbersCount, r.primary ? r.primary.phone : '', r.property_ref, r.address, stageOf(r).name, r.pipeline_name, r.deal_price || '', r.lead_source, r.assigned_to, (r.tags || []).join('; '), r.lead_id].map(esc).join(',')));
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `contacts-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
   };
@@ -697,7 +734,26 @@ export default function SellerContacts() {
                         </td>}
                         {isVisible('numbers') && <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-slate-600">{r.numbersCount} · <span className="text-emerald-600">{r.verifiedCount}✓</span></td>}
                         {isVisible('property') && <td className="max-w-[240px] px-3 py-2.5"><div className="truncate text-xs text-slate-700">{r.property_ref || '—'}</div>{r.address && <div className="truncate text-[10px] text-slate-400">{r.address}</div>}</td>}
-                        {isVisible('crm_stage') && <td className="whitespace-nowrap px-3 py-2.5"><span className="pill bg-brand/10 text-brand">{r.crm_stage || '—'}</span></td>}
+                        {isVisible('crm_stage') && (() => {
+                          const st = stageOf(r);
+                          const color = statusColor(st.name) || '#64748b';
+                          const inStd = stdStages.some((s: any) => String(s.id) === String(st.id));
+                          return (
+                            <td className="whitespace-nowrap px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                              <div className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-2 py-1 hover:border-brand/40" title="Set stage — mirrors the call-disposition set">
+                                <StageIcon name={statusIconName(st.name)} color={color} className="h-3.5 w-3.5 shrink-0" />
+                                <select value={st.id != null ? String(st.id) : ''} onChange={(e) => changeStage(r, e.target.value)}
+                                  className="max-w-[150px] cursor-pointer border-0 bg-transparent p-0 pr-4 text-xs font-semibold focus:outline-none focus:ring-0"
+                                  style={{ color }}>
+                                  <option value="">— No stage —</option>
+                                  {/* Preserve a legacy stage that isn't on the Standard board so its label still shows. */}
+                                  {!inStd && st.name && <option value={st.id != null ? String(st.id) : ''}>{st.name}</option>}
+                                  {stdStages.map((s: any) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+                                </select>
+                              </div>
+                            </td>
+                          );
+                        })()}
                         {isVisible('pipeline') && <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600">{r.pipeline_name || '—'}</td>}
                         {isVisible('deal_price') && <td className="px-3 py-2.5 text-right">{r.deal_price ? `$${num(r.deal_price)}` : '—'}</td>}
                         {isVisible('lead_source') && <td className="max-w-[150px] truncate px-3 py-2.5 text-xs text-slate-500">{r.lead_source || '—'}</td>}
