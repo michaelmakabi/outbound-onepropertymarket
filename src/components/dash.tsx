@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState, useCallback } from 're
 import {
   Loader2, LucideIcon, SlidersHorizontal, ArrowUp, ArrowDown, ChevronsUpDown,
   Search, Check, X, RefreshCw, Bookmark, Plus, Play, Pause, Calendar as CalendarIcon,
+  Filter, Trash2,
 } from 'lucide-react';
 import { useFilters, RangePreset } from '../lib/filters';
 import { OUTCOME_ORDER, outcomeLabel, outcomeColor, num as fnum, pct as fpct } from '../lib/format';
@@ -451,12 +452,129 @@ export function SavedViews<T>({
   );
 }
 
+/* --------------------------------------------- per-column filter stack (GHL-style AND/OR) */
+
+// One condition in the layered stack. `key` is a column key resolvable by the table's getValue.
+export type FilterOp =
+  | 'contains' | 'not_contains' | 'equals' | 'starts' | 'ends'
+  | 'empty' | 'not_empty' | 'gt' | 'lt';
+export type ColumnFilterCond = { id: string; key: string; op: FilterOp; value: string };
+export type ColumnFilterState = { combinator: 'AND' | 'OR'; conds: ColumnFilterCond[] };
+
+// Operators that need no value (a half-typed row with a value-op and empty value is treated as inactive).
+const VALUELESS_OPS: FilterOp[] = ['empty', 'not_empty'];
+const OP_LABEL: Record<FilterOp, string> = {
+  contains: 'contains', not_contains: 'does not contain', equals: 'is exactly',
+  starts: 'starts with', ends: 'ends with', empty: 'is empty', not_empty: 'is not empty',
+  gt: '> (greater)', lt: '< (less)',
+};
+const OP_ORDER: FilterOp[] = ['contains', 'not_contains', 'equals', 'starts', 'ends', 'gt', 'lt', 'empty', 'not_empty'];
+
+const condActive = (c: ColumnFilterCond) => !!c.key && (VALUELESS_OPS.includes(c.op) || c.value.trim() !== '');
+
+// Evaluate one condition against a cell value produced by the table's getValue().
+function evalCond(cell: string | number, c: ColumnFilterCond): boolean {
+  const s = String(cell ?? '').toLowerCase();
+  const v = c.value.trim().toLowerCase();
+  switch (c.op) {
+    case 'contains': return s.includes(v);
+    case 'not_contains': return !s.includes(v);
+    case 'equals': return s === v;
+    case 'starts': return s.startsWith(v);
+    case 'ends': return s.endsWith(v);
+    case 'empty': return s === '';
+    case 'not_empty': return s !== '';
+    case 'gt': case 'lt': {
+      const na = Number(cell), nb = Number(c.value);
+      const numeric = !Number.isNaN(na) && !Number.isNaN(nb) && c.value.trim() !== '';
+      const cmp = numeric ? (na - nb) : s.localeCompare(v);
+      return c.op === 'gt' ? cmp > 0 : cmp < 0;
+    }
+    default: return true;
+  }
+}
+
+// State + serializable value + a memoized predicate for a layered column-filter stack.
+export function useColumnFilters<T>(getValue: (r: T, key: string) => string | number, initial?: ColumnFilterState) {
+  const [combinator, setCombinator] = useState<'AND' | 'OR'>(initial?.combinator ?? 'AND');
+  const [conds, setConds] = useState<ColumnFilterCond[]>(initial?.conds ?? []);
+  const nextId = () => `f${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+  const add = (key = '') => setConds((cs) => [...cs, { id: nextId(), key, op: 'contains', value: '' }]);
+  const update = (id: string, patch: Partial<ColumnFilterCond>) => setConds((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const removeCond = (id: string) => setConds((cs) => cs.filter((c) => c.id !== id));
+  const clear = () => setConds([]);
+  const activeConds = useMemo(() => conds.filter(condActive), [conds]);
+  const activeCount = activeConds.length;
+  const predicate = useMemo(() => {
+    if (activeConds.length === 0) return null as null | ((r: T) => boolean);
+    return (r: T) => {
+      const results = activeConds.map((c) => evalCond(getValue(r, c.key), c));
+      return combinator === 'AND' ? results.every(Boolean) : results.some(Boolean);
+    };
+  }, [activeConds, combinator, getValue]);
+  const apply = (s: ColumnFilterState | undefined | null) => { setCombinator(s?.combinator ?? 'AND'); setConds(s?.conds ?? []); };
+  const state: ColumnFilterState = { combinator, conds };
+  return { combinator, setCombinator, conds, setConds, add, update, removeCond, clear, predicate, activeCount, state, apply };
+}
+
+// Layered per-column filter UI: N stacked [column][operator][value] rows joined by AND / OR.
+export function ColumnFilterStack({
+  columns, ctrl,
+}: { columns: ColumnDef[]; ctrl: ReturnType<typeof useColumnFilters<any>> }) {
+  const { combinator, setCombinator, conds, add, update, removeCond, clear, activeCount } = ctrl;
+  return (
+    <div className="rounded-xl border border-line bg-surface/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500"><Filter className="h-3.5 w-3.5" /> Column filters</span>
+          {conds.length > 1 && (
+            <div className="inline-flex overflow-hidden rounded-lg border border-line">
+              {(['AND', 'OR'] as const).map((m) => (
+                <button key={m} onClick={() => setCombinator(m)} className={cx('px-2.5 py-1 text-[11px] font-bold transition', combinator === m ? 'bg-brand text-white' : 'bg-white text-slate-500 hover:text-ink')}>{m}</button>
+              ))}
+            </div>
+          )}
+          {activeCount > 0 && <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand">{activeCount} active</span>}
+        </div>
+        {conds.length > 0 && <button onClick={clear} className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /> Clear all</button>}
+      </div>
+
+      {conds.length === 0 ? (
+        <div className="text-xs text-slate-400">No column filters. Add one to search a specific field — stack several and combine them with AND / OR.</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {conds.map((c, i) => {
+            const valueless = VALUELESS_OPS.includes(c.op);
+            return (
+              <div key={c.id} className="flex flex-wrap items-center gap-2">
+                <span className="w-9 shrink-0 text-[10px] font-bold uppercase text-slate-400">{i === 0 ? 'Where' : combinator}</span>
+                <select value={c.key} onChange={(e) => update(c.id, { key: e.target.value })} className="input !py-1.5 text-sm">
+                  <option value="">Select column…</option>
+                  {columns.map((col) => <option key={col.key} value={col.key}>{col.label}</option>)}
+                </select>
+                <select value={c.op} onChange={(e) => update(c.id, { op: e.target.value as FilterOp })} className="input !py-1.5 text-sm">
+                  {OP_ORDER.map((op) => <option key={op} value={op}>{OP_LABEL[op]}</option>)}
+                </select>
+                <input value={valueless ? '' : c.value} disabled={valueless} onChange={(e) => update(c.id, { value: e.target.value })} placeholder={valueless ? '—' : 'value'} className="input !py-1.5 text-sm disabled:bg-surface disabled:opacity-50" />
+                <button onClick={() => removeCond(c.id)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <button onClick={() => add()} className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"><Plus className="h-3.5 w-3.5" /> Add column filter</button>
+    </div>
+  );
+}
+
 /** Client-side searchable + sortable + column-toggle table state. */
 export function useClientTable<T>({
-  pageKey, columns, rows, getValue, initialSort,
+  pageKey, columns, rows, getValue, initialSort, rowFilter,
 }: {
   pageKey: string; columns: ColumnDef[]; rows: T[];
   getValue: (r: T, key: string) => string | number; initialSort?: SortState;
+  rowFilter?: ((r: T) => boolean) | null;
 }) {
   const { isVisible, toggle } = useColumnVisibility(pageKey, columns);
   const [search, setSearch] = useState('');
@@ -465,9 +583,10 @@ export function useClientTable<T>({
   const searchKeys = useMemo(() => columns.map((c) => c.key), [columns]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => searchKeys.some((k) => String(getValue(r, k) ?? '').toLowerCase().includes(q)));
-  }, [rows, search, searchKeys, getValue]);
+    let base = rowFilter ? rows.filter(rowFilter) : rows;
+    if (!q) return base;
+    return base.filter((r) => searchKeys.some((k) => String(getValue(r, k) ?? '').toLowerCase().includes(q)));
+  }, [rows, search, searchKeys, getValue, rowFilter]);
 
   const sorted = useMemo(() => {
     if (!sort) return filtered;
