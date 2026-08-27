@@ -11,7 +11,7 @@ import { StageIcon } from '../lib/statusIcons';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
   Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check, X, Loader2, History,
-  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing, Trash2, Home, Users, UserCheck, Lock,
+  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing, Trash2, Home, Users, UserCheck, Lock, Send,
 } from 'lucide-react';
 
 const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) · OUTBOUND' };
@@ -91,7 +91,7 @@ export default function LeadDetail() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<'activity' | 'notes' | 'calls' | 'property' | 'ledger' | 'details' | 'team'>('activity');
+  const [tab, setTab] = useState<'activity' | 'notes' | 'calls' | 'property' | 'ledger' | 'details' | 'team' | 'loi'>('activity');
   const [ids, setIds] = useState<string[]>((location.state as any)?.ids || []);
   const [toast, setToast] = useState('');
 
@@ -130,11 +130,11 @@ export default function LeadDetail() {
   // CRM structure for the inline Move editor + custom-field schema.
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [customFields, setCustomFields] = useState<any[]>([]);
-  // Inline Move (pipeline/stage) editor.
-  const [moveOpen, setMoveOpen] = useState(false);
-  const [mp, setMp] = useState<any>('');
-  const [ms, setMs] = useState<any>('');
-  const [moving, setMoving] = useState(false);
+  // Opportunities: this contact can sit in several pipelines at once (one opportunity per pipeline).
+  // The Standard 1PM opportunity is call-driven; custom-pipeline opportunities move independently.
+  const [opps, setOpps] = useState<any[]>([]);
+  const [oppAvail, setOppAvail] = useState<any[]>([]);
+  const [oppBusy, setOppBusy] = useState(false);
   // Tag composer.
   const [tagInput, setTagInput] = useState('');
   // Custom-field draft + save state.
@@ -233,8 +233,11 @@ export default function LeadDetail() {
     setAddr({ Street: a.Street || '', City: a.City || '', State: a.State || '', Zip: a.Zip || '' });
     setBg(L?.background || '');
     setNameVal(L?.name || '');
-    setMoveOpen(false); setEditName(false); setAddNumOpen(false);
+    setEditName(false); setAddNumOpen(false);
   }, [data?.lead?.lead_id]);
+  // Load this contact's opportunities (all pipelines it sits in) + the pipelines it can still be added to.
+  const loadOpps = () => opm.oppsForLead(id).then((d: any) => { setOpps(d.opportunities || []); setOppAvail(d.available || []); }).catch(() => {});
+  useEffect(() => { loadOpps(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const idx = ids.indexOf(id);
   const prevId = idx > 0 ? ids[idx - 1] : null;
@@ -314,17 +317,65 @@ export default function LeadDetail() {
     setToast('Custom fields saved.');
     setTimeout(() => setToast(''), 3000);
   }
-  function openMove() {
-    setMp(lead?.pipeline_id ?? '');
-    setMs(lead?.stage_id ?? '');
-    setMoveOpen(true);
+  // Move one opportunity's stage (this pipeline only — other pipeline positions are untouched).
+  async function changeOppStage(o: any, stageId: number) {
+    setOpps((prev) => prev.map((x) => (x.opportunity_id === o.opportunity_id ? { ...x, stage_id: stageId } : x)));
+    try { await opm.oppsMove({ opportunity_id: o.opportunity_id, stage_id: stageId }); load(); }
+    catch (e: any) { flash(e?.message || 'Move failed.'); loadOpps(); }
   }
-  async function doMove() {
-    if (!mp || !ms) return;
-    setMoving(true);
-    try { await opm.moveLead({ lead_id: id, pipeline_id: mp, stage_id: ms }); setMoveOpen(false); load(); }
-    catch (e: any) { setToast('Move failed: ' + (e?.message || 'error')); setTimeout(() => setToast(''), 4000); }
-    finally { setMoving(false); }
+  // Add this contact to another pipeline as a new opportunity (lands on that pipeline's first stage).
+  async function addOpp(pipelineId: number) {
+    if (!pipelineId || oppBusy) return;
+    setOppBusy(true);
+    try { await opm.oppsAdd({ lead_id: id, pipeline_id: pipelineId }); await loadOpps(); load(); flash('Added to pipeline.'); }
+    catch (e: any) { flash(e?.message || 'Could not add to pipeline.'); } finally { setOppBusy(false); }
+  }
+  async function removeOpp(o: any) {
+    if (o.is_standard) { flash('The Standard 1PM opportunity is always kept.'); return; }
+    if (!confirm(`Remove this contact from "${o.pipeline_name}"?`)) return;
+    try { await opm.oppsRemove(o.opportunity_id); await loadOpps(); load(); }
+    catch (e: any) { flash(e?.message || 'Could not remove.'); }
+  }
+
+  // ---- LOI (Letter of Intent) ----
+  const [loiFields, setLoiFields] = useState<any>({});
+  const [loiBody, setLoiBody] = useState('');
+  const [loiSentAt, setLoiSentAt] = useState<string | null>(null);
+  const [loiBusy, setLoiBusy] = useState('');
+  useEffect(() => {
+    opm.loiGet(id).then((d: any) => {
+      const dr = d.draft; const def = d.defaults || {};
+      setLoiFields(dr?.fields && Object.keys(dr.fields).length ? dr.fields
+        : { buyer_name: def.buyer_name, offer_price: def.offer_price ?? '', property_address: def.property_address || '', earnest_money: def.earnest_money, closing_days: def.closing_days, inspection_days: def.inspection_days });
+      setLoiBody(dr?.body_text || '');
+      setLoiSentAt(dr?.sent_at || null);
+    }).catch(() => {});
+  }, [id]);
+  const setLf = (k: string, v: any) => setLoiFields((f: any) => ({ ...f, [k]: v }));
+  async function genLoi() {
+    setLoiBusy('gen');
+    try { const d: any = await opm.loiGenerate(id, loiFields); setLoiFields(d.fields || loiFields); setLoiBody(d.body_text || ''); flash('LOI draft generated.'); }
+    catch (e: any) { flash(e?.message || 'Could not generate.'); } finally { setLoiBusy(''); }
+  }
+  async function saveLoi() {
+    setLoiBusy('save');
+    try { await opm.loiSave(id, loiFields, loiBody); flash('LOI saved.'); }
+    catch (e: any) { flash(e?.message || 'Could not save.'); } finally { setLoiBusy(''); }
+  }
+  async function sendLoi() {
+    if (!confirm('Mark this LOI as sent and move the contact to “Offer sent”?')) return;
+    setLoiBusy('send');
+    try { const r: any = await opm.loiSend(id, loiFields, loiBody); setLoiSentAt(new Date().toISOString()); loadOpps(); load(); flash(r?.advanced_to ? 'LOI sent — moved to “Offer sent”.' : 'LOI marked sent.'); }
+    catch (e: any) { flash(e?.message || 'Could not send.'); } finally { setLoiBusy(''); }
+  }
+  function exportLoiPdf() {
+    const w = window.open('', '_blank');
+    if (!w) { flash('Allow pop-ups to export the PDF.'); return; }
+    const esc = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const bodyHtml = esc(loiBody).replace(/\n/g, '<br>');
+    const brand = esc(loiFields.buyer_name || '1PropertyMarket');
+    w.document.write(`<html><head><title>Letter of Intent — ${esc(lead.name || '')}</title><style>body{font-family:Georgia,'Times New Roman',serif;color:#111;max-width:720px;margin:40px auto;padding:0 24px;line-height:1.65;font-size:14px}.brand{color:#0A2E73;font-weight:800;font-size:20px;letter-spacing:.3px;border-bottom:2px solid #3DC2F2;padding-bottom:8px;margin-bottom:22px}.sig{margin-top:52px}.line{border-bottom:1px solid #888;width:280px;margin:30px 0 6px}@media print{body{margin:0}}</style></head><body><div class="brand">${brand}</div>${bodyHtml}<div class="sig"><div class="line"></div>Seller signature &nbsp;&nbsp; Date: ______________</div><script>window.onload=function(){window.print()}<\/script></body></html>`);
+    w.document.close();
   }
   const toggleTx = (cid: string) => setOpenTx((s) => { const n = new Set(s); n.has(cid) ? n.delete(cid) : n.add(cid); return n; });
 
@@ -410,12 +461,12 @@ export default function LeadDetail() {
   const initials = (lead.name || '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('');
   const verifiedN = contacts.filter((c) => c.phone_verified).length;
   const parcelEntries = Object.entries(parcel).filter(([k, v]) => k !== 'is related' && k !== 'lat long' && v !== '' && v != null);
-  const movePipeline = pipelines.find((p) => String(p.id) === String(mp));
   const TABS = [
     { k: 'activity', label: 'Activity', n: notes.length },
     { k: 'calls', label: 'Calls', n: leadCalls.length },
     { k: 'details', label: 'Details', n: null },
     { k: 'property', label: 'Property', n: null },
+    { k: 'loi', label: 'LOI', n: null },
     { k: 'team', label: 'Team', n: comments.length },
     { k: 'ledger', label: 'History', n: ledger.length },
   ] as const;
@@ -613,40 +664,37 @@ export default function LeadDetail() {
             <div className="p-4">
               {tab === 'details' ? (
                 <div className="space-y-0">
-            {/* Pipeline / Stage + inline Move editor */}
+            {/* Opportunities — this contact can sit in several pipelines at once. The Standard 1PM
+                opportunity is call-driven; each custom pipeline moves independently. */}
             <div className="border-b border-dashed border-line py-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="shrink-0 text-slate-500">Pipeline / Stage</span>
-                <button onClick={() => (moveOpen ? setMoveOpen(false) : openMove())} className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline">
-                  <GitBranch className="h-3 w-3" /> {moveOpen ? 'Close' : 'Move'}
-                </button>
+              <div className="mb-1.5 flex items-center gap-1.5 text-slate-500"><GitBranch className="h-3 w-3" /> Opportunities <span className="text-[10px] text-slate-400">({opps.length})</span></div>
+              <div className="space-y-1.5">
+                {opps.length === 0 && <div className="text-xs text-slate-400">No pipelines yet.</div>}
+                {opps.map((o) => {
+                  const pstages = (pipelines.find((p: any) => String(p.id) === String(o.pipeline_id))?.stages || []);
+                  return (
+                    <div key={o.opportunity_id} className="rounded-lg border border-line p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-xs font-semibold text-ink" title={o.pipeline_name}>{o.pipeline_name}</span>
+                          {o.is_standard && <span className="shrink-0 rounded bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-brand" title="Always driven by call dispositions">Calls</span>}
+                          {o.is_primary && <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-700">Primary</span>}
+                        </div>
+                        {!o.is_standard && <button onClick={() => removeOpp(o)} title="Remove from this pipeline" className="shrink-0 rounded p-0.5 text-slate-300 transition hover:text-red-500"><X className="h-3.5 w-3.5" /></button>}
+                      </div>
+                      <select value={o.stage_id ?? ''} onChange={(e) => changeOppStage(o, Number(e.target.value))} className="input mt-1.5 h-8 w-full text-xs">
+                        {pstages.length === 0 && <option value={o.stage_id ?? ''}>{o.stage_name}</option>}
+                        {pstages.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <StagePill name={lead.stage_name || lead.crm_stage} color={lead.stage_color} />
-                <span className="text-xs text-slate-400">{lead.pipeline_name || '—'}</span>
-              </div>
-              {moveOpen && (
-                <div className="mt-2 space-y-2 rounded-lg border border-line bg-surface/60 p-2.5">
-                  <div>
-                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Pipeline</label>
-                    <select value={mp} onChange={(e) => { setMp(e.target.value); const p = pipelines.find((x) => String(x.id) === e.target.value); setMs(p?.stages?.[0]?.id ?? ''); }} className="input w-full text-sm">
-                      {pipelines.length === 0 && <option value="">Loading…</option>}
-                      {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Stage</label>
-                    <select value={ms} onChange={(e) => setMs(e.target.value)} className="input w-full text-sm">
-                      {(movePipeline?.stages || []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setMoveOpen(false)} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-white">Cancel</button>
-                    <button onClick={doMove} disabled={moving || !mp || !ms} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
-                      {moving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
-                    </button>
-                  </div>
-                </div>
+              {oppAvail.length > 0 && (
+                <select value="" disabled={oppBusy} onChange={(e) => { const v = e.target.value; e.currentTarget.value = ''; if (v) addOpp(Number(v)); }} className="input mt-1.5 h-8 w-full text-xs">
+                  <option value="">+ Add to another pipeline…</option>
+                  {oppAvail.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               )}
             </div>
 
@@ -742,6 +790,31 @@ export default function LeadDetail() {
             )}
 
             <button onClick={() => setTab('property')} className="mt-2 text-xs font-semibold text-brand hover:underline">View all property & parcel data →</button>
+                </div>
+              ) : tab === 'loi' ? (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-ink">Letter of Intent</div>
+                    {loiSentAt && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Sent {new Date(loiSentAt).toLocaleDateString()}</span>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <label className="text-[11px] font-semibold text-slate-500">Offer price<input type="number" value={loiFields.offer_price ?? ''} onChange={(e) => setLf('offer_price', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-500">Earnest money<input type="number" value={loiFields.earnest_money ?? ''} onChange={(e) => setLf('earnest_money', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-500">Closing (days)<input type="number" value={loiFields.closing_days ?? ''} onChange={(e) => setLf('closing_days', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-500">Inspection (days)<input type="number" value={loiFields.inspection_days ?? ''} onChange={(e) => setLf('inspection_days', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-500">Buyer / entity<input value={loiFields.buyer_name ?? ''} onChange={(e) => setLf('buyer_name', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                    <label className="col-span-2 text-[11px] font-semibold text-slate-500 sm:col-span-3">Property address<input value={loiFields.property_address ?? ''} onChange={(e) => setLf('property_address', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                  </div>
+                  <div>
+                    <button onClick={genLoi} disabled={loiBusy === 'gen'} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50">{loiBusy === 'gen' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Generate draft from these terms</button>
+                  </div>
+                  <textarea value={loiBody} onChange={(e) => setLoiBody(e.target.value)} rows={16} placeholder="Generate a draft above, or write the LOI here…" className="input w-full resize-y font-mono text-xs leading-relaxed" />
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button onClick={saveLoi} disabled={loiBusy === 'save' || !loiBody.trim()} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50">{loiBusy === 'save' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save</button>
+                    <button onClick={exportLoiPdf} disabled={!loiBody.trim()} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50"><FileText className="h-3.5 w-3.5" /> Export PDF</button>
+                    <button onClick={sendLoi} disabled={loiBusy === 'send' || !loiBody.trim()} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{loiBusy === 'send' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Mark sent → Offer sent</button>
+                  </div>
+                  <p className="text-[11px] text-slate-400">Export opens a print-ready page — choose “Save as PDF”. This is a non-binding letter of intent.</p>
                 </div>
               ) : tab === 'team' ? (
                 <div>
