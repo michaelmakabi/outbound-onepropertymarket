@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useFilters } from '../lib/filters';
+import { useWorkspace } from '../lib/workspace';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, RefreshButton, StatusDot,
   ColumnDef, ColumnToggleMenu, SortableHead, useClientTable, OutcomeTiles,
@@ -77,6 +78,7 @@ function WorkspaceTable({ raw }: { raw: any[] }) {
 
 export default function Overview() {
   const { startMs, endMs } = useFilters();
+  const { viewAll, activeName } = useWorkspace();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -91,7 +93,7 @@ export default function Overview() {
 
   return (
     <div>
-      <PageHeader title="Global Overview" description="Aggregate outbound performance across all your workspaces"
+      <PageHeader title={viewAll ? 'Global Overview' : `${activeName || 'Workspace'} Overview`} description={viewAll ? 'Aggregate outbound performance across all your workspaces' : `Outbound performance for ${activeName || 'this workspace'}`}
         actions={<RefreshButton loading={refreshing} onClick={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />} />
 
       {loading ? <LoadingBlock /> : !g ? <EmptyState text="No data available." /> : (
@@ -171,9 +173,11 @@ export default function Overview() {
             </SectionCard>
           </div>
 
-          <SectionCard title="Workspaces" description="Search, sort any column, toggle fields · click a row to drill in">
-            <WorkspaceTable raw={data.perWorkspace} />
-          </SectionCard>
+          {viewAll && Array.isArray(data.perWorkspace) && (
+            <SectionCard title="Workspaces" description="Search, sort any column, toggle fields · click a row to drill in">
+              <WorkspaceTable raw={data.perWorkspace} />
+            </SectionCard>
+          )}
         </div>
       )}
     </div>
