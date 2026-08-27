@@ -177,11 +177,70 @@ async function opmCueCall(action: string, opts: { method?: string; params?: Reco
   return data;
 }
 
+// ---- Opportunities (dedicated `opm-opps` function): a contact can hold one opportunity per
+// pipeline. The Standard 1PM opportunity is always call-driven; custom-pipeline opportunities move
+// independently. Shares OPM auth + active-workspace scoping. ----
+const OPMOPPS_BASE =
+  (import.meta as any).env?.VITE_OPMOPPS_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-opps') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-opps');
+
+async function opmOppsCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMOPPS_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+// ---- LOI engine (dedicated `opm-loi` function): editable Letter-of-Intent draft per lead, exported
+// to PDF; sending advances the Standard opportunity to "Offer sent". Shares OPM auth. ----
+const OPMLOI_BASE =
+  (import.meta as any).env?.VITE_OPMLOI_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-loi') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-loi');
+
+async function opmLoiCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMLOI_BASE);
+  url.searchParams.set('action', action);
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
 export const opm = {
   workspaces: () => opmCall('workspaces'),
   // CUE report (Comping · Underwriting · Evaluation) for a lead's property.
   cueGet: (leadId: string) => opmCueCall('cue_get', { params: { lead_id: leadId } }),
+  // LOI (Letter of Intent) — draft/generate/save/send an offer letter for a lead.
+  loiGet: (leadId: string) => opmLoiCall('get', { params: { lead_id: leadId } }),
+  loiGenerate: (leadId: string, fields: any) => opmLoiCall('generate', { method: 'POST', body: { lead_id: leadId, fields } }),
+  loiSave: (leadId: string, fields: any, body_text: string) => opmLoiCall('save', { method: 'POST', body: { lead_id: leadId, fields, body_text } }),
+  loiSend: (leadId: string, fields: any, body_text: string) => opmLoiCall('send', { method: 'POST', body: { lead_id: leadId, fields, body_text } }),
   cueGenerate: (leadId: string) => opmCueCall('cue_generate', { method: 'POST', body: { lead_id: leadId } }),
+  // Opportunities — a contact can live in several pipelines at once (one opportunity per pipeline).
+  oppsBoard: (pipeline_id: number | string) => opmOppsCall('board', { params: { pipeline_id } }),
+  oppsForLead: (leadId: string) => opmOppsCall('for_lead', { params: { lead_id: leadId } }),
+  oppsMove: (b: { opportunity_id: number; stage_id: number | null }) => opmOppsCall('move', { method: 'POST', body: b }),
+  oppsAdd: (b: { lead_id: string; pipeline_id: number; stage_id?: number | null }) => opmOppsCall('add', { method: 'POST', body: b }),
+  oppsRemove: (opportunity_id: number) => opmOppsCall('remove', { method: 'POST', body: { opportunity_id } }),
+  // Most-recent-call map (lead_id → last call) for the active workspace — enriches board cards.
+  lastCallsMap: () => opmCampaignCall('last_calls', { method: 'POST', body: {} }),
   summary: () => opmCall('summary'),
   pipelines: () => opmCall('pipelines'),
   // Snapshots: list a specific workspace's pipelines/custom fields (source picker), and clone across.
