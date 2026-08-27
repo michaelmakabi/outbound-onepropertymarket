@@ -540,6 +540,12 @@ export const testai = {
   cloneAgent: (b: { workspace: string; agent_id: string; new_name?: string }) =>
     testaiCall('clone_agent', { method: 'POST', body: b }),
   numbers: (workspace: string) => testaiCall('numbers', { params: { workspace } }),
+  // Bind a number's inbound and/or outbound agent (from the AI Agents page or Phone Numbers page).
+  assignNumber: (b: { workspace: string; phone: string; inbound_agent_id?: string; outbound_agent_id?: string; inbound_webhook_url?: string }) =>
+    testaiCall('assign_number', { method: 'POST', body: b }),
+  // Create a brand-new agent from scratch (open to any workspace member with access).
+  createAgent: (b: { workspace: string; name?: string; general_prompt?: string; voice_id?: string; begin_message?: string; language?: string; agent?: Record<string, any>; llm?: Record<string, any> }) =>
+    testaiCall('create_agent', { method: 'POST', body: b }),
   // Prompt-aware variable detection: returns the agent's general_prompt + detected {{vars}} (browser never sees the Retell key).
   agentPromptVars: (workspace: string, agent_id: string) => testaiCall('agent_prompt_vars', { params: { workspace, agent_id } }),
   // Reusable Test-AI templates, keyed by workspace.
