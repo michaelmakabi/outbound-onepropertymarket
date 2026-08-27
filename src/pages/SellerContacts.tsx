@@ -8,7 +8,7 @@ import TagManagerModal from '../components/TagManagerModal';
 import SmartLists from '../components/SmartLists';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews, AudioPlayer,
-  ColumnDef, ColumnToggleMenu, SortableHead, useClientTable,
+  ColumnDef, ColumnToggleMenu, SortableHead, useClientTable, ColumnFilterStack, useColumnFilters,
 } from '../components/dash';
 import { num, dateTime, secs, humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
@@ -333,17 +333,22 @@ export default function SellerContacts() {
   // Include a hidden "__phones" column so useClientTable's search also scans phone digits.
   const searchColumns = useMemo<ColumnDef[]>(() => [...visibleColumns, { key: '__phones', label: '' }], [visibleColumns]);
 
+  // Per-column filter stack (GHL-style): choose any column, an operator, a value; stack several and
+  // combine them with AND / OR. Filterable set = every column except the audio-only Recording cell.
+  const filterCols = useMemo<ColumnDef[]>(() => visibleColumns.filter((c) => c.key !== 'last_rec'), [visibleColumns]);
+  const colFilters = useColumnFilters<any>(getValue);
+
   const { rows, search, setSearch, sort, setSort, isVisible, toggle } = useClientTable<any>({
-    pageKey: PAGE_KEY, columns: searchColumns, rows: preFiltered, getValue, initialSort: { by: 'name', dir: 'asc' },
+    pageKey: PAGE_KEY, columns: searchColumns, rows: preFiltered, getValue, initialSort: { by: 'name', dir: 'asc' }, rowFilter: colFilters.predicate,
   });
 
-  useEffect(() => { setPage(1); setMatchAll(false); }, [pipelineId, stageId, verified, tagFilter, search, sort, commFrom, commTo, commDir]);
+  useEffect(() => { setPage(1); setMatchAll(false); }, [pipelineId, stageId, verified, tagFilter, search, sort, commFrom, commTo, commDir, colFilters.conds, colFilters.combinator]);
 
   const total = rows.length;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const orderedIds = useMemo(() => rows.map((r) => r.lead_id), [rows]);
-  const hasFilters = !!pipelineId || !!stageId || !!verified || tagFilter.length > 0 || !!search || !!commFrom || !!commTo || !!commDir;
+  const hasFilters = !!pipelineId || !!stageId || !!verified || tagFilter.length > 0 || !!search || !!commFrom || !!commTo || !!commDir || colFilters.activeCount > 0;
 
   const dialableNumbers = records.reduce((s, r) => s + r.numbersCount, 0);
   const verifiedNumbers = records.reduce((s, r) => s + r.verifiedCount, 0);
@@ -487,7 +492,7 @@ export default function SellerContacts() {
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, property, address, phone, source, disposition…" className="input w-full sm:w-[300px] pl-8" />
           </div>
-          {hasFilters && <button className="btn-ghost !py-1.5" onClick={() => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setSearch(''); setCommFrom(''); setCommTo(''); setCommDir(''); }}><X className="h-3.5 w-3.5" /> Clear</button>}
+          {hasFilters && <button className="btn-ghost !py-1.5" onClick={() => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setSearch(''); setCommFrom(''); setCommTo(''); setCommDir(''); colFilters.clear(); }}><X className="h-3.5 w-3.5" /> Clear</button>}
         </div>
         {/* Last-interaction filters: filter records by the date + direction of their most recent call. */}
         <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
@@ -505,6 +510,10 @@ export default function SellerContacts() {
             <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)} disabled={commDir === 'none'} className="input !py-1.5 text-sm disabled:opacity-50" />
           </label>
           {(commFrom || commTo || commDir) && <button className="btn-ghost !py-1.5" onClick={() => { setCommFrom(''); setCommTo(''); setCommDir(''); }}><X className="h-3.5 w-3.5" /> Clear dates</button>}
+        </div>
+        {/* Per-column layered filter stack — AND/OR across any columns (incl. custom fields). */}
+        <div className="mt-3 border-t border-line pt-3">
+          <ColumnFilterStack columns={filterCols} ctrl={colFilters} />
         </div>
       </SectionCard>
 
