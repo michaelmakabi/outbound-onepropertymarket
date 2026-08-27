@@ -17,6 +17,7 @@ type Stage = { id: number; name: string; color: string; sort_order: number; lead
 type Pipeline = { id: number; name: string; workspace?: string; sort_order?: number; stages: Stage[] };
 type Lead = {
   lead_id: string; name: string; stage_id: number | null; pipeline_id: number;
+  opportunity_id?: number;
   deal_price?: number | null; lead_source?: string | null; assigned_to?: string | null;
   property_ref?: string | null; tags?: string[]; created_at?: string | null; updated_at?: string | null;
   date_added?: string | null; attempts?: number; last_disposition?: string | null;
@@ -147,13 +148,23 @@ export default function Pipelines() {
     setDurMin(c.durMin || ''); setDurMax(c.durMax || '');
   };
 
-  // Load leads whenever the selected pipeline changes.
+  // Load the OPPORTUNITIES on the selected pipeline (a contact can appear on several boards at once),
+  // then enrich each card with its most-recent call from the shared last-calls map.
   useEffect(() => {
     if (active == null) { setLeads([]); return; }
     let cancelled = false;
     setLeadsLoading(true);
-    opm.pipelineLeads(active)
-      .then((d: any) => { if (!cancelled) { setLeads(d.leads || []); setCallAgents(d.agents || []); } })
+    Promise.all([opm.oppsBoard(active), opm.lastCallsMap().catch(() => ({ map: {} }))])
+      .then(([d, lc]: any[]) => {
+        if (cancelled) return;
+        const map = (lc && lc.map) || {};
+        const rows = (d.leads || []).map((l: any) => {
+          const c = map[l.lead_id];
+          return c ? { ...l, last_call: { ts: c.date ? new Date(c.date).getTime() : undefined, duration: c.duration_seconds, disposition: c.disposition, direction: c.direction, agent_name: c.agent_name || null } } : l;
+        });
+        setLeads(rows);
+        setCallAgents([...new Set(rows.map((r: any) => r.last_call?.agent_name).filter(Boolean))] as string[]);
+      })
       .catch(() => { if (!cancelled) setLeads([]); })
       .finally(() => { if (!cancelled) setLeadsLoading(false); });
     return () => { cancelled = true; };
@@ -296,13 +307,15 @@ export default function Pipelines() {
     // optimistic
     setLeads((prev) => prev.map((l) => (l.lead_id === leadId ? { ...l, stage_id: stageId } : l)));
     try {
-      await opm.moveLead({ lead_id: leadId, pipeline_id: current.id, stage_id: stageId });
+      // Move this pipeline's OPPORTUNITY independently; the lead's other pipeline positions are untouched.
+      if (lead.opportunity_id != null) await opm.oppsMove({ opportunity_id: lead.opportunity_id, stage_id: stageId });
+      else await opm.moveLead({ lead_id: leadId, pipeline_id: current.id, stage_id: stageId });
       loadPipelines();
     } catch {
       // reload on failure to resync
       if (active != null) {
         setLeadsLoading(true);
-        opm.pipelineLeads(active).then((d: any) => setLeads(d.leads || [])).finally(() => setLeadsLoading(false));
+        opm.oppsBoard(active).then((d: any) => setLeads(d.leads || [])).finally(() => setLeadsLoading(false));
       }
       loadPipelines();
     }
