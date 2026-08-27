@@ -3,6 +3,7 @@ import { tokenStore, workspaceStore } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import { PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState } from '../components/dash';
 import { num } from '../lib/format';
+import { areaCodeTz } from '../lib/timezones';
 import { Phone, PhoneOutgoing, PhoneIncoming, Plus, Trash2, Loader2, CheckCircle2, X, Radio, Sparkles, ShoppingCart, UserCheck, Hash, AlertTriangle } from 'lucide-react';
 
 // Self-contained client for the dedicated `opm-numbers` edge function (buy / remove / assign / list
@@ -248,6 +249,7 @@ export default function PhoneNumbers() {
                   <th className="px-3 py-2"><input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4 accent-[#1f6feb]" /></th>
                   <th className="px-3 py-2">Number</th>
                   <th className="px-3 py-2">Area</th>
+                  <th className="px-3 py-2">Time zone</th>
                   <th className="px-3 py-2">Nickname</th>
                   <th className="px-3 py-2">Outbound agent</th>
                   <th className="px-3 py-2">Inbound agent</th>
@@ -260,6 +262,7 @@ export default function PhoneNumbers() {
                     <td className="px-3 py-2.5"><input type="checkbox" checked={selected.has(n.phone_number)} onChange={() => toggle(n.phone_number)} className="h-4 w-4 accent-[#1f6feb]" /></td>
                     <td className="px-3 py-2.5 font-mono text-ink">{fmtPhone(n.phone_number)}</td>
                     <td className="px-3 py-2.5 text-slate-500">{n.area_code}</td>
+                    <td className="px-3 py-2.5">{(() => { const tz = areaCodeTz(n.area_code || n.phone_number); return tz ? <span title={`${tz.label} Time · ${tz.iana}`} className="pill bg-slate-100 text-slate-600">{tz.abbr}</span> : <span className="text-slate-400">—</span>; })()}</td>
                     <td className="px-3 py-2.5 text-slate-600">{n.nickname || '—'}</td>
                     <td className="px-3 py-2.5">{n.outbound_agent_name ? <span className="inline-flex items-center gap-1 text-slate-700"><PhoneOutgoing className="h-3.5 w-3.5 text-brand" /> {n.outbound_agent_name}</span> : <span className="text-slate-400">—</span>}</td>
                     <td className="px-3 py-2.5">{n.inbound_agent_name ? <span className="inline-flex items-center gap-1 text-slate-700"><PhoneIncoming className="h-3.5 w-3.5 text-slate-400" /> {n.inbound_agent_name}</span> : <span className="text-slate-400">—</span>}</td>
