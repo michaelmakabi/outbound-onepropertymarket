@@ -8,11 +8,11 @@ import TagManagerModal from '../components/TagManagerModal';
 import SmartLists from '../components/SmartLists';
 import {
   PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews, AudioPlayer,
-  ColumnDef, ColumnToggleMenu, SortableHead, useClientTable, ColumnFilterStack, useColumnFilters,
+  ColumnDef, SortableHead, useClientTable, ColumnFilterStack, useColumnFilters, SlideOver, ToolbarButton, ColumnsDrawer,
 } from '../components/dash';
 import { num, dateTime, secs, humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
-import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star, UserCheck, Tag } from 'lucide-react';
+import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star, UserCheck, Tag, Filter } from 'lucide-react';
 
 const PAGE_KEY = 'opm-crm';
 const PAGE_SIZE = 50;
@@ -86,6 +86,9 @@ export default function SellerContacts() {
   const [showAdd, setShowAdd] = useState(false);
   const [showFields, setShowFields] = useState(false);
   const [showTags, setShowTags] = useState(false);
+  // GHL-style tuck-away drawers for the filter + column controls (keeps the page compact).
+  const [showFilters, setShowFilters] = useState(false);
+  const [showColumns, setShowColumns] = useState(false);
   const [customFields, setCustomFields] = useState<any[]>([]);
 
   // ---- Bulk AI caller → tracked Campaign ----
@@ -348,7 +351,9 @@ export default function SellerContacts() {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const orderedIds = useMemo(() => rows.map((r) => r.lead_id), [rows]);
-  const hasFilters = !!pipelineId || !!stageId || !!verified || tagFilter.length > 0 || !!search || !!commFrom || !!commTo || !!commDir || colFilters.activeCount > 0;
+  // Count of applied filters (excludes the always-visible toolbar search) → badge on the Filters button.
+  const activeFilterCount = (pipelineId ? 1 : 0) + (stageId ? 1 : 0) + (verified ? 1 : 0) + tagFilter.length + ((commDir || commFrom || commTo) ? 1 : 0) + colFilters.activeCount;
+  const clearAllFilters = () => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setCommFrom(''); setCommTo(''); setCommDir(''); colFilters.clear(); };
 
   const dialableNumbers = records.reduce((s, r) => s + r.numbersCount, 0);
   const verifiedNumbers = records.reduce((s, r) => s + r.verifiedCount, 0);
@@ -469,53 +474,78 @@ export default function SellerContacts() {
         <KpiCard label="In a Pipeline" value={num(inPipeline)} sub="assigned to a board" icon={Layers} />
       </div>
 
-      <SectionCard title="Filters" description={`${total.toLocaleString()} record${total === 1 ? '' : 's'} match`} className="mb-4"
-        action={<div className="flex items-center gap-2">
-          <SmartLists<ViewCfg> key={smartKey} page="crm" current={currentCfg} onApply={applyView} />
-          <SavedViews<ViewCfg> pageKey={PAGE_KEY} current={currentCfg} onApply={applyView} />
-          <ColumnToggleMenu columns={visibleColumns} isVisible={isVisible} onToggle={toggle} />
+      {/* Compact toolbar — filters + columns tuck away into right-side drawers (GHL-style). */}
+      <div className="card mb-4 flex flex-wrap items-center gap-2 p-2.5">
+        <ToolbarButton icon={Filter} label="Filters" count={activeFilterCount} active={activeFilterCount > 0} onClick={() => setShowFilters(true)} />
+        {activeFilterCount > 0 && <button className="text-xs font-semibold text-slate-400 hover:text-red-600" onClick={clearAllFilters}>Clear</button>}
+        <span className="text-xs text-slate-500">{total.toLocaleString()} record{total === 1 ? '' : 's'}</span>
+        <div className="relative ml-auto w-full sm:w-auto">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, property, phone, source…" className="input w-full pl-8 sm:w-[280px]" />
+          {search && <button onClick={() => setSearch('')} className="absolute right-2 top-2 rounded p-0.5 text-slate-400 hover:text-ink"><X className="h-3.5 w-3.5" /></button>}
+        </div>
+        <SmartLists<ViewCfg> key={smartKey} page="crm" current={currentCfg} onApply={applyView} />
+        <SavedViews<ViewCfg> pageKey={PAGE_KEY} current={currentCfg} onApply={applyView} />
+        <ToolbarButton icon={SlidersHorizontal} label="Columns" onClick={() => setShowColumns(true)} />
+      </div>
+
+      {/* Filters drawer — every filter control stacked in a narrow panel instead of edge-to-edge. */}
+      <SlideOver open={showFilters} onClose={() => setShowFilters(false)} title="Filters" subtitle={`${total.toLocaleString()} record${total === 1 ? '' : 's'} match`} icon={Filter}
+        footer={<div className="flex items-center justify-between">
+          <button className="btn-ghost !py-1.5" disabled={activeFilterCount === 0} onClick={clearAllFilters}><X className="h-3.5 w-3.5" /> Clear all</button>
+          <button className="btn-primary !py-1.5" onClick={() => setShowFilters(false)}>Done</button>
         </div>}>
-        <div className="flex flex-wrap items-center gap-3">
-          <select value={pipelineId} onChange={(e) => { setPipelineId(e.target.value); setStageId(''); }} className="input !py-1.5 text-sm">
-            <option value="">All pipelines</option>
-            {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <select value={stageId} onChange={(e) => setStageId(e.target.value)} className="input !py-1.5 text-sm">
-            <option value="">All stages</option>
-            {stages.map((s: any) => <option key={s.id} value={s.id}>{s.name} ({s.leadCount})</option>)}
-          </select>
-          <select value={verified} onChange={(e) => setVerified(e.target.value)} className="input !py-1.5 text-sm">
-            <option value="">Any number status</option><option value="yes">Has verified number</option><option value="no">No verified number</option>
-          </select>
-          <MultiSelect options={allTags} value={tagFilter} onChange={setTagFilter} placeholder="All tags" width={180} />
-          <div className="relative w-full sm:w-auto">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, property, address, phone, source, disposition…" className="input w-full sm:w-[300px] pl-8" />
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="label mb-1 block">Pipeline</label>
+            <select value={pipelineId} onChange={(e) => { setPipelineId(e.target.value); setStageId(''); }} className="input w-full !py-1.5 text-sm">
+              <option value="">All pipelines</option>
+              {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
           </div>
-          {hasFilters && <button className="btn-ghost !py-1.5" onClick={() => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setSearch(''); setCommFrom(''); setCommTo(''); setCommDir(''); colFilters.clear(); }}><X className="h-3.5 w-3.5" /> Clear</button>}
+          <div>
+            <label className="label mb-1 block">Stage</label>
+            <select value={stageId} onChange={(e) => setStageId(e.target.value)} className="input w-full !py-1.5 text-sm">
+              <option value="">All stages</option>
+              {stages.map((s: any) => <option key={s.id} value={s.id}>{s.name} ({s.leadCount})</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label mb-1 block">Number status</label>
+            <select value={verified} onChange={(e) => setVerified(e.target.value)} className="input w-full !py-1.5 text-sm">
+              <option value="">Any number status</option><option value="yes">Has verified number</option><option value="no">No verified number</option>
+            </select>
+          </div>
+          <div>
+            <label className="label mb-1 block">Tags</label>
+            <MultiSelect options={allTags} value={tagFilter} onChange={setTagFilter} placeholder="All tags" width={360} />
+          </div>
+
+          <div className="border-t border-line pt-4">
+            <label className="label mb-2 flex items-center gap-1.5"><History className="h-3.5 w-3.5" /> Last interaction</label>
+            <select value={commDir} onChange={(e) => setCommDir(e.target.value)} className="input mb-2 w-full !py-1.5 text-sm">
+              <option value="">Any interaction</option>
+              <option value="outbound">Outbound (we called)</option>
+              <option value="inbound">Inbound (they called)</option>
+              <option value="none">Never contacted</option>
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs font-semibold text-slate-500">From
+                <input type="date" value={commFrom} onChange={(e) => setCommFrom(e.target.value)} disabled={commDir === 'none'} className="input mt-1 w-full !py-1.5 text-sm disabled:opacity-50" />
+              </label>
+              <label className="text-xs font-semibold text-slate-500">To
+                <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)} disabled={commDir === 'none'} className="input mt-1 w-full !py-1.5 text-sm disabled:opacity-50" />
+              </label>
+            </div>
+          </div>
+
+          <div className="border-t border-line pt-4">
+            <ColumnFilterStack columns={filterCols} ctrl={colFilters} />
+          </div>
         </div>
-        {/* Last-interaction filters: filter records by the date + direction of their most recent call. */}
-        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500"><History className="h-3.5 w-3.5" /> Last interaction</span>
-          <select value={commDir} onChange={(e) => setCommDir(e.target.value)} className="input !py-1.5 text-sm">
-            <option value="">Any interaction</option>
-            <option value="outbound">Outbound (we called)</option>
-            <option value="inbound">Inbound (they called)</option>
-            <option value="none">Never contacted</option>
-          </select>
-          <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">From
-            <input type="date" value={commFrom} onChange={(e) => setCommFrom(e.target.value)} disabled={commDir === 'none'} className="input !py-1.5 text-sm disabled:opacity-50" />
-          </label>
-          <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">To
-            <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)} disabled={commDir === 'none'} className="input !py-1.5 text-sm disabled:opacity-50" />
-          </label>
-          {(commFrom || commTo || commDir) && <button className="btn-ghost !py-1.5" onClick={() => { setCommFrom(''); setCommTo(''); setCommDir(''); }}><X className="h-3.5 w-3.5" /> Clear dates</button>}
-        </div>
-        {/* Per-column layered filter stack — AND/OR across any columns (incl. custom fields). */}
-        <div className="mt-3 border-t border-line pt-3">
-          <ColumnFilterStack columns={filterCols} ctrl={colFilters} />
-        </div>
-      </SectionCard>
+      </SlideOver>
+
+      <ColumnsDrawer open={showColumns} onClose={() => setShowColumns(false)} columns={visibleColumns} isVisible={isVisible} onToggle={toggle} />
 
       {selected.size > 0 && (
         <div className="mb-4 flex flex-col gap-2 rounded-xl border border-brand/30 bg-brand-light/50 px-4 py-2.5">
