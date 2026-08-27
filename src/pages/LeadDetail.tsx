@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
 import { LoadingBlock, EmptyState, AudioPlayer } from '../components/dash';
 import MentionThread, { Member } from '../components/MentionThread';
+import CallConversation from '../components/CallConversation';
 import { MessagesSquare } from 'lucide-react';
 import { humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
@@ -473,7 +474,7 @@ export default function LeadDetail() {
   const activityList = tab === 'notes' ? notes.filter((n) => n.source !== 'call') : notes;
 
   return (
-    <div className="mx-auto max-w-[1200px] text-sm">
+    <div className="mx-auto w-full max-w-[1760px] px-1 text-[15px]">
       {/* top bar */}
       <div className="mb-4 flex items-center justify-between gap-3">
         <button onClick={() => nav('/leads', { state: { ids } })} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 transition hover:text-brand"><ArrowLeft className="h-4 w-4" /> All leads</button>
@@ -888,13 +889,12 @@ export default function LeadDetail() {
                           {c.custom_data.appointment_datetime && <div><span className="font-semibold text-slate-500">Appointment:</span> {c.custom_data.appointment_datetime}</div>}
                         </div>
                       )}
-                      {c.recording_url && <div className="mt-2"><AudioPlayer src={c.recording_url} /></div>}
-                      {c.transcript && (
+                      {(c.recording_url || c.transcript) && (
                         <div className="mt-2">
                           <button onClick={() => toggleTx(c.call_id)} className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline">
-                            <FileText className="h-3.5 w-3.5" /> {open ? 'Hide transcript' : 'Show transcript'} <ChevronDown className={`h-3.5 w-3.5 transition ${open ? 'rotate-180' : ''}`} />
+                            <FileText className="h-3.5 w-3.5" /> {open ? 'Hide conversation' : 'Show conversation'} <ChevronDown className={`h-3.5 w-3.5 transition ${open ? 'rotate-180' : ''}`} />
                           </button>
-                          {open && <div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg bg-surface p-3 text-xs leading-relaxed text-slate-700">{c.transcript}</div>}
+                          {open && <div className="mt-2"><CallConversation call={c} contactName={lead.name} /></div>}
                         </div>
                       )}
                     </li>
