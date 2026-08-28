@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { opm, fmt } from '../lib/api';
+import { syncWorkspaceNow } from '../lib/syncNow';
 import { useAuth } from '../lib/auth';
 import { PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState } from '../components/dash';
 import { num } from '../lib/format';
-import { ArrowLeft, DollarSign, PhoneOutgoing, Voicemail, PhoneCall, Loader2, CheckCircle2, Clock, AlertCircle, ExternalLink, Pause, Play, Ban } from 'lucide-react';
+import { ArrowLeft, DollarSign, PhoneOutgoing, Voicemail, PhoneCall, Loader2, CheckCircle2, Clock, AlertCircle, ExternalLink, Pause, Play, Ban, RefreshCw } from 'lucide-react';
 
 const STATUS_PILL: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-600', launching: 'bg-blue-100 text-blue-700',
@@ -33,11 +34,32 @@ export default function OpmCampaignDetail() {
   const [retail, setRetail] = useState<{ apply: boolean; mult: Record<string, number> }>({ apply: false, mult: {} });
   useEffect(() => { opm.retailMult().then((d: any) => setRetail({ apply: !!d?.apply, mult: d?.mult || {} })).catch(() => {}); }, []);
 
-  const load = useCallback(() => {
-    setLoading(true); setError('');
-    opm.campaignDetail(id).then(setData).catch((e: any) => setError(String(e?.message || e))).finally(() => setLoading(false));
+  // `silent` refreshes the data in place (no full-page spinner) — used by the live auto-poll so the
+  // page updates as calls go out without flicker.
+  const [refreshing, setRefreshing] = useState(false);
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true); else setRefreshing(true);
+    if (!silent) setError('');
+    opm.campaignDetail(id).then(setData).catch((e: any) => { if (!silent) setError(String(e?.message || e)); }).finally(() => { if (!silent) setLoading(false); else setRefreshing(false); });
   }, [id]);
   useEffect(() => { load(); }, [load]);
+
+  // While a campaign is actively dialing, poll every 8s so launched leads, dispositions, recordings,
+  // costs and KPIs stream in live — this is the "watch it dial in real time" view after launch.
+  // Each tick first nudges an on-demand Retell sync for this workspace (throttled server-side, so it
+  // no-ops when recently synced) so fresh call outcomes are in the DB before we re-read the campaign.
+  const liveStatus = data?.campaign?.status;
+  const liveWs = data?.campaign?.workspace;
+  const isLive = liveStatus === 'dripping' || liveStatus === 'throttled' || liveStatus === 'launching';
+  useEffect(() => {
+    if (!isLive) return;
+    if (liveWs) syncWorkspaceNow(liveWs); // kick an immediate sync on entering the live view
+    const t = setInterval(() => {
+      const tick = liveWs ? syncWorkspaceNow(liveWs) : Promise.resolve();
+      Promise.resolve(tick).finally(() => load(true));
+    }, 8000);
+    return () => clearInterval(t);
+  }, [isLive, liveWs, load]);
 
   if (loading) return <LoadingBlock label="Loading campaign…" />;
   if (error || !data?.campaign) return <div className="card p-10 text-center text-slate-400">{error || 'Campaign not found.'}</div>;
@@ -81,6 +103,7 @@ export default function OpmCampaignDetail() {
         description={`${c.workspace} · ${c.agent_name || 'agent'}${c.dial_mode ? ` · ${c.dial_mode === 'all_numbers' ? 'all numbers' : 'primary only'}` : ''}${c.timezone ? ` · ${c.timezone}` : ''} · created ${c.created_at ? new Date(c.created_at).toLocaleDateString() : ''}`}
         actions={<div className="flex flex-wrap items-center gap-2">
           <span className={`pill ${STATUS_PILL[c.status] || 'bg-slate-100 text-slate-600'}`}>{c.status}</span>
+          {isLive && <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" /></span> Live{refreshing ? <RefreshCw className="h-3 w-3 animate-spin" /> : ''} · updates automatically</span>}
           {isScheduled && <button className={BTN} disabled={busyAct !== ''} onClick={launchNow}>{busyAct === 'resume' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Launch now</button>}
           {isPausable && <button className={BTN} disabled={busyAct !== ''} onClick={pauseCampaign}>{busyAct === 'pause' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />} Pause</button>}
           {isResumable && <button className={BTN} disabled={busyAct !== ''} onClick={resumeCampaign}>{busyAct === 'resume' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Resume</button>}
