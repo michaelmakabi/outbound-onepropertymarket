@@ -27,6 +27,9 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
   const [preview, setPreview] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
   const [err, setErr] = useState('');
+  // Large imports are streamed to the backend in batches (it caps each request), so lists of
+  // 100k+ leads work. `progress` drives the batch progress bar during preview/commit.
+  const [progress, setProgress] = useState<{ done: number; total: number; phase: 'preview' | 'commit' } | null>(null);
   // Auto smart-list: every import is saved as a named smart list so the batch is instantly usable
   // (tap it in Contacts or the campaign wizard). Defaults from the file name; the user can rename it.
   const [listName, setListName] = useState('');
@@ -86,21 +89,52 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
     reader.readAsText(file);
   }
 
+  // Backend caps each request, so we stream the file in batches. 1,500 keeps every payload small
+  // and each round-trip fast; a 100k list is simply ~67 sequential batches.
+  const BATCH = 1500;
+
   const runPreview = async () => {
     setErr(''); setBusy(true); setPreview(null);
     try {
-      const r = await opm.smartImport({ target_workspace: slug, records, mode: 'preview', list_name: listName.trim() || undefined, extra_tags: extraTags });
-      setPreview(r); setStep(3);
-    } catch (e: any) { setErr(e?.message || 'Preview failed.'); } finally { setBusy(false); }
+      // Small lists: one call (exact stats). Large lists: aggregate a fast estimate across batches.
+      if (records.length <= BATCH) {
+        const r = await opm.smartImport({ target_workspace: slug, records, mode: 'preview', list_name: listName.trim() || undefined, extra_tags: extraTags });
+        setPreview(r); setStep(3); return;
+      }
+      const agg: any = { records_in: 0, numbers_total: 0, unique_numbers: 0, duplicates_in_upload: 0, already_in_workspace: 0, new_numbers: 0, multi_name_numbers: 0, records_without_number: 0 };
+      let sample: any[] = [];
+      setProgress({ done: 0, total: records.length, phase: 'preview' });
+      for (let i = 0; i < records.length; i += BATCH) {
+        const part = records.slice(i, i + BATCH);
+        const r: any = await opm.smartImport({ target_workspace: slug, records: part, mode: 'preview' });
+        const p = r?.preview || {};
+        for (const k of Object.keys(agg)) agg[k] += Number(p[k] || 0);
+        if (sample.length < 12 && Array.isArray(r?.sample)) sample = sample.concat(r.sample).slice(0, 12);
+        setProgress({ done: Math.min(i + BATCH, records.length), total: records.length, phase: 'preview' });
+      }
+      setPreview({ preview: agg, sample, estimated: true }); setStep(3);
+    } catch (e: any) { setErr(e?.message || 'Preview failed.'); } finally { setBusy(false); setProgress(null); }
   };
 
   const runCommit = async () => {
     setErr(''); setBusy(true);
     try {
-      const r = await opm.smartImport({ target_workspace: slug, records, mode: 'commit', list_name: listName.trim() || undefined, extra_tags: extraTags });
+      const committed = { leads: 0, contacts: 0 };
+      let lastStats: any = null; let firstList: any = null;
+      setProgress({ done: 0, total: records.length, phase: 'commit' });
+      for (let i = 0; i < records.length; i += BATCH) {
+        const part = records.slice(i, i + BATCH);
+        // Only the first batch carries the list name / tags so we don't create duplicate lists.
+        const r: any = await opm.smartImport({ target_workspace: slug, records: part, mode: 'commit', list_name: i === 0 ? (listName.trim() || undefined) : undefined, extra_tags: i === 0 ? extraTags : undefined });
+        committed.leads += r?.committed?.leads || 0;
+        committed.contacts += r?.committed?.contacts || 0;
+        lastStats = r?.stats || lastStats;
+        if (!firstList && r?.list) firstList = r.list;
+        setProgress({ done: Math.min(i + BATCH, records.length), total: records.length, phase: 'commit' });
+      }
       trackAction(`Imported ${records.length} lead${records.length === 1 ? '' : 's'}${listName.trim() ? ` into "${listName.trim()}"` : ''}`, { workspace: slug, entity_type: 'import' });
-      setResult(r); setStep(4);
-    } catch (e: any) { setErr(e?.message || 'Import failed.'); } finally { setBusy(false); }
+      setResult({ committed, stats: lastStats, list: firstList }); setStep(4);
+    } catch (e: any) { setErr(e?.message || 'Import failed.'); } finally { setBusy(false); setProgress(null); }
   };
 
   const stepLabels = ['Upload', 'Map columns', 'Review & consolidate', 'Done'];
@@ -159,7 +193,7 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
               </label>
               <div className="mt-5 flex items-start gap-3 rounded-2xl bg-surface px-5 py-4 text-sm leading-relaxed text-slate-500">
                 <Layers className="mt-0.5 h-5 w-5 shrink-0 text-brand" />
-                <span>We handle messy lists automatically: a single row can carry many phone numbers (owner, relatives, tenants) and multiple people. We detect every number, keep each property as one record, de-duplicate by phone number, and consolidate duplicate names, addresses, and fields into one clean record.</span>
+                <span>We handle messy lists automatically: a single row can carry many phone numbers (owner, relatives, tenants) and multiple people. We detect every number, keep each property as one record, de-duplicate by phone number, and consolidate duplicate names, addresses, and fields into one clean record. Big lists welcome — 100k+ leads are uploaded in the background in batches.</span>
               </div>
               {parseErr && <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600"><AlertCircle className="h-4 w-4" /> {parseErr}</div>}
             </div>
@@ -242,6 +276,7 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
                 <div className="py-10 text-center text-sm text-slate-400"><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /> Analyzing…</div>
               ) : (
                 <>
+                  {preview?.estimated && <div className="mb-3 rounded-lg bg-brand-light/40 px-3 py-2 text-xs text-slate-600">Large list — the numbers below are a fast estimate across batches. The exact de-duplicated total is applied on import.</div>}
                   <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <Stat icon={Users} label="Property records" value={p.records_in} />
                     <Stat icon={Phone} label="Phone numbers" value={p.numbers_total} />
@@ -295,6 +330,19 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
           )}
         </div>
 
+        {/* Batch progress (large imports) */}
+        {progress && progress.total > BATCH && (
+          <div className="border-t border-line px-7 py-3">
+            <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-600">
+              <span>{progress.phase === 'commit' ? 'Importing' : 'Analyzing'} {progress.total.toLocaleString()} leads…</span>
+              <span className="font-mono text-slate-500">{progress.done.toLocaleString()} / {progress.total.toLocaleString()}</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-surface">
+              <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }} />
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-line px-7 py-4">
           <div>
@@ -305,7 +353,7 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
             {step === 2 && <button className={BTN_PRIMARY} disabled={busy} onClick={runPreview}>{busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Analyzing…</> : <>Review <ArrowRight className="h-4 w-4" /></>}</button>}
             {step === 3 && (
               <button disabled={!slug || busy || !p || p.new_numbers === 0} className={BTN_PRIMARY} onClick={runCommit}>
-                {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Importing…</> : <><CheckCircle2 className="h-4 w-4" /> Import {p?.new_numbers || 0} contacts</>}
+                {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Importing…</> : <><CheckCircle2 className="h-4 w-4" /> Import {(p?.new_numbers || 0).toLocaleString()} contacts</>}
               </button>
             )}
             {step === 4 && <button className={BTN_PRIMARY} onClick={onClose}>Done</button>}
