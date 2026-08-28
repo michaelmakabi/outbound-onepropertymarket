@@ -56,6 +56,8 @@ export default function PhoneNumbers() {
   const [buyNick, setBuyNick] = useState('');
   const [buyAgent, setBuyAgent] = useState('');
   const [addToDialer, setAddToDialer] = useState(true);
+  // Opt-in: if a requested area code has no Retell inventory, buy from the nearest available one.
+  const [allowNearby, setAllowNearby] = useState(false);
   const [suggests, setSuggests] = useState<{ area_code: string; count: number; pct: number }[] | null>(null);
   const [suggestBusy, setSuggestBusy] = useState(false);
 
@@ -97,13 +99,24 @@ export default function PhoneNumbers() {
   const doBuy = async () => {
     if (!areaCodes.length) { setError('Enter at least one 3-digit area code.'); return; }
     const totalCost = areaCodes.length * perArea;
-    if (!window.confirm(`Buy ${totalCost} phone number${totalCost === 1 ? '' : 's'} (${areaCodes.join(', ')}) on ${activeName}'s Retell account? This purchases real numbers and bills that account.`)) return;
+    const confirmMsg = allowNearby
+      ? `Buy ${totalCost} number${totalCost === 1 ? '' : 's'} for ${areaCodes.join(', ')} on ${activeName}'s account? If an area code has no numbers available, a number from the nearest available area code is bought instead. This purchases real numbers and bills that account.`
+      : `Buy ${totalCost} phone number${totalCost === 1 ? '' : 's'} (${areaCodes.join(', ')}) on ${activeName}'s Retell account? This purchases real numbers and bills that account.`;
+    if (!window.confirm(confirmMsg)) return;
     setBusy('buy'); setError('');
     try {
-      const d = await numCall('buy', { method: 'POST', body: { area_codes: areaCodes.map(Number), per_area: perArea, nickname: buyNick || undefined, outbound_agent_id: buyAgent || undefined, add_to_dialer: addToDialer } });
-      flash(`Purchased ${d.purchased_count} number${d.purchased_count === 1 ? '' : 's'}${d.failures?.length ? ` · ${d.failures.length} failed` : ''}${addToDialer ? ' · added to campaign dialer' : ''}.`);
-      if (d.failures?.length) setError(d.failures.map((f: any) => `${f.area_code}: ${f.error}`).join(' · '));
-      setShowBuy(false); setAreaInput(''); setBuyNick('');
+      const d = await numCall('buy', { method: 'POST', body: { area_codes: areaCodes.map(Number), per_area: perArea, nickname: buyNick || undefined, outbound_agent_id: buyAgent || undefined, add_to_dialer: addToDialer, allow_nearby: allowNearby } });
+      // Prefer the server's friendly summary line.
+      if (d.purchased_count > 0) {
+        flash(d.message || `Purchased ${d.purchased_count} number${d.purchased_count === 1 ? '' : 's'}${addToDialer ? ' · added to campaign dialer' : ''}.`);
+        if (!d.failures?.length) { setShowBuy(false); setAreaInput(''); setBuyNick(''); }
+      }
+      // On no-availability, show the clear message and offer nearby area codes as one-tap chips.
+      if (d.failures?.length) {
+        setError(d.message || d.failures.map((f: any) => `${f.area_code}: ${f.error}`).join(' · '));
+        const near = [...new Set(d.failures.flatMap((f: any) => f.nearby || []))] as string[];
+        if (near.length) setSuggests(near.map((ac) => ({ area_code: ac, count: 0, pct: 0 })));
+      }
       load();
     } catch (e: any) { setError(String(e?.message || e)); } finally { setBusy(''); }
   };
@@ -170,12 +183,12 @@ export default function PhoneNumbers() {
           <div className="space-y-4">
             <div>
               <div className="mb-1.5 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-brand"><Sparkles className="h-3.5 w-3.5" /> Best-match area codes {suggestBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}</div>
-              <p className="mb-2 text-xs text-slate-500">These area codes appear most in your leads — buying local numbers lifts pickup rates. Tap to add.</p>
+              <p className="mb-2 text-xs text-slate-500">These area codes appear most in your leads — buying local numbers lifts pickup rates. Tap to add. (If a code has no numbers available, we'll suggest nearby ones here.)</p>
               <div className="flex flex-wrap gap-2">
                 {(suggests || []).length === 0 ? <span className="text-sm text-slate-400">{suggestBusy ? 'Scanning your leads…' : 'No lead phone data to analyze yet.'}</span> :
                   suggests!.map((s) => (
                     <button key={s.area_code} onClick={() => addSuggest(s.area_code)} className="inline-flex items-center gap-1.5 rounded-xl border border-brand/30 bg-brand-light/30 px-3 py-1.5 text-sm font-semibold text-brand hover:bg-brand-light">
-                      {s.area_code} <span className="rounded-md bg-white/60 px-1.5 text-xs text-slate-500">{num(s.count)} · {s.pct}%</span>
+                      {s.area_code}{s.count > 0 && <span className="rounded-md bg-white/60 px-1.5 text-xs text-slate-500">{num(s.count)} · {s.pct}%</span>}
                     </button>
                   ))}
               </div>
@@ -202,6 +215,10 @@ export default function PhoneNumbers() {
             <label className="flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={addToDialer} onChange={(e) => setAddToDialer(e.target.checked)} className="h-4 w-4 accent-[#1f6feb]" />
               Add purchased numbers to the campaign dialer rotation
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={allowNearby} onChange={(e) => setAllowNearby(e.target.checked)} className="h-4 w-4 accent-[#1f6feb]" />
+              If an area code has no numbers available, buy from the nearest available area code
             </label>
 
             <div className="flex items-center gap-3">
