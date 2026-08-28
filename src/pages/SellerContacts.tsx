@@ -12,6 +12,7 @@ import {
   ColumnDef, SortableHead, useClientTable, ColumnFilterStack, useColumnFilters, SlideOver, ToolbarButton, ColumnsDrawer,
 } from '../components/dash';
 import { num, dateTime, secs, humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
+import { OurLineTag, InitiatorTag, ourCallNumber, callInitiator, fmtPhone } from '../components/CallMeta';
 import { statusColor, statusIconName } from '../lib/statuses';
 import { StageIcon } from '../lib/statusIcons';
 import { Contact, Phone, BadgeCheck, Layers, Search, X, Download, ChevronLeft, ChevronRight, ChevronDown, Smartphone, PhoneOutgoing, Loader2, CheckCircle2, AlertCircle, Upload, Plus, SlidersHorizontal, Trash2, History, Star, UserCheck, Tag, Filter } from 'lucide-react';
@@ -42,6 +43,22 @@ async function fetchLastCalls(): Promise<Record<string, any>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const t = tokenStore.get(); if (t) headers['Authorization'] = `Bearer ${t}`;
   const res = await fetch(url.toString(), { method: 'POST', headers, body: JSON.stringify({}) });
+  const d = await res.json().catch(() => ({}));
+  return d.map || {};
+}
+
+// Caller-ID resolver (opm-lastline — an ISOLATED read-only endpoint kept separate from opm-campaign so
+// it can never affect campaign dialing): lead_id -> most recent call's our_number / their_number /
+// direction / agent_name / source / launched_by. Keyed identically to lastCalls (by lead_id). Powers the
+// "which of our numbers was used, and was it AI or a person" surfacing on every row's last interaction.
+const LASTLINE_BASE =
+  (import.meta as any).env?.VITE_OPMLASTLINE_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-lastline') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-lastline');
+async function fetchLastLine(): Promise<Record<string, any>> {
+  const ws = workspaceStore.get();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const t = tokenStore.get(); if (t) headers['Authorization'] = `Bearer ${t}`;
+  const res = await fetch(LASTLINE_BASE, { method: 'POST', headers, body: JSON.stringify(ws ? { workspace: ws } : {}) });
   const d = await res.json().catch(() => ({}));
   return d.map || {};
 }
@@ -160,6 +177,10 @@ export default function SellerContacts() {
   // and the lead-detail block. Re-fetched when the workspace changes or contacts (re)load.
   const [lastCalls, setLastCalls] = useState<Record<string, any>>({});
   useEffect(() => { fetchLastCalls().then(setLastCalls).catch(() => setLastCalls({})); }, [active, contactRows.length]);
+  // Caller-ID for the last interaction (which of OUR numbers was on the line + AI/agent-or-person),
+  // from the isolated opm-lastline endpoint. Same lead_id keying, fetched on the same triggers.
+  const [lastLine, setLastLine] = useState<Record<string, any>>({});
+  useEffect(() => { fetchLastLine().then(setLastLine).catch(() => setLastLine({})); }, [active, contactRows.length]);
 
   // Deep link from a campaign ("Show all leads for this campaign"): ?tag=campaign:<slug>&ws=<slug>.
   // Switch to that workspace (if allowed) and pre-apply the campaign tag filter, then clear the params.
@@ -433,11 +454,11 @@ export default function SellerContacts() {
   };
 
   const exportCsv = () => {
-    const cols = ['#', 'Name', 'Numbers', 'Primary Phone', 'Property', 'Address', 'Stage', 'Pipeline', 'DealPrice', 'Source', 'Assigned', 'Tags', 'LeadID'];
+    const cols = ['#', 'Name', 'Numbers', 'Primary Phone', 'Property', 'Address', 'Stage', 'Pipeline', 'DealPrice', 'Source', 'Assigned', 'Last: our line', 'Last: type', 'Last: initiated by', 'Tags', 'LeadID'];
     const src = selected.size ? rows.filter((r) => selected.has(r.lead_id)) : rows;
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = [cols.join(',')];
-    src.forEach((r, i) => lines.push([i + 1, r.lead_name, r.numbersCount, r.primary ? r.primary.phone : '', r.property_ref, r.address, stageOf(r).name, r.pipeline_name, r.deal_price || '', r.lead_source, r.assigned_to, (r.tags || []).join('; '), r.lead_id].map(esc).join(',')));
+    src.forEach((r, i) => { const ll = lastLine[r.lead_id]; const init = ll ? callInitiator(ll) : null; lines.push([i + 1, r.lead_name, r.numbersCount, r.primary ? r.primary.phone : '', r.property_ref, r.address, stageOf(r).name, r.pipeline_name, r.deal_price || '', r.lead_source, r.assigned_to, ll ? fmtPhone(ourCallNumber(ll)) : '', init ? init.mode : '', init ? init.who : '', (r.tags || []).join('; '), r.lead_id].map(esc).join(',')); });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `contacts-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
   };
@@ -730,7 +751,7 @@ export default function SellerContacts() {
                         {isVisible('deal_price') && <td className="px-3 py-2.5 text-right">{r.deal_price ? `$${num(r.deal_price)}` : '—'}</td>}
                         {isVisible('lead_source') && <td className="max-w-[150px] truncate px-3 py-2.5 text-xs text-slate-500">{r.lead_source || '—'}</td>}
                         {isVisible('assigned_to') && <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{r.assigned_to || '—'}</td>}
-                        {isVisible('last_comm') && (() => { const lc = lastCalls[r.lead_id]; return <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600">{lc?.date ? <>{dateTime(lc.date)}{lc.direction && <span className="ml-1 text-[10px] text-slate-400">{lc.direction === 'inbound' ? '↙' : '↗'}</span>}</> : <span className="text-slate-300">—</span>}</td>; })()}
+                        {isVisible('last_comm') && (() => { const lc = lastCalls[r.lead_id]; const ll = lastLine[r.lead_id]; return <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600">{lc?.date ? (<div className="flex flex-col gap-1"><span className="inline-flex items-center">{dateTime(lc.date)}{lc.direction && <span className="ml-1 text-[10px] text-slate-400">{lc.direction === 'inbound' ? '↙' : '↗'}</span>}</span>{ll && (<span className="flex flex-wrap items-center gap-1"><InitiatorTag c={ll} /><OurLineTag c={ll} /></span>)}</div>) : <span className="text-slate-300">—</span>}</td>; })()}
                         {isVisible('last_duration') && (() => { const lc = lastCalls[r.lead_id]; return <td className="px-3 py-2.5 text-right font-mono text-xs text-slate-600">{lc ? secs(Number(lc.duration_seconds || 0)) : <span className="text-slate-300">—</span>}</td>; })()}
                         {isVisible('last_rec') && (() => { const lc = lastCalls[r.lead_id]; return <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>{lc?.recording_url ? <AudioPlayer src={lc.recording_url} compact /> : <span className="text-xs text-slate-300">—</span>}</td>; })()}
                         {isVisible('last_disp') && (() => { const lc = lastCalls[r.lead_id]; return <td className="whitespace-nowrap px-3 py-2.5">{lc?.disposition ? <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(lc.disposition) }}><StageIcon name={dispositionIconName(lc.disposition)} color={dispositionColor(lc.disposition)} className="h-3.5 w-3.5" />{humanizeDisposition(lc.disposition)}</span> : <span className="text-xs text-slate-400">—</span>}</td>; })()}
