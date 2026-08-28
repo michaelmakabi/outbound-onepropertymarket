@@ -6,13 +6,14 @@
 // When opened from Contacts, pass `lockedWorkspace` (the active tenant), `initialLeadIds` (the
 // current selection) and `startStep={1}` so the user lands on the Agent step with their leads
 // already chosen. The pre-seeded selection is preserved (never cleared on mount).
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { opm, testai, fmt } from '../lib/api';
 import { num } from '../lib/format';
+import { LOGO_MARK } from '../lib/logo';
 import ImportWizard from './ImportWizard';
 import {
   Radio, X, CheckCircle2, Loader2, ChevronLeft, ChevronRight, ArrowLeft, ArrowRight, Search, Upload,
-  ListFilter, Users, Phone, PhoneOutgoing, Clock, AlertTriangle, Info, Hash, Timer,
+  ListFilter, Users, Phone, PhoneOutgoing, Clock, AlertTriangle, Info, Hash, Timer, Plus, Sparkles,
 } from 'lucide-react';
 
 const LEADS_PAGE_SIZE = 50;
@@ -34,6 +35,16 @@ const STEP_INTRO: { title: string; desc: string }[] = [
   { title: 'Pick your AI voice agent', desc: 'Select the AI agent that will place and handle every call in this campaign.' },
   { title: 'Build your call list', desc: 'Add leads with a smart list, search & select, or import a fresh file. Then choose how many numbers to dial per lead.' },
   { title: 'Name it & review', desc: 'Give the campaign a name, choose to launch now or schedule it, and review the projected calls, cost and timing.' },
+];
+
+// Narration for the branded launch overlay — each line explains a real thing happening behind the
+// scenes as the campaign spins up. The final line is shown once the server confirms.
+const LAUNCH_STEPS: { label: string; sub: string }[] = [
+  { label: 'Validating your campaign', sub: 'Checking the agent, caller-ID numbers and dialer credit.' },
+  { label: 'Reserving your caller-ID numbers', sub: 'Locking in the numbers this campaign will dial from.' },
+  { label: 'Queuing your leads', sub: 'Ordering them East Coast first so everyone is called in-hours.' },
+  { label: 'Starting the dialer', sub: 'Handing the batch to the AI agent to begin placing calls.' },
+  { label: 'Campaign is live', sub: 'Taking you to the live campaign view…' },
 ];
 
 export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadIds, initialName, startStep, onClose, onLaunched }: {
@@ -61,6 +72,15 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initialLeadIds || []));
   const [resolving, setResolving] = useState(false);
+  // The leads pre-seeded from the Contacts selection are the campaign's BASE TARGET. Anything the
+  // user adds here (smart lists, "select all", import) is explicitly additive on top of them.
+  const preseeded = useMemo(() => new Set(initialLeadIds || []), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const hasPreseed = preseeded.size > 0;
+  // When pre-seeded, the "add more leads" tools are collapsed by default so the base target is the story.
+  const [showAddMore, setShowAddMore] = useState(!hasPreseed);
+  const addedBeyondPreseed = useMemo(() => {
+    let c = 0; selected.forEach((id) => { if (!preseeded.has(id)) c++; }); return c;
+  }, [selected, preseeded]);
 
   // Smart lists (saved views) for this workspace: id -> resolved { ids, count }.
   const [lists, setLists] = useState<any[]>([]);
@@ -86,6 +106,11 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Form-style validation: which required field is missing, so we can outline it red and jump to it.
+  const [invalidField, setInvalidField] = useState<'' | 'name' | 'leads' | 'agent' | 'preflight' | 'schedule'>('');
+  const nameRef = useRef<HTMLInputElement>(null);
+  // Branded launch overlay: an animated progress bar with a step-by-step "what's happening" narration.
+  const [launchStep, setLaunchStep] = useState(0);
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -263,15 +288,36 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
   const scheduleReady = launchMode === 'now' || (scheduleFuture && scheduleHourOk);
 
   const launch = async () => {
-    if (busy || !preflightOk || !scheduleReady) return;
-    setErr(''); setBusy(true);
+    if (busy) return;
+    // Form-style validation: don't silently disable — point the user at exactly what's incomplete.
+    if (!ws) { setInvalidField('agent'); setStep(0); return; }
+    if (!agentId) { setInvalidField('agent'); setStep(1); return; }
+    if (selected.size === 0) { setInvalidField('leads'); setStep(2); setErr('Add at least one lead before launching.'); return; }
+    if (!name.trim()) {
+      setInvalidField('name'); setStep(3);
+      setTimeout(() => { nameRef.current?.focus(); nameRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 40);
+      return;
+    }
+    if (!scheduleReady) { setInvalidField('schedule'); return; }
+    if (!preflightOk) { setInvalidField('preflight'); return; }
+    setErr(''); setInvalidField(''); setBusy(true); setLaunchStep(0);
     try {
       const payload: any = { workspace: ws, name: name.trim(), agent_id: agentId, agent_name: agentName, lead_ids: [...selected], dial_mode: dialMode, timezone };
       if (launchMode === 'schedule' && scheduleAt) payload.scheduled_at = new Date(scheduleAt).toISOString();
       const r = await opm.campaignLaunch(payload);
+      // Let the final "Launching…" frame breathe for a beat so the transition doesn't feel abrupt.
+      setLaunchStep(LAUNCH_STEPS.length - 1);
+      await new Promise((res) => setTimeout(res, 500));
       onLaunched(r?.campaign?.id);
     } catch (e: any) { setErr(String(e?.message || e)); setBusy(false); }
   };
+
+  // Advance the branded launch narration while the request is in flight (purely cosmetic pacing).
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(() => setLaunchStep((s) => Math.min(s + 1, LAUNCH_STEPS.length - 2)), 900);
+    return () => clearInterval(t);
+  }, [busy]);
 
   const canNext = [!!ws, !!agentId, selected.size > 0, !!name.trim()][step];
   const steps = ['Workspace', 'Agent', 'Leads', 'Confirm'];
@@ -370,6 +416,21 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
         {step === 2 && (
           <div className="space-y-6">
+            {/* Base target: leads carried in from the Contacts selection. */}
+            {hasPreseed && (
+              <div className="rounded-2xl border-2 border-brand/30 bg-brand-light/30 p-5">
+                <div className="flex items-center gap-2 text-base font-bold text-ink"><CheckCircle2 className="h-5 w-5 text-brand" /> Targeting {num(preseeded.size)} lead{preseeded.size === 1 ? '' : 's'} you selected</div>
+                <p className="mt-1 text-sm text-slate-600">These are the exact contacts you picked — they're the campaign's target. You don't need to add anything else. If you'd like, you can <span className="font-semibold text-ink">also include more</span> leads below.{addedBeyondPreseed > 0 && <> You've added <span className="font-semibold text-brand">{num(addedBeyondPreseed)} more</span> so far.</>}</p>
+                {!showAddMore && (
+                  <button onClick={() => setShowAddMore(true)} className="mt-3 inline-flex items-center gap-2 rounded-xl border border-brand/40 bg-white px-4 py-2.5 text-sm font-semibold text-brand hover:bg-brand-light/40"><Plus className="h-4 w-4" /> Also include more leads (optional)</button>
+                )}
+              </div>
+            )}
+
+            {(showAddMore || !hasPreseed) && (<>
+            {hasPreseed && (
+              <div className="flex items-center gap-2 text-sm font-bold text-brand"><Sparkles className="h-4 w-4" /> Add more leads on top of your {num(preseeded.size)} selected <span className="ml-1 font-normal text-slate-400">— optional</span></div>
+            )}
             {/* Smart-list batch selection */}
             <div>
               <div className="mb-2 flex items-center gap-2 text-sm font-bold text-ink"><ListFilter className="h-4 w-4 text-brand" /> Smart lists {listsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}</div>
@@ -426,6 +487,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
                 <div className="mt-2 text-xs text-slate-500">{num(selected.size)} lead{selected.size === 1 ? '' : 's'} selected in total (including any not shown on this page).</div>
               )}
             </div>
+            </>)}
 
             {/* Dial mode selector */}
             <div>
@@ -452,9 +514,11 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
         {step === 3 && (
           <div className="space-y-5">
-            <div><label className="mb-2 block text-base font-bold text-ink">Campaign name</label>
-              <input autoFocus className="input !py-3.5 text-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Miami Off-Market — August" />
-              <p className="mt-2 text-sm text-slate-500">This is how the campaign appears in your dashboard and reports.</p></div>
+            <div><label className="mb-2 block text-base font-bold text-ink">Campaign name {invalidField === 'name' && <span className="ml-1 text-sm font-semibold text-red-600">— required</span>}</label>
+              <input ref={nameRef} autoFocus className={`input !py-3.5 text-base ${invalidField === 'name' ? 'border-red-400 ring-2 ring-red-200 focus:border-red-400' : ''}`} value={name} onChange={(e) => { setName(e.target.value); if (invalidField === 'name') setInvalidField(''); }} placeholder="e.g. Miami Off-Market — August" />
+              {invalidField === 'name'
+                ? <p className="mt-2 flex items-center gap-1.5 text-sm font-medium text-red-600"><AlertTriangle className="h-4 w-4" /> Give your campaign a name so you can find it later.</p>
+                : <p className="mt-2 text-sm text-slate-500">This is how the campaign appears in your dashboard and reports.</p>}</div>
 
             {/* Summary */}
             <div className="space-y-2.5 rounded-2xl border border-line bg-surface p-5 text-base">
@@ -508,7 +572,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
             {preflightLoading ? (
               <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Checking the agent's numbers and dialer credit…</div>
             ) : preflight && !preflightOk ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+              <div className={`rounded-lg border p-3 text-sm ${invalidField === 'preflight' ? 'border-red-400 bg-red-50 ring-2 ring-red-200' : 'border-red-200 bg-red-50'}`}>
                 <div className="flex items-center gap-1.5 font-semibold text-red-700"><AlertTriangle className="h-4 w-4" /> Can't launch yet</div>
                 <ul className="mt-1.5 space-y-1 text-xs text-red-600">
                   {(preflight.issues || ['This agent has no dialable numbers assigned.']).map((iss: string, i: number) => <li key={i} className="flex gap-1.5"><span>•</span> {iss}</li>)}
@@ -524,11 +588,58 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
           <button className={BTN_GHOST} disabled={step === 0 || busy} onClick={() => setStep((s) => s - 1)}><ArrowLeft className="h-4 w-4" /> Back</button>
           {step < 3
             ? <button className={BTN_PRIMARY} disabled={!canNext} onClick={() => setStep((s) => s + 1)}>Next <ArrowRight className="h-4 w-4" /></button>
-            : <button className="inline-flex items-center gap-2 rounded-xl bg-brand px-7 py-3 text-base font-bold text-white shadow-sm hover:bg-brand/90 disabled:opacity-40" disabled={busy || !name.trim() || selected.size === 0 || preflightLoading || !preflightOk || !scheduleReady} onClick={launch}>{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : launchMode === 'schedule' ? <Clock className="h-5 w-5" /> : <PhoneOutgoing className="h-5 w-5" />} {launchMode === 'schedule' ? 'Schedule campaign' : `Launch ${num(estimatedCalls)} call${estimatedCalls === 1 ? '' : 's'}`}</button>}
+            : <button className="inline-flex items-center gap-2 rounded-xl bg-brand px-7 py-3 text-base font-bold text-white shadow-sm hover:bg-brand/90 disabled:opacity-40" disabled={busy || preflightLoading} onClick={launch}>{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : launchMode === 'schedule' ? <Clock className="h-5 w-5" /> : <PhoneOutgoing className="h-5 w-5" />} {launchMode === 'schedule' ? 'Schedule campaign' : `Launch ${num(estimatedCalls)} call${estimatedCalls === 1 ? '' : 's'}`}</button>}
         </div>
       </div>
 
       {showImport && <ImportWizard onClose={afterImport} lockedWorkspace={ws || undefined} />}
+
+      {busy && <LaunchOverlay step={launchStep} scheduled={launchMode === 'schedule'} calls={estimatedCalls} name={name.trim()} />}
+    </div>
+  );
+}
+
+/* ---------------- Branded launch overlay ---------------- */
+// Full-screen branded cover shown while the campaign is spinning up: OPM logo, an animated progress
+// bar, and a live step-by-step narration of what's happening behind the scenes.
+function LaunchOverlay({ step, scheduled, calls, name }: { step: number; scheduled: boolean; calls: number; name: string }) {
+  const pct = Math.round(((step + 1) / LAUNCH_STEPS.length) * 100);
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-ink/70 p-4 backdrop-blur-sm">
+      <div className="card w-full max-w-md rounded-3xl p-9 text-center shadow-2xl">
+        <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-3xl bg-brand-light/50 p-3 ring-1 ring-brand/20">
+          <img src={LOGO_MARK} alt="1PropertyMarket" className="h-full w-full animate-pulse object-contain" />
+        </div>
+        <h3 className="text-xl font-extrabold tracking-tight text-ink">{scheduled ? 'Scheduling your campaign' : 'Launching your campaign'}</h3>
+        {name && <p className="mt-1 text-sm font-semibold text-brand">{name}</p>}
+
+        {/* Progress bar */}
+        <div className="mt-6 h-2.5 w-full overflow-hidden rounded-full bg-surface">
+          <div className="h-full rounded-full bg-brand transition-all duration-700 ease-out" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="mt-1.5 text-right text-[11px] font-semibold text-slate-400">{pct}%</div>
+
+        {/* Live step narration */}
+        <div className="mt-4 space-y-2 text-left">
+          {LAUNCH_STEPS.map((s, i) => {
+            const done = i < step;
+            const active = i === step;
+            return (
+              <div key={i} className={`flex items-start gap-2.5 rounded-xl px-3 py-2 transition ${active ? 'bg-brand-light/40' : ''}`}>
+                <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold ${done ? 'bg-emerald-100 text-emerald-700' : active ? 'bg-brand text-white' : 'bg-surface text-slate-300'}`}>
+                  {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : active ? <Loader2 className="h-3 w-3 animate-spin" /> : i + 1}
+                </span>
+                <div>
+                  <div className={`text-sm font-semibold ${done || active ? 'text-ink' : 'text-slate-400'}`}>{s.label}</div>
+                  {active && <div className="text-xs text-slate-500">{s.sub}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="mt-5 text-xs text-slate-400">{scheduled ? 'Almost done — saving your schedule.' : `Placing ~${num(calls)} call${calls === 1 ? '' : 's'}. This only takes a moment — please don't close this window.`}</p>
+      </div>
     </div>
   );
 }
