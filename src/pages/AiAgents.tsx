@@ -262,7 +262,12 @@ export default function AiAgents() {
               <div className="flex items-center gap-2 text-base font-bold text-ink"><Phone className="h-5 w-5 text-brand" /> Assign numbers</div>
               <button onClick={() => setAssignFor(null)} className="rounded p-1 text-slate-400 hover:text-ink"><X className="h-4 w-4" /></button>
             </div>
-            <p className="mb-3 text-xs text-slate-500">Pick which of this workspace's numbers <span className="font-semibold text-ink">{assignFor.agent_name}</span> answers on (inbound) and dials from (outbound). Numbers with no outbound agent are flagged as available.</p>
+            <p className="mb-3 text-xs text-slate-500">Pick which of this workspace's numbers <span className="font-semibold text-ink">{assignFor.agent_name}</span> answers on (inbound) and dials from (outbound).</p>
+            {/* Guiding tips */}
+            <div className="mb-3 space-y-1.5 rounded-xl border border-brand/20 bg-brand-light/20 p-3 text-[11px] text-slate-600">
+              <div className="flex items-start gap-1.5"><PhoneOutgoing className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" /> <span><span className="font-semibold text-ink">Outbound</span> = this agent places calls from that number. <span className="font-semibold text-ink">Inbound</span> = this agent answers calls to it. Turn on either or both.</span></div>
+              <div className="flex items-start gap-1.5"><CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" /> <span>A green <span className="font-semibold text-emerald-700">available</span> badge means no other agent dials from that number yet — it's free to assign.</span></div>
+            </div>
             {numLoading ? <Spinner label="Loading numbers…" /> : numbers.length === 0 ? (
               <EmptyState text="No phone numbers on this workspace's account yet. Buy numbers on the Phone Numbers page first." />
             ) : (
@@ -271,14 +276,14 @@ export default function AiAgents() {
                   const s = sel[n.phone_number] || { inbound: false, outbound: false };
                   const available = !(n.outbound_agent_ids || []).length;
                   return (
-                    <div key={n.phone_number} className="rounded-xl border border-line p-2.5">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm font-semibold text-ink">{fmtNum(n.phone_number)}</span>
-                          {n.nickname && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">{n.nickname}</span>}
-                          {available && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">available</span>}
+                    <div key={n.phone_number} className={`rounded-xl border p-2.5 transition ${s.inbound || s.outbound ? 'border-brand/40 bg-brand-light/10' : 'border-line'}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <span className="whitespace-nowrap font-mono text-sm font-semibold text-ink">{fmtNum(n.phone_number)}</span>
+                          {n.nickname && <span className="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">{n.nickname}</span>}
+                          {available && <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">available</span>}
                         </div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex shrink-0 items-center gap-1.5">
                           <button onClick={() => toggleSel(n.phone_number, 'outbound')} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition ${s.outbound ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-line text-slate-600 hover:border-emerald-400'}`}><PhoneOutgoing className="h-3 w-3" /> Outbound</button>
                           <button onClick={() => toggleSel(n.phone_number, 'inbound')} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition ${s.inbound ? 'border-sky-500 bg-sky-500 text-white' : 'border-line text-slate-600 hover:border-sky-400'}`}><PhoneIncoming className="h-3 w-3" /> Inbound</button>
                         </div>
