@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { testai } from '../lib/api';
+import { testai, trackAction } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import { PageHead, Spinner, EmptyState } from '../components/ui';
 import {
@@ -127,6 +127,7 @@ export default function AiAgents() {
           ok++;
         } catch { fail++; }
       }
+      if (ok > 0) trackAction(`Assigned ${assignFor.agent_name} to ${ok} number${ok === 1 ? '' : 's'}`, { workspace: active, entity_type: 'agent', entity_id: assignFor.agent_id });
       flash(fail === 0, fail === 0 ? `Assigned ${assignFor.agent_name} to ${ok} number${ok === 1 ? '' : 's'}.` : `Assigned ${ok}, ${fail} failed.`);
       setAssignFor(null);
     } finally { setNumBusy(false); }
@@ -137,6 +138,7 @@ export default function AiAgents() {
     setCreating(true);
     try {
       const r = await testai.createAgent({ workspace: active, name: newName.trim(), general_prompt: newPrompt.trim() || undefined });
+      trackAction(`Created agent "${r.agent_name}"`, { workspace: active, entity_type: 'agent', entity_id: r.agent_id });
       flash(true, `Created "${r.agent_name}". Opening the editor…`);
       setNewOpen(false); setNewName(''); setNewPrompt('');
       load();
