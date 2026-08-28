@@ -4,22 +4,95 @@
 // customer's workspace(s): the user list is filtered to that workspace's members and
 // the access editor / new-user flow pre-target that workspace. All create / edit /
 // reset / invite / scope / view logic is shared so the two surfaces never drift.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, opm } from '../lib/api';
+import { audit, type AuditEvent } from '../lib/audit';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from './ui';
-import { UserPlus, ShieldCheck, X, Check, Pencil, KeyRound, Send, Copy, Clock, Eye } from 'lucide-react';
+import {
+  UserPlus, ShieldCheck, X, Check, Pencil, KeyRound, Send, Copy, Clock, Eye,
+  Search, Download, ChevronLeft, ChevronRight, Filter, ArrowUpDown, RefreshCw,
+} from 'lucide-react';
 
 export type Ws = { slug: string; display_name: string; status?: string };
 type LeadScope = 'all' | 'assigned';
 type AccessRow = { workspace: string; agent_mode: 'all' | 'only' | 'except'; agent_ids: string[]; lead_scope: LeadScope };
 
 const dt = (s: string | null) => (s ? new Date(s).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
+// Compact relative time ("3m", "5h", "2d") for the activity feed.
+const rel = (s: string | null) => {
+  if (!s) return '';
+  const d = Date.now() - new Date(s).getTime();
+  const m = Math.floor(d / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  return days < 30 ? `${days}d ago` : new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+const titleize = (s: string) => (s || '').replace(/[_.]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+// Category → pill colors, so the eye can scan the feed by type at a glance.
+const CAT_STYLE: Record<string, string> = {
+  auth: 'bg-sky-100 text-sky-700',
+  admin: 'bg-violet-100 text-violet-700',
+  account: 'bg-indigo-100 text-indigo-700',
+  ai: 'bg-fuchsia-100 text-fuchsia-700',
+  navigation: 'bg-slate-100 text-slate-600',
+  campaign: 'bg-amber-100 text-amber-700',
+  pipeline: 'bg-blue-100 text-blue-700',
+  assignment: 'bg-teal-100 text-teal-700',
+  disposition: 'bg-emerald-100 text-emerald-700',
+  contact: 'bg-cyan-100 text-cyan-700',
+  note: 'bg-lime-100 text-lime-700',
+  import: 'bg-orange-100 text-orange-700',
+  agent: 'bg-purple-100 text-purple-700',
+  call: 'bg-rose-100 text-rose-700',
+  crm: 'bg-slate-100 text-slate-600',
+  system: 'bg-slate-100 text-slate-500',
+  other: 'bg-slate-100 text-slate-500',
+};
+const catStyle = (c: string | null) => CAT_STYLE[(c || 'other').toLowerCase()] || CAT_STYLE.other;
+
+// Turn an event into a readable one-liner. Prefers plain detail text, then interprets
+// the structured detail_json emitted by the CRM log (stage changes, assignments, campaigns…).
+function describe(ev: AuditEvent): string {
+  if (ev.detail_text) return ev.detail_text;
+  const d = ev.detail_json || {};
+  switch (ev.action) {
+    case 'stage_change': return `Stage ${d.from_stage_id ?? '?'} → ${d.to_stage_id ?? '?'}${d.from_pipeline_id !== d.to_pipeline_id ? ` (pipeline ${d.from_pipeline_id}→${d.to_pipeline_id})` : ''}`;
+    case 'assign_lead': return d.primary_name ? `Assigned to ${d.primary_name}` : 'Lead assignment updated';
+    case 'campaign_launch': return `${d.name || 'Campaign'} · ${d.dialable ?? d.total ?? 0} dialable of ${d.total ?? 0}`;
+    case 'note_added': return `Note added${d.chars ? ` (${d.chars} chars)` : ''}`;
+    case 'page_view': return '';
+    default: break;
+  }
+  const keys = Object.keys(d);
+  if (!keys.length) return '';
+  return keys.slice(0, 4).map((k) => `${k}: ${typeof d[k] === 'object' ? JSON.stringify(d[k]) : d[k]}`).join(' · ');
+}
 
 function StatusBadge({ u }: { u: any }) {
   if (u.disabled) return <span className="pill bg-red-100 text-red-700">Disabled</span>;
   if (!u.claimed_at) return <span className="pill bg-amber-100 text-amber-700">Pending invite</span>;
   return <span className="pill bg-emerald-100 text-emerald-700">Active</span>;
+}
+
+// Sortable column header for the users table.
+function SortTh({ k, label, sort, onSort, className }: { k: string; label: string; sort: { by: string; dir: 'asc' | 'desc' }; onSort: (k: string) => void; className?: string }) {
+  const active = sort.by === k;
+  return (
+    <th className={`px-3 py-2.5 font-semibold ${className || ''}`}>
+      <button className="inline-flex items-center gap-1 hover:text-ink" onClick={() => onSort(k)} title={`Sort by ${label}`}>
+        {label}<ArrowUpDown className={`h-3 w-3 ${active ? 'text-brand' : 'text-slate-300'}`} />
+      </button>
+    </th>
+  );
+}
+// Compact labelled <select> for the activity filter bar.
+function FilterSelect({ value, onChange, children, title }: { value: string; onChange: (v: string) => void; children: any; title?: string }) {
+  return <select title={title} className="input w-auto !py-1.5 text-xs" value={value} onChange={(e) => onChange(e.target.value)}>{children}</select>;
 }
 
 export function UsersAndAccess({
@@ -39,7 +112,6 @@ export function UsersAndAccess({
   const isSuper = me?.role === 'super_admin';
   const [users, setUsers] = useState<any[]>([]);
   const [allWs, setAllWs] = useState<Ws[]>([]);
-  const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editUser, setEditUser] = useState<any>(null);
@@ -48,6 +120,27 @@ export function UsersAndAccess({
   // Lead-visibility scope per user (keyed by email), surfaced as a badge. Scoped mode only —
   // lead_scope lives per (user, workspace), so we read the customer's primary workspace members.
   const [scopeByEmail, setScopeByEmail] = useState<Record<string, LeadScope>>({});
+
+  // ---- users table controls (client-side; the user list is small) ----
+  const [uSearch, setUSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [uSort, setUSort] = useState<{ by: string; dir: 'asc' | 'desc' }>({ by: 'name', dir: 'asc' });
+  const toggleSort = (by: string) => setUSort((s) => (s.by === by ? { by, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { by, dir: 'asc' }));
+
+  // ---- unified activity feed (user_events + CRM log) via the /audit function ----
+  const wsInList = scoped ? (scopeWorkspaces || []).map((w) => w.slug) : undefined;
+  const PAGE = 25;
+  const emptyFacets = { actions: [] as string[], categories: [] as string[], workspaces: [] as string[], entities: [] as string[], actors: [] as { id: number; name: string }[] };
+  const [feed, setFeed] = useState<{ events: AuditEvent[]; total: number; facets: typeof emptyFacets }>({ events: [], total: 0, facets: emptyFacets });
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [offset, setOffset] = useState(0);
+  const [af, setAf] = useState({ q: '', category: '', evt: '', actor: '', ws: '', from: '', to: '' });
+  const [qDebounced, setQDebounced] = useState('');
+  const searchTimer = useRef<any>(null);
+  const setFilter = (patch: Partial<typeof af>) => { setAf((a) => ({ ...a, ...patch })); setOffset(0); };
+  const resetFilters = () => { setAf({ q: '', category: '', evt: '', actor: '', ws: '', from: '', to: '' }); setQDebounced(''); setOffset(0); };
+
   const scopeWsSlug = primaryWorkspace || scopeWorkspaces?.[0]?.slug || null;
   const loadScopes = async () => {
     if (!scoped || !scopeWsSlug) return;
@@ -59,17 +152,60 @@ export function UsersAndAccess({
     } catch { /* non-fatal */ }
   };
 
+  const dayMs = (v: string, end?: boolean) => (v ? new Date(v + (end ? 'T23:59:59.999' : 'T00:00:00')).getTime() : undefined);
+  const buildQuery = () => ({
+    q: qDebounced || undefined,
+    category: af.category || undefined,
+    evt: af.evt || undefined,
+    actor: af.actor || undefined,
+    ws: !scoped && af.ws ? af.ws : undefined,
+    ws_in: scoped ? wsInList : undefined,
+    from: dayMs(af.from), to: dayMs(af.to, true),
+  });
+  const loadFeed = async (ofs: number) => {
+    setFeedLoading(true);
+    try { const d = await audit.events({ ...buildQuery(), limit: PAGE, offset: ofs }); setFeed(d as any); }
+    catch { setFeed({ events: [], total: 0, facets: emptyFacets }); }
+    finally { setFeedLoading(false); }
+  };
+
   const refresh = async () => {
-    const [u, e] = await Promise.all([api.admin.users(), scoped ? Promise.resolve({ events: [] }) : api.admin.userEvents()]);
-    setUsers(u.users); if (!scoped) setEvents(e.events);
+    const u = await api.admin.users(); setUsers(u.users);
     if (scoped) { onChanged?.(); loadScopes(); }
+    setOffset(0); loadFeed(0);
   };
   useEffect(() => {
-    Promise.all([api.admin.users(), api.admin.allWorkspaces(), scoped ? Promise.resolve({ events: [] }) : api.admin.userEvents()])
-      .then(([u, w, e]) => { setUsers(u.users); setAllWs(w.workspaces); if (!scoped) setEvents(e.events); })
+    Promise.all([api.admin.users(), api.admin.allWorkspaces()])
+      .then(([u, w]) => { setUsers(u.users); setAllWs(w.workspaces); })
       .finally(() => setLoading(false));
     loadScopes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Debounce the free-text search box before it hits the server.
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { setQDebounced(af.q.trim()); setOffset(0); }, 350);
+    return () => clearTimeout(searchTimer.current);
+  }, [af.q]);
+  // Reload the feed whenever a filter or the page changes.
+  useEffect(() => { loadFeed(offset); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [offset, qDebounced, af.category, af.evt, af.actor, af.ws, af.from, af.to]);
+
+  const exportCsv = async () => {
+    try {
+      const d = await audit.events({ ...buildQuery(), limit: 1000, offset: 0 });
+      const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const head = ['time', 'category', 'action', 'actor', 'workspace', 'target', 'entity', 'details'];
+      const lines = [head.join(',')].concat((d.events || []).map((e: AuditEvent) => [
+        new Date(e.created_at).toISOString(), e.category || '', e.action, e.actor_name || '', e.workspace || '',
+        e.target_name || '', e.entity_type && e.entity_id ? `${e.entity_type}:${e.entity_id}` : '', describe(e),
+      ].map(esc).join(',')));
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `platform-activity-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    } catch { alert('Could not export right now — please try again.'); }
+  };
 
   // Which users to show. Scoped → only users whose login/email is a member of this customer's workspace(s).
   const emailSet = useMemo(() => new Set((scopedEmails || []).map((x) => (x || '').toLowerCase())), [scopedEmails]);
@@ -77,6 +213,25 @@ export function UsersAndAccess({
     () => (scoped ? users.filter((u) => emailSet.has(String(u.username || u.email || '').toLowerCase())) : users),
     [users, scoped, emailSet],
   );
+  // Search + role/status filter + sort, applied client-side over the (small) user list.
+  const filteredUsers = useMemo(() => {
+    let list = shownUsers;
+    const q = uSearch.trim().toLowerCase();
+    if (q) list = list.filter((u) => `${u.name || ''} ${u.username || ''} ${u.email || ''}`.toLowerCase().includes(q));
+    if (roleFilter) list = list.filter((u) => u.role === roleFilter);
+    if (statusFilter) list = list.filter((u) => statusFilter === 'disabled' ? u.disabled : statusFilter === 'pending' ? (!u.disabled && !u.claimed_at) : statusFilter === 'active' ? (!u.disabled && !!u.claimed_at) : true);
+    const dir = uSort.dir === 'asc' ? 1 : -1;
+    const val = (u: any) => {
+      switch (uSort.by) {
+        case 'email': return (u.username || '').toLowerCase();
+        case 'role': return u.role || '';
+        case 'status': return u.disabled ? '2' : (!u.claimed_at ? '1' : '0');
+        case 'last': return u.last_signed_in ? new Date(u.last_signed_in).getTime() : 0;
+        default: return (u.name || '').toLowerCase();
+      }
+    };
+    return [...list].sort((a, b) => { const av = val(a), bv = val(b); return av < bv ? -dir : av > bv ? dir : 0; });
+  }, [shownUsers, uSearch, roleFilter, statusFilter, uSort]);
   // Workspaces the access editor operates on (scoped → just this customer's).
   const editorWorkspaces = scoped ? (scopeWorkspaces as Ws[]) : allWs;
 
@@ -118,23 +273,44 @@ export function UsersAndAccess({
         <PageHead title="Users & Access" subtitle="Create logins and scope exactly what each person can see" right={newUserBtn} />
       )}
 
+      {/* Users table controls: search + role + status */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+          <input value={uSearch} onChange={(e) => setUSearch(e.target.value)} placeholder="Search users…" className="input w-full pl-8 sm:w-[240px]" />
+        </div>
+        <FilterSelect value={roleFilter} onChange={setRoleFilter} title="Role">
+          <option value="">All roles</option>
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+          <option value="super_admin">Super admin</option>
+        </FilterSelect>
+        <FilterSelect value={statusFilter} onChange={setStatusFilter} title="Status">
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="pending">Pending invite</option>
+          <option value="disabled">Disabled</option>
+        </FilterSelect>
+        <span className="text-xs text-slate-400">{filteredUsers.length} of {shownUsers.length}</span>
+      </div>
+
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-5 py-2.5 font-semibold">Name</th>
-              <th className="px-3 py-2.5 font-semibold">Email</th>
-              <th className="px-3 py-2.5 font-semibold">Role</th>
-              <th className="px-3 py-2.5 font-semibold">Status</th>
-              <th className="px-3 py-2.5 font-semibold">Last seen</th>
+              <SortTh k="name" label="Name" sort={uSort} onSort={toggleSort} className="!px-5" />
+              <SortTh k="email" label="Email" sort={uSort} onSort={toggleSort} />
+              <SortTh k="role" label="Role" sort={uSort} onSort={toggleSort} />
+              <SortTh k="status" label="Status" sort={uSort} onSort={toggleSort} />
+              <SortTh k="last" label="Last seen" sort={uSort} onSort={toggleSort} />
               <th className="px-3 py-2.5 text-right font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {shownUsers.length === 0 && (
-              <tr><td colSpan={6} className="px-5 py-8 text-center text-sm text-slate-400">{scoped ? 'No users have access to this customer yet. Create one to get started.' : 'No users yet.'}</td></tr>
+            {filteredUsers.length === 0 && (
+              <tr><td colSpan={6} className="px-5 py-8 text-center text-sm text-slate-400">{shownUsers.length === 0 ? (scoped ? 'No users have access to this customer yet. Create one to get started.' : 'No users yet.') : 'No users match these filters.'}</td></tr>
             )}
-            {shownUsers.map((u) => (
+            {filteredUsers.map((u) => (
               <tr key={u.id} className="border-t border-line hover:bg-surface">
                 <td className="px-5 py-2.5 font-semibold text-ink">{u.name}</td>
                 <td className="px-3 py-2.5 text-slate-500">{u.username}</td>
@@ -165,26 +341,108 @@ export function UsersAndAccess({
         </table>
       </div>
 
-      {!scoped && (
-        <div className="card mt-6 overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-line px-5 py-3 text-xs font-bold uppercase tracking-wide text-slate-500"><Clock className="h-3.5 w-3.5" /> Activity log</div>
-          <div className="max-h-80 overflow-x-auto overflow-y-auto">
-            {events.length === 0 ? <div className="px-5 py-6 text-center text-sm text-slate-400">No activity yet.</div> : (
-              <table className="w-full text-sm">
-                <tbody>
-                  {events.map((e) => (
-                    <tr key={e.id} className="border-t border-line">
-                      <td className="whitespace-nowrap px-5 py-2 text-xs text-slate-400">{dt(e.created_at)}</td>
-                      <td className="px-3 py-2"><span className="pill bg-slate-100 text-slate-600">{e.action.replace(/_/g, ' ')}</span></td>
-                      <td className="px-3 py-2 text-slate-600"><b className="text-ink">{e.actor_name || 'system'}</b>{e.target_name && e.target_name !== e.actor_name ? ` → ${e.target_name}` : ''}{e.detail ? ` · ${e.detail}` : ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+      {/* ---------------- Platform activity (unified audit feed) ---------------- */}
+      <div className="card mt-6 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+            <Clock className="h-3.5 w-3.5" /> Platform activity
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">{feed.total.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => loadFeed(offset)} title="Refresh"><RefreshCw className={`h-3.5 w-3.5 ${feedLoading ? 'animate-spin' : ''}`} /></button>
+            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={exportCsv} title="Export current view to CSV"><Download className="h-3.5 w-3.5" /> Export</button>
           </div>
         </div>
-      )}
+
+        {/* Filter bar */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface/40 px-5 py-2.5">
+          <div className="relative">
+            <Filter className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <input value={af.q} onChange={(e) => setAf((a) => ({ ...a, q: e.target.value }))} placeholder="Search activity…" className="input w-full pl-8 sm:w-[220px] !py-1.5 text-xs" />
+          </div>
+          <FilterSelect value={af.category} onChange={(v) => setFilter({ category: v })} title="Category">
+            <option value="">All categories</option>
+            {feed.facets.categories.map((c) => <option key={c} value={c}>{titleize(c)}</option>)}
+          </FilterSelect>
+          <FilterSelect value={af.evt} onChange={(v) => setFilter({ evt: v })} title="Action">
+            <option value="">All actions</option>
+            {feed.facets.actions.map((a) => <option key={a} value={a}>{titleize(a)}</option>)}
+          </FilterSelect>
+          <FilterSelect value={af.actor} onChange={(v) => setFilter({ actor: v })} title="User">
+            <option value="">All users</option>
+            {feed.facets.actors.map((a) => <option key={a.id} value={String(a.id)}>{a.name}</option>)}
+          </FilterSelect>
+          {!scoped && (
+            <FilterSelect value={af.ws} onChange={(v) => setFilter({ ws: v })} title="Workspace">
+              <option value="">All workspaces</option>
+              {feed.facets.workspaces.map((w) => <option key={w} value={w}>{w}</option>)}
+            </FilterSelect>
+          )}
+          <input type="date" value={af.from} onChange={(e) => setFilter({ from: e.target.value })} title="From date" className="input w-auto !py-1.5 text-xs" />
+          <span className="text-xs text-slate-400">→</span>
+          <input type="date" value={af.to} onChange={(e) => setFilter({ to: e.target.value })} title="To date" className="input w-auto !py-1.5 text-xs" />
+          {(af.q || af.category || af.evt || af.actor || af.ws || af.from || af.to) && (
+            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={resetFilters}><X className="h-3.5 w-3.5" /> Clear</button>
+          )}
+        </div>
+
+        <div className="max-h-[520px] overflow-x-auto overflow-y-auto">
+          {feedLoading && feed.events.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-slate-400">Loading activity…</div>
+          ) : feed.events.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-slate-400">No activity matches these filters.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-surface text-left text-[11px] uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-5 py-2 font-semibold">When</th>
+                  <th className="px-3 py-2 font-semibold">Category</th>
+                  <th className="px-3 py-2 font-semibold">Action</th>
+                  <th className="px-3 py-2 font-semibold">User</th>
+                  <th className="px-3 py-2 font-semibold">Where</th>
+                  <th className="px-3 py-2 font-semibold">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {feed.events.map((e) => {
+                  const desc = describe(e);
+                  const ip = e.detail_json?.ip;
+                  const imp = e.detail_json?.impersonator;
+                  return (
+                    <tr key={e.uid} className="border-t border-line align-top hover:bg-surface">
+                      <td className="whitespace-nowrap px-5 py-2 text-xs text-slate-500" title={dt(e.created_at)}>{rel(e.created_at)}</td>
+                      <td className="px-3 py-2"><span className={`pill ${catStyle(e.category)}`}>{titleize(e.category || 'other')}</span></td>
+                      <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-ink">{titleize(e.action)}</td>
+                      <td className="px-3 py-2 text-slate-700">
+                        <div className="font-semibold text-ink">{e.actor_name || 'system'}</div>
+                        {imp && <div className="text-[10px] text-amber-600">via {imp}</div>}
+                        {e.target_name && e.target_name !== e.actor_name && <div className="text-[11px] text-slate-500">→ {e.target_name}</div>}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">
+                        {e.workspace && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">{e.workspace}</span>}
+                        {e.entity_type && e.entity_id && <div className="mt-0.5 font-mono text-[10px] text-slate-400">{e.entity_type}:{e.entity_id}</div>}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-600">
+                        {desc || <span className="text-slate-300">—</span>}
+                        {ip && <span className="ml-1 font-mono text-[10px] text-slate-400">· {ip}</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Pagination */}
+        <div className="flex items-center justify-between border-t border-line px-5 py-2.5 text-xs text-slate-500">
+          <span>{feed.total === 0 ? 'No results' : `${offset + 1}–${Math.min(offset + PAGE, feed.total)} of ${feed.total.toLocaleString()}`}</span>
+          <div className="flex items-center gap-1">
+            <button className="btn-ghost !px-2 !py-1 text-xs disabled:opacity-40" disabled={offset === 0 || feedLoading} onClick={() => setOffset(Math.max(0, offset - PAGE))}><ChevronLeft className="h-3.5 w-3.5" /> Prev</button>
+            <button className="btn-ghost !px-2 !py-1 text-xs disabled:opacity-40" disabled={offset + PAGE >= feed.total || feedLoading} onClick={() => setOffset(offset + PAGE)}>Next <ChevronRight className="h-3.5 w-3.5" /></button>
+          </div>
+        </div>
+      </div>
 
       {creating && <UserForm mode="create" isSuper={isSuper} afterCreate={afterCreate} onClose={() => setCreating(false)} onReveal={setReveal} onDone={() => { setCreating(false); refresh(); }} />}
       {editUser && <UserForm mode="edit" isSuper={isSuper} user={editUser} onClose={() => setEditUser(null)} onReveal={setReveal} onDone={() => { setEditUser(null); refresh(); }} />}
