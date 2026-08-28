@@ -3,6 +3,7 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { opm, testai, tokenStore, workspaceStore } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import ImportWizard from '../components/ImportWizard';
+import LaunchWizard from '../components/LaunchWizard';
 import CustomFieldsModal from '../components/CustomFieldsModal';
 import TagManagerModal from '../components/TagManagerModal';
 import SmartLists from '../components/SmartLists';
@@ -66,7 +67,7 @@ type ViewCfg = { pipelineId: string; stageId: string; verified: string; tags: st
 
 export default function SellerContacts() {
   const nav = useNavigate();
-  const { isStaff, ownsActive, active, setActive, roles } = useWorkspace();
+  const { isStaff, ownsActive, active, setActive, roles, workspaces } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const [contactRows, setContactRows] = useState<any[]>([]);
   const [leadRows, setLeadRows] = useState<any[]>([]);
@@ -597,7 +598,7 @@ export default function SellerContacts() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-brand">{selected.size} selected{matchAll ? ' (all matching)' : ''}</span>
             <span className="mx-1 h-4 w-px bg-brand/20" />
-            <button className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand/90" onClick={() => { setLaunchResult(null); setCampaignName(''); setCallModal(true); }}><PhoneOutgoing className="h-3.5 w-3.5" /> Launch AI calls</button>
+            <button className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand/90" onClick={() => setCallModal(true)}><PhoneOutgoing className="h-3.5 w-3.5" /> Launch AI calls</button>
             {canAssign && <button className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-white px-3 py-1.5 text-sm font-semibold text-brand hover:bg-brand-light" onClick={openAssign}><UserCheck className="h-3.5 w-3.5" /> Assign to…</button>}
             <button className="btn-ghost !py-1.5" onClick={exportCsv}><Download className="h-3.5 w-3.5" /> Export selected</button>
             {canManage && <button className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50" disabled={deleting} onClick={bulkDelete}>{deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete</button>}
@@ -616,58 +617,18 @@ export default function SellerContacts() {
         </div>
       )}
 
+      {/* Launch AI calls → the full shared campaign wizard, pre-seeded with the current selection
+          and locked to the active workspace. Opens on the Agent step (workspace + leads already set)
+          and includes the Primary-only vs All-numbers dial-mode choice, projection and scheduling. */}
       {callModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" onClick={() => !launching && setCallModal(false)}>
-          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-lg font-bold text-ink"><PhoneOutgoing className="h-5 w-5 text-brand" /> Launch AI calls as a campaign</h3>
-              {!launching && <button onClick={() => setCallModal(false)} className="rounded-lg p-1 text-slate-400 hover:bg-surface"><X className="h-4 w-4" /></button>}
-            </div>
-
-            {launchResult ? (
-              <>
-                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
-                  <div className="flex items-center gap-2 font-semibold text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Campaign "{launchResult.name}" launched</div>
-                  <div className="mt-2 text-slate-600">{launchResult.launched} of {launchResult.total} call{launchResult.total === 1 ? '' : 's'} placed{launchResult.pending > 0 ? ` · ${launchResult.pending} queued for drip` : ''}. Each launched lead is tagged and tracked.</div>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button className="btn-ghost" onClick={() => { setCallModal(false); setSelected(new Set()); setMatchAll(false); }}>Close</button>
-                  {launchResult.id && <button className="btn-primary" onClick={() => nav(`/campaigns/${launchResult.id}`)}>View campaign</button>}
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="mb-3 text-sm text-slate-600">
-                  This launches a tracked campaign that places <span className="font-bold text-ink">{launching ? '' : selectedLeadIds.length}</span> live AI call{selectedLeadIds.length === 1 ? '' : 's'} to real sellers using <span className="font-semibold">{agents.find((a) => a.agent_id === agentId)?.agent_name || DIAL_AGENT.name}</span>. Each lead's primary number is dialed with its property context, and every lead is tagged <code className="rounded bg-surface px-1 text-[11px]">campaign:…</code>.
-                </p>
-                <label className="mb-3 block text-xs font-semibold text-slate-500">Campaign name
-                  <input autoFocus value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="e.g. Miami Off-Market — August" className="input mt-1 w-full !py-1.5 text-sm text-ink" />
-                </label>
-                <label className="mb-3 block text-xs font-semibold text-slate-500">AI voice agent
-                  <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="input mt-1 w-full !py-1.5 text-sm text-ink">
-                    {!agents.length && <option value={DIAL_AGENT.id}>{DIAL_AGENT.name}</option>}
-                    {agents.length > 0 && !agents.some((a) => a.agent_id === agentId) && <option value="">Select an agent…</option>}
-                    {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
-                  </select>
-                </label>
-                <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-ink"><input type="checkbox" checked={drip} onChange={(e) => setDrip(e.target.checked)} className="h-4 w-4 accent-[#1f6feb]" /> Drip the calls in batches</label>
-                {drip && (
-                  <div className="mb-3 grid grid-cols-2 gap-3">
-                    <label className="text-xs font-semibold text-slate-500">Batch size
-                      <input type="number" min={1} value={dripBatch} onChange={(e) => setDripBatch(Math.max(1, Number(e.target.value) || 1))} className="input mt-1 w-full !py-1.5 text-sm text-ink" /></label>
-                    <label className="text-xs font-semibold text-slate-500">Every N minutes
-                      <input type="number" min={2} value={dripMinutes} onChange={(e) => setDripMinutes(Math.max(2, Number(e.target.value) || 2))} className="input mt-1 w-full !py-1.5 text-sm text-ink" /></label>
-                  </div>
-                )}
-                <div className="mb-4 text-xs text-slate-400">{drip ? `First ${Math.min(dripBatch, selectedLeadIds.length)} call${Math.min(dripBatch, selectedLeadIds.length) === 1 ? '' : 's'} go out now; the rest drip automatically every ${dripMinutes} min.` : 'All calls are placed now. Leads without a dialable primary number are skipped.'}</div>
-                <div className="flex justify-end gap-2">
-                  <button className="btn-ghost" onClick={() => setCallModal(false)}>Cancel</button>
-                  <button disabled={launching || selectedLeadIds.length === 0 || !agentId || !campaignName.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50" onClick={launchCampaign}>{launching ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneOutgoing className="h-4 w-4" />} Launch {drip ? Math.min(dripBatch, selectedLeadIds.length) : selectedLeadIds.length} now</button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        <LaunchWizard
+          workspaces={workspaces || []}
+          lockedWorkspace={active || undefined}
+          initialLeadIds={selectedLeadIds}
+          startStep={1}
+          onClose={() => setCallModal(false)}
+          onLaunched={(id) => { setCallModal(false); setSelected(new Set()); setMatchAll(false); if (id) nav(`/campaigns/${id}`); }}
+        />
       )}
 
       {assignToast && (
