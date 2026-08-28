@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { testai, trackAction } from '../lib/api';
+import { testai } from '../lib/api';
+import { trackAction } from '../lib/audit';
 import { useWorkspace } from '../lib/workspace';
 import { PageHead, Spinner, EmptyState } from '../components/ui';
 import {
