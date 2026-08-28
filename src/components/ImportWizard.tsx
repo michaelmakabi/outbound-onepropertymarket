@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { opm, trackAction } from '../lib/api';
+import { opm } from '../lib/api';
+import { trackAction } from '../lib/audit';
 import { useWorkspace } from '../lib/workspace';
 import { parseCsv, autoMatch, explodeSkipTrace, CANONICAL_FIELDS } from '../lib/dispatch';
 import { UploadCloud, X, ArrowRight, ArrowLeft, CheckCircle2, Loader2, AlertCircle, Building2, FileSpreadsheet, Users, Phone, Copy, Layers, Tag } from 'lucide-react';
