@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { opm } from '../lib/api';
+import { opm, trackAction } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
 import { parseCsv, autoMatch, explodeSkipTrace, CANONICAL_FIELDS } from '../lib/dispatch';
 import { UploadCloud, X, ArrowRight, ArrowLeft, CheckCircle2, Loader2, AlertCircle, Building2, FileSpreadsheet, Users, Phone, Copy, Layers, Tag } from 'lucide-react';
@@ -97,6 +97,7 @@ export default function ImportWizard({ onClose, lockedWorkspace }: { onClose: ()
     setErr(''); setBusy(true);
     try {
       const r = await opm.smartImport({ target_workspace: slug, records, mode: 'commit', list_name: listName.trim() || undefined, extra_tags: extraTags });
+      trackAction(`Imported ${records.length} lead${records.length === 1 ? '' : 's'}${listName.trim() ? ` into "${listName.trim()}"` : ''}`, { workspace: slug, entity_type: 'import' });
       setResult(r); setStep(4);
     } catch (e: any) { setErr(e?.message || 'Import failed.'); } finally { setBusy(false); }
   };
