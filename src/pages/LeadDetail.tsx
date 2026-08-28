@@ -6,6 +6,7 @@ import { useWorkspace } from '../lib/workspace';
 import { LoadingBlock, EmptyState, AudioPlayer } from '../components/dash';
 import MentionThread, { Member } from '../components/MentionThread';
 import CallConversation from '../components/CallConversation';
+import { OurLineTag, InitiatorTag } from '../components/CallMeta';
 import { MessagesSquare } from 'lucide-react';
 import { humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
@@ -572,10 +573,11 @@ export default function LeadDetail() {
                       <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: `${color}1a`, color }}><StageIcon name={dispositionIconName(lastCall.disposition)} color={color} className="h-3 w-3" />{humanizeDisposition(lastCall.disposition)}</span>
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                  <div className="flex flex-wrap items-center gap-2 gap-y-1 text-xs text-slate-500">
                     <span className="font-semibold text-ink">{lastCall.start_timestamp ? new Date(Number(lastCall.start_timestamp)).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</span>
                     <span>{durLabel(lastCall.duration_seconds)}</span>
-                    {lastCall.agent_name && <span className="font-medium text-slate-600">{lastCall.agent_name}</span>}
+                    <InitiatorTag c={lastCall} />
+                    <OurLineTag c={lastCall} />
                   </div>
                   {lastCall.call_summary && <div className="text-xs leading-relaxed text-slate-600 line-clamp-3">{lastCall.call_summary}</div>}
                   {lastCall.recording_url && <AudioPlayer src={lastCall.recording_url} />}
@@ -874,11 +876,12 @@ export default function LeadDetail() {
                           </span>
                         )}
                       </div>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                        {c.agent_name && <span className="font-medium text-slate-600">{c.agent_name}</span>}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2 gap-y-1 text-xs text-slate-500">
+                        <InitiatorTag c={c} />
+                        <OurLineTag c={c} />
+                        {(inbound ? c.from_number : c.to_number) && <span className="font-mono text-slate-400" title={inbound ? 'Caller (contact)' : 'Number we dialed (contact)'}>{inbound ? '↙' : '↗'} {fmtNum(inbound ? c.from_number : c.to_number)}</span>}
                         <span>{durLabel(c.duration_seconds)}</span>
                         {c.user_sentiment && <span className="rounded-full bg-surface px-2 py-0.5 font-semibold text-slate-600">{c.user_sentiment}</span>}
-                        {(inbound ? c.from_number : c.to_number) && <span className="font-mono text-slate-400">{fmtNum(inbound ? c.from_number : c.to_number)}</span>}
                       </div>
                       {c.call_summary && <div className="mt-2 text-sm leading-relaxed text-slate-700">{c.call_summary}</div>}
                       {c.custom_data && (c.custom_data.notes || c.custom_data.follow_up_action || c.custom_data.follow_up_date || c.custom_data.appointment_datetime) && (
