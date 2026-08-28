@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useWorkspace, ALL_WORKSPACES } from '../lib/workspace';
-import { audit } from '../lib/api';
+import { audit } from '../lib/audit';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 import {
