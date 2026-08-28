@@ -10,6 +10,7 @@ import AiPromptModal from '../components/AiPromptModal';
 import { bulkDownload, downloadCallMp3 } from '../lib/download';
 import { usd, secs, dateTime, humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
+import { OurLineTag, InitiatorTag, ourCallNumber, fmtPhone, callInitiator } from '../components/CallMeta';
 import { Search, X, ChevronLeft, ChevronRight, PhoneIncoming, PhoneOutgoing, Download, Clock, FileText, Wand2, Loader2, ArrowDownToLine } from 'lucide-react';
 
 const PAGE_SIZE = 50;
@@ -21,7 +22,8 @@ const COLUMNS: ColumnDef[] = [
   { key: 'when', label: 'When', sortKey: 'when' },
   { key: 'direction', label: 'Direction', sortKey: 'direction' },
   { key: 'contact', label: 'Contact', required: true },
-  { key: 'agent', label: 'Agent', sortKey: 'agent' },
+  { key: 'line', label: 'Our line' },
+  { key: 'agent', label: 'Agent / initiated by', sortKey: 'agent' },
   { key: 'disposition', label: 'Disposition', sortKey: 'disposition' },
   { key: 'summary', label: 'Summary / Transcript' },
   { key: 'duration', label: 'Duration', sortKey: 'duration', align: 'right' },
@@ -138,13 +140,14 @@ export default function CallHistory() {
       const all = await api.calls(query({ page: 1, pageSize: 5000 }));
       let items: any[] = all.items || [];
       if (selected.size) items = items.filter((c) => selected.has(c.call_id));
-      const cols = ['When', 'Direction', 'Contact', 'Name', 'Email', 'Property', 'Agent', 'Disposition', 'Duration(s)', 'Cost($)', 'Sentiment', 'Summary', 'CallID'];
+      const cols = ['When', 'Direction', 'Contact', 'Name', 'Email', 'Property', 'Our line', 'Type', 'Agent', 'Initiated by', 'Disposition', 'Duration(s)', 'Cost($)', 'Sentiment', 'Summary', 'CallID'];
       const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
       const lines = [cols.join(',')];
       for (const c of items) {
         const contact = c.direction === 'inbound' ? c.from_number : c.to_number;
         const info = resolveInfo(contact) || {};
-        lines.push([c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '', info.name || '', info.email || '', info.property_ref || '', c.agent_name || '', c.disposition || '', c.duration_seconds || 0, (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id].map(esc).join(','));
+        const init = callInitiator(c);
+        lines.push([c.start_timestamp ? new Date(c.start_timestamp).toISOString() : '', c.direction || '', contact || '', info.name || '', info.email || '', info.property_ref || '', fmtPhone(ourCallNumber(c)), init.mode === 'ai' ? 'AI' : 'Manual', c.agent_name || '', init.who || '', c.disposition || '', c.duration_seconds || 0, (Number(c.combined_cost_cents || 0) / 100).toFixed(3), c.user_sentiment || '', c.call_summary || '', c.call_id].map(esc).join(','));
       }
       const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
@@ -270,7 +273,8 @@ export default function CallHistory() {
                           {info?.property_ref && <div className="max-w-[200px] truncate text-[10px] text-slate-400">{info.property_ref}</div>}
                         </td>
                       ); })()}
-                      {isVisible('agent') && <td className="max-w-[220px] truncate px-3 py-2.5 text-xs">{c.agent_name || '—'}</td>}
+                      {isVisible('line') && <td className="px-3 py-2.5"><OurLineTag c={c} /></td>}
+                      {isVisible('agent') && <td className="max-w-[220px] px-3 py-2.5 text-xs"><InitiatorTag c={c} /></td>}
                       {isVisible('disposition') && <td className="whitespace-nowrap px-3 py-2.5">{c.disposition ? <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: dispositionColor(c.disposition) }}><StageIcon name={dispositionIconName(c.disposition)} color={dispositionColor(c.disposition)} className="h-3.5 w-3.5" />{humanizeDisposition(c.disposition)}</span> : <span className="text-xs text-slate-400">—</span>}</td>}
                       {isVisible('summary') && <td className="max-w-[280px] px-3 py-2.5">{c.call_summary ? <span className="flex items-center gap-1.5 text-xs text-slate-600"><FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{c.call_summary}</span></span> : <span className="text-xs text-slate-300">—</span>}</td>}
                       {isVisible('duration') && <td className="px-3 py-2.5 text-right font-mono text-xs">{secs(Number(c.duration_seconds || 0))}</td>}
