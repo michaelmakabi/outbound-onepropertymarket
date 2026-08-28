@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useWorkspace, ALL_WORKSPACES } from '../lib/workspace';
+import { audit } from '../lib/api';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
 import {
@@ -89,6 +90,16 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const width = collapsed ? 'w-[68px]' : 'w-60';
   const activeLabel = [{ to: '/notifications-center', label: 'Notification Center' }, ...NAV, { to: '/leads', label: 'Contacts' }, { to: '/routing', label: 'Lead Routing' }, { to: '/notifications', label: 'Notifications' }, ...ADMIN_NAV, { to: '/account', label: 'Account & Billing' }, { to: '/tenants', label: 'Customers' }, { to: '/onboarding', label: 'Card Authorization' }, { to: '/agent-clone', label: 'Clone Agent' }, { to: '/snapshots', label: 'Snapshots' }].find((n) => (n.to === '/' ? location.pathname === '/' : location.pathname.startsWith(n.to)))?.label ?? 'Menu';
+
+  // Movement beacon: record which screen each user opens (best-effort, fire-and-forget).
+  // Powers the "user movement" view in the platform activity log. Never blocks navigation.
+  useEffect(() => {
+    if (!user) return;
+    const wsForBeacon = activeWs && activeWs !== ALL_WORKSPACES ? activeWs : null;
+    const id = setTimeout(() => { audit.track({ path: location.pathname, label: activeLabel, workspace: wsForBeacon }); }, 400);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, activeWs, user?.id]);
 
   const item = (n: any) => (
     <NavLink
