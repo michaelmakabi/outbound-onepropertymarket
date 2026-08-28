@@ -4,6 +4,7 @@ import { api, opm } from '../lib/api';
 import { KpiCard, SectionCard, LoadingBlock, AudioPlayer } from '../components/dash';
 import { usd, secs, dateTime, humanizeDisposition, humanizeProduct, dispositionColor } from '../lib/format';
 import { downloadCallMp3, saveBlob, transcriptText } from '../lib/download';
+import { OurLineTag, InitiatorTag, callInitiator, fmtPhone } from '../components/CallMeta';
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Clock, DollarSign, Smile, CheckCircle2, Zap, ArrowDownToLine, FileText, Loader2, Repeat, User } from 'lucide-react';
 
 export default function CallDetail() {
@@ -104,7 +105,12 @@ export default function CallDetail() {
             {person?.name || contact || 'Call'}
             {c.disposition && <span className="pill" style={{ background: `${dispositionColor(c.disposition)}22`, color: dispositionColor(c.disposition) }}>{humanizeDisposition(c.disposition)}</span>}
           </h1>
-          <p className="text-sm text-slate-500">{c.workspace} · {c.agent_name || '—'} · {dateTime(c.start_timestamp)}</p>
+          <p className="text-sm text-slate-500">{c.workspace} · {dateTime(c.start_timestamp)}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <InitiatorTag c={c} />
+            <OurLineTag c={c} />
+            {contact && <span className="font-mono text-slate-500" title={inbound ? 'Caller (contact)' : 'Number we dialed (contact)'}>{inbound ? '↙ from' : '↗ to'} {fmtPhone(contact)}</span>}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {c.recording_url && (
@@ -228,10 +234,13 @@ export default function CallDetail() {
             <dl className="space-y-2 text-sm">
               {[
                 ['Workspace', c.workspace],
+                ['Type', callInitiator(c).mode === 'ai' ? 'AI call' : 'Manual call'],
                 ['Agent', c.agent_name || '—'],
+                ['Initiated by', callInitiator(c).who || '—'],
                 ['LLM model', humanizeProduct(c.llm_product)],
                 ['TTS voice', humanizeProduct(c.tts_product)],
-                ['Our number', ourNumber || '—'],
+                ['Our number (line used)', fmtPhone(ourNumber)],
+                ['Contact number', fmtPhone(contact)],
                 ['Status', c.call_status || '—'],
                 ['Disconnect', c.disconnection_reason || '—'],
                 ['Call ID', c.call_id],
