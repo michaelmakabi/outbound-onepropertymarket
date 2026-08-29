@@ -7,6 +7,7 @@ import { LoadingBlock, EmptyState, AudioPlayer } from '../components/dash';
 import MentionThread, { Member } from '../components/MentionThread';
 import CallConversation from '../components/CallConversation';
 import { OurLineTag, InitiatorTag } from '../components/CallMeta';
+import { dealTerms, dealTermsAdd, loiDocuments, loiEmailMeta } from '../lib/dealloi';
 import { MessagesSquare } from 'lucide-react';
 import { humanizeDisposition, dispositionColor, dispositionIconName } from '../lib/format';
 import { StageIcon } from '../lib/statusIcons';
@@ -33,7 +34,29 @@ function fmtNum(n: string) {
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : n;
 }
 const money = (n: any) => (n ? `$${Number(n).toLocaleString('en-US')}` : '—');
+const money0 = (n: any) => { const v = Number(n); return isFinite(v) ? `$${Math.round(v).toLocaleString('en-US')}` : '—'; };
 const durLabel = (s: any) => { const n = Math.round(Number(s) || 0); return `${Math.floor(n / 60)}m ${n % 60}s`; };
+
+// ---- Property address helpers: format a structured address, detect its state, and build the
+// external "look this property up" links the top bar exposes (Maps everywhere; PropertyShark for NY;
+// Miami-Dade property search for a Miami/FL address; Google fallback for anything else). ----
+function fmtAddress(a: any): string {
+  if (!a) return '';
+  if (typeof a === 'string') return a.trim();
+  const parts = [a.Street || a.street || a.line1, a.City || a.city, [a.State || a.state, a.Zip || a.zip].filter(Boolean).join(' ')].filter(Boolean);
+  return parts.join(', ').trim();
+}
+function addrState(a: string): 'NY' | 'FL' | '' {
+  const s = ` ${String(a || '')} `;
+  if (/\bNY\b|New York|Brooklyn|Bronx|Queens|Manhattan|Staten Island/i.test(s) || /\b1[0-4]\d{3}\b/.test(s)) return 'NY';
+  if (/\bFL\b|Florida|Miami|Miami-?Dade|Broward|Palm Beach/i.test(s) || /\b3[0-4]\d{3}\b/.test(s)) return 'FL';
+  return '';
+}
+const mapsUrl = (a: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
+const googleUrl = (a: string) => `https://www.google.com/search?q=${encodeURIComponent(a)}`;
+const propertySharkUrl = (a: string) => `https://www.propertyshark.com/mason/Property-Search/?searchType=full_address&q=${encodeURIComponent(a)}`;
+// Miami-Dade County Property Appraiser search, address pre-filled.
+const miamiDadeUrl = (a: string) => `https://www.miamidade.gov/Apps/PA/PropertySearch/#/?address=${encodeURIComponent(a)}`;
 
 function cleanNote(raw: string): string {
   if (!raw) return '';
@@ -280,6 +303,8 @@ export default function LeadDetail() {
   const relatives = contacts.filter((c) => c.contact_kind === 'relative');
   const parcel = lead?.parcel || {};
   const tags: string[] = Array.isArray(lead?.tags) ? lead.tags : [];
+  // Property address(es) tied to this contact + their look-up links (Maps / PropertyShark NY / Miami-Dade FL / Google).
+  const propAddrs: string[] = (Array.isArray(lead?.addresses) && lead.addresses.length ? lead.addresses.map(fmtAddress) : (lead?.property_ref ? [lead.property_ref] : [])).filter(Boolean);
 
   async function patch(contact_id: string, b: any) {
     setData((d: any) => ({ ...d, contacts: d.contacts.map((c: any) => c.contact_id === contact_id ? { ...c, ...b } : (b.is_primary_number ? { ...c, is_primary_number: false } : c)) }));
@@ -344,35 +369,83 @@ export default function LeadDetail() {
   const [loiBody, setLoiBody] = useState('');
   const [loiSentAt, setLoiSentAt] = useState<string | null>(null);
   const [loiBusy, setLoiBusy] = useState('');
+  // Print-ready, letterhead-styled LOI (built by opm-loi to match the branded entity template). We just open it.
+  const [loiHtml, setLoiHtml] = useState('');
   useEffect(() => {
     opm.loiGet(id).then((d: any) => {
       const dr = d.draft; const def = d.defaults || {};
-      setLoiFields(dr?.fields && Object.keys(dr.fields).length ? dr.fields
+      setLoiFields(dr?.fields && Object.keys(dr.fields).length ? { ...def, ...dr.fields }
         : { buyer_name: def.buyer_name, offer_price: def.offer_price ?? '', property_address: def.property_address || '', earnest_money: def.earnest_money, closing_days: def.closing_days, inspection_days: def.inspection_days });
       setLoiBody(dr?.body_text || '');
       setLoiSentAt(dr?.sent_at || null);
+      setLoiHtml(d.export_html || '');
     }).catch(() => {});
   }, [id]);
   const setLf = (k: string, v: any) => setLoiFields((f: any) => ({ ...f, [k]: v }));
+  // Purchase price drives a 5% standard down payment (earnest), auto-filled unless manually overridden.
+  const setOfferPrice = (v: any) => setLoiFields((f: any) => {
+    const n = Number(String(v).replace(/[^0-9.]/g, ''));
+    const auto = isFinite(n) && n > 0 ? Math.round(n * 0.05) : '';
+    return { ...f, offer_price: v, earnest_money: auto };
+  });
+
+  // ---- Deal-terms negotiation tracker: OUR terms (fed by the LOI) vs the CUSTOMER's, dated, auto-delta ----
+  const [terms, setTerms] = useState<{ ours: any; theirs: any; delta: any; history: any[] }>({ ours: null, theirs: null, delta: null, history: [] });
+  const loadTerms = () => { dealTerms(id).then((d: any) => setTerms({ ours: d.ours || null, theirs: d.theirs || null, delta: d.delta || null, history: d.history || [] })).catch(() => {}); };
+  useEffect(() => { loadTerms(); }, [id]);
+  const [termSide, setTermSide] = useState<'theirs' | 'ours'>('theirs');
+  const [termForm, setTermForm] = useState({ price: '', down_payment: '', closing_days: '', inspection_days: '', note: '' });
+  const [termBusy, setTermBusy] = useState(false);
+  async function addTerms() {
+    if (termBusy) return; setTermBusy(true);
+    try { await dealTermsAdd(id, { side: termSide, ...termForm, source: 'manual' }); setTermForm({ price: '', down_payment: '', closing_days: '', inspection_days: '', note: '' }); loadTerms(); flash('Terms recorded.'); }
+    catch (e: any) { flash(e?.message || 'Could not save terms.'); } finally { setTermBusy(false); }
+  }
+
+  // ---- LOI document versions (timestamped + attributed) + email compose (compose + secure link) ----
+  const [loiDocs, setLoiDocs] = useState<any[]>([]);
+  const loadDocs = () => { loiDocuments(id).then((d: any) => setLoiDocs(d.documents || [])).catch(() => setLoiDocs([])); };
+  useEffect(() => { loadDocs(); }, [id]);
+  const [emailBusy, setEmailBusy] = useState('');
+  async function emailLoi(provider: 'gmail' | 'outlook') {
+    setEmailBusy(provider);
+    try {
+      const meta: any = await loiEmailMeta(id);
+      const to = encodeURIComponent(lead?.emails?.[0]?.email || lead?.emails?.[0] || '');
+      const su = encodeURIComponent(meta.subject || 'Letter of Intent');
+      const bd = encodeURIComponent(meta.intro || '');
+      const composeUrl = provider === 'gmail'
+        ? `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}&body=${bd}`
+        : `https://outlook.office.com/mail/deeplink/compose?to=${to}&subject=${su}&body=${bd}`;
+      window.open(composeUrl, '_blank');
+    } catch (e: any) { flash(e?.message || 'Generate an LOI first, then email it.'); } finally { setEmailBusy(''); }
+  }
   async function genLoi() {
     setLoiBusy('gen');
-    try { const d: any = await opm.loiGenerate(id, loiFields); setLoiFields(d.fields || loiFields); setLoiBody(d.body_text || ''); flash('LOI draft generated.'); }
+    try { const d: any = await opm.loiGenerate(id, loiFields); setLoiFields(d.fields || loiFields); setLoiBody(d.body_text || ''); setLoiHtml(d.export_html || loiHtml); loadDocs(); loadTerms(); flash('LOI draft generated.'); }
     catch (e: any) { flash(e?.message || 'Could not generate.'); } finally { setLoiBusy(''); }
   }
   async function saveLoi() {
     setLoiBusy('save');
-    try { await opm.loiSave(id, loiFields, loiBody); flash('LOI saved.'); }
+    try { const d: any = await opm.loiSave(id, loiFields, loiBody); if (d?.export_html) setLoiHtml(d.export_html); flash('LOI saved.'); }
     catch (e: any) { flash(e?.message || 'Could not save.'); } finally { setLoiBusy(''); }
   }
   async function sendLoi() {
     if (!confirm('Mark this LOI as sent and move the contact to “Offer sent”?')) return;
     setLoiBusy('send');
-    try { const r: any = await opm.loiSend(id, loiFields, loiBody); setLoiSentAt(new Date().toISOString()); loadOpps(); load(); flash(r?.advanced_to ? 'LOI sent — moved to “Offer sent”.' : 'LOI marked sent.'); }
+    try { const r: any = await opm.loiSend(id, loiFields, loiBody); setLoiSentAt(new Date().toISOString()); loadOpps(); load(); loadDocs(); loadTerms(); flash(r?.advanced_to ? 'LOI sent — moved to “Offer sent”.' : 'LOI marked sent.'); }
     catch (e: any) { flash(e?.message || 'Could not send.'); } finally { setLoiBusy(''); }
   }
-  function exportLoiPdf() {
+  async function exportLoiPdf() {
     const w = window.open('', '_blank');
     if (!w) { flash('Allow pop-ups to export the PDF.'); return; }
+    // Prefer the branded letterhead HTML from opm-loi; regenerate on the fly if we don't have it yet.
+    let html = loiHtml;
+    if (!html) {
+      try { const d: any = await opm.loiGenerate(id, loiFields); html = d.export_html || ''; if (d.fields) setLoiFields(d.fields); if (d.body_text) setLoiBody(d.body_text); setLoiHtml(html); } catch { /* fall through */ }
+    }
+    if (html) { w.document.write(html); w.document.close(); return; }
+    // Fallback: plain print of the editable body.
     const esc = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const bodyHtml = esc(loiBody).replace(/\n/g, '<br>');
     const brand = esc(loiFields.buyer_name || '1PropertyMarket');
@@ -525,7 +598,30 @@ export default function LeadDetail() {
 
       {toast && <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700"><Check className="h-4 w-4" /> {toast}</div>}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+      {/* Property address bar — the property/properties tied to this contact, each with quick look-ups:
+          Google Maps (always), PropertyShark (NY only), Miami-Dade property search (FL only), Google. */}
+      {propAddrs.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-line bg-white p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"><Home className="h-3 w-3" /> Property {propAddrs.length > 1 ? 'addresses' : 'address'}</div>
+          <div className="space-y-2">
+            {propAddrs.map((a, i) => {
+              const st = addrState(a);
+              return (
+                <div key={i} className="flex flex-wrap items-center gap-2">
+                  <span className="mr-1 text-sm font-semibold text-ink">{a}</span>
+                  <a href={mapsUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><Home className="h-3.5 w-3.5" /> Maps</a>
+                  {st === 'NY' && <a href={propertySharkUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">PropertyShark</a>}
+                  {st === 'FL' && <a href={miamiDadeUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">Miami-Dade</a>}
+                  <a href={googleUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">Google</a>
+                  {st && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{st}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)_340px]">
         {/* LEFT column — dialing essentials only */}
         <div className="space-y-4">
           <Card title="Phone Numbers" count={owners.length}>
@@ -801,8 +897,8 @@ export default function LeadDetail() {
                     {loiSentAt && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Sent {new Date(loiSentAt).toLocaleDateString()}</span>}
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    <label className="text-[11px] font-semibold text-slate-500">Offer price<input type="number" value={loiFields.offer_price ?? ''} onChange={(e) => setLf('offer_price', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
-                    <label className="text-[11px] font-semibold text-slate-500">Earnest money<input type="number" value={loiFields.earnest_money ?? ''} onChange={(e) => setLf('earnest_money', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-500">Offer price<input type="number" value={loiFields.offer_price ?? ''} onChange={(e) => setOfferPrice(e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-500">Down payment <span className="text-slate-400">(5%)</span><input type="number" value={loiFields.earnest_money ?? ''} onChange={(e) => setLf('earnest_money', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
                     <label className="text-[11px] font-semibold text-slate-500">Closing (days)<input type="number" value={loiFields.closing_days ?? ''} onChange={(e) => setLf('closing_days', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
                     <label className="text-[11px] font-semibold text-slate-500">Inspection (days)<input type="number" value={loiFields.inspection_days ?? ''} onChange={(e) => setLf('inspection_days', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
                     <label className="text-[11px] font-semibold text-slate-500">Buyer / entity<input value={loiFields.buyer_name ?? ''} onChange={(e) => setLf('buyer_name', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
@@ -963,6 +1059,121 @@ export default function LeadDetail() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* RIGHT column — deal status, negotiation tracker, LOI documents/email, deals, placeholders */}
+        <div className="space-y-4">
+          {/* Deal terms: OUR terms (from the LOI) vs the CUSTOMER's, with auto-deltas + dated history. */}
+          <Card title="Deal terms — ours vs theirs">
+            {(() => {
+              const o = terms.ours, th = terms.theirs, dl = terms.delta;
+              const fmtD = (v: any) => (v == null ? '—' : String(v));
+              const TRow = ({ label, ov, tv, dv, f }: any) => (
+                <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 border-b border-dashed border-line py-1.5 text-xs last:border-0">
+                  <span className="text-slate-500">{label}</span>
+                  <span className="w-16 text-right font-semibold text-ink">{ov == null ? '—' : f(ov)}</span>
+                  <span className="w-16 text-right font-semibold text-violet-600">{tv == null ? '—' : f(tv)}</span>
+                  <span className={`w-16 text-right font-bold ${dv == null ? 'text-slate-300' : dv === 0 ? 'text-slate-400' : dv > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{dv == null ? '' : (dv > 0 ? '+' : '') + f(dv)}</span>
+                </div>
+              );
+              return (
+                <div>
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    <span /><span className="w-16 text-right">Ours</span><span className="w-16 text-right text-violet-500">Theirs</span><span className="w-16 text-right">Diff</span>
+                  </div>
+                  <TRow label="Price" ov={o?.price} tv={th?.price} dv={dl?.price} f={money0} />
+                  <TRow label="Down payment" ov={o?.down_payment} tv={th?.down_payment} dv={dl?.down_payment} f={money0} />
+                  <TRow label="Closing (days)" ov={o?.closing_days} tv={th?.closing_days} dv={dl?.closing_days} f={fmtD} />
+                  <TRow label="Inspection (days)" ov={o?.inspection_days} tv={th?.inspection_days} dv={dl?.inspection_days} f={fmtD} />
+                  {!o && !th && <div className="py-2 text-xs text-slate-400">No terms yet. Generate an LOI (sets our terms) or log the customer's ask below.</div>}
+
+                  {/* Log a new dated terms entry (the customer's counter, or a manual update of ours). */}
+                  <div className="mt-2 rounded-lg border border-line bg-surface/60 p-2">
+                    <div className="mb-1.5 flex gap-1">
+                      {(['theirs', 'ours'] as const).map((s) => (
+                        <button key={s} onClick={() => setTermSide(s)} className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition ${termSide === s ? (s === 'theirs' ? 'border-violet-500 bg-violet-500 text-white' : 'border-brand bg-brand text-white') : 'border-line text-slate-500'}`}>{s === 'theirs' ? "Customer's ask" : 'Our terms'}</button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input value={termForm.price} onChange={(e) => setTermForm((f) => ({ ...f, price: e.target.value }))} placeholder="Price" className="input h-7 text-xs" />
+                      <input value={termForm.down_payment} onChange={(e) => setTermForm((f) => ({ ...f, down_payment: e.target.value }))} placeholder="Down" className="input h-7 text-xs" />
+                      <input value={termForm.closing_days} onChange={(e) => setTermForm((f) => ({ ...f, closing_days: e.target.value }))} placeholder="Closing days" className="input h-7 text-xs" />
+                      <input value={termForm.inspection_days} onChange={(e) => setTermForm((f) => ({ ...f, inspection_days: e.target.value }))} placeholder="Inspection days" className="input h-7 text-xs" />
+                    </div>
+                    <input value={termForm.note} onChange={(e) => setTermForm((f) => ({ ...f, note: e.target.value }))} placeholder="Note (e.g. per Aug 27 call)" className="input mt-1.5 h-7 w-full text-xs" />
+                    <div className="mt-1.5 flex justify-end">
+                      <button onClick={addTerms} disabled={termBusy} className="inline-flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-125 disabled:opacity-50">{termBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Record dated terms</button>
+                    </div>
+                  </div>
+
+                  {/* Snapshot the current terms onto the record's custom data for quick reference. */}
+                  {(o || th) && (
+                    <button onClick={() => { saveLead({ custom: { ...(lead.custom || {}), loi_price: o?.price ?? '', loi_down: o?.down_payment ?? '', loi_closing: o?.closing_days ?? '', loi_inspection: o?.inspection_days ?? '', their_price: th?.price ?? '' } }); flash('Deal terms saved to the record.'); }} className="mt-2 text-[11px] font-semibold text-brand hover:underline">Save deal terms to record →</button>
+                  )}
+
+                  {/* Dated negotiation log. */}
+                  {terms.history.length > 0 && (
+                    <div className="mt-2 border-t border-line pt-2">
+                      <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Negotiation log</div>
+                      <ol className="space-y-1">
+                        {terms.history.slice(0, 8).map((h) => (
+                          <li key={h.id} className="flex items-start gap-1.5 text-[11px]">
+                            <span className={`mt-0.5 rounded px-1 py-0.5 text-[9px] font-bold uppercase ${h.side === 'theirs' ? 'bg-violet-100 text-violet-700' : 'bg-brand/10 text-brand'}`}>{h.side === 'theirs' ? 'Them' : 'Us'}</span>
+                            <div className="min-w-0 flex-1">
+                              <span className="text-slate-600">{[h.price != null && money0(h.price), h.closing_days != null && `${h.closing_days}d close`].filter(Boolean).join(' · ') || h.note || '—'}</span>
+                              <div className="text-[10px] text-slate-400">{h.created_by || 'System'} · {h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</div>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </Card>
+
+          {/* Letter of Intent — export, email (compose + secure link), and the versioned history. */}
+          <Card title="Letter of Intent" count={loiDocs.length}>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => setTab('loi')} className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><FileText className="h-3.5 w-3.5" /> Open / edit</button>
+              <button onClick={exportLoiPdf} className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><FileText className="h-3.5 w-3.5" /> Export PDF</button>
+              <button onClick={() => emailLoi('gmail')} disabled={!!emailBusy} className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50">{emailBusy === 'gmail' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />} Gmail</button>
+              <button onClick={() => emailLoi('outlook')} disabled={!!emailBusy} className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50">{emailBusy === 'outlook' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />} Outlook</button>
+            </div>
+            <div className="mt-2 space-y-1">
+              {loiDocs.length === 0 ? <div className="text-xs text-slate-400">No versions yet — Generate on the LOI tab. Each generation is saved here with a timestamp.</div> : loiDocs.slice(0, 6).map((d) => (
+                <div key={d.id} className="flex items-center justify-between gap-2 border-b border-dashed border-line py-1 text-[11px] last:border-0">
+                  <span className="text-slate-600">{d.created_at ? new Date(d.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</span>
+                  <span className="truncate text-slate-400">{d.created_by || 'System'}{d.sent_at ? ' · sent' : ''}</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[10px] text-slate-400">Email opens a compose window with an AI intro + a secure link to the LOI.</p>
+          </Card>
+
+          {/* Deals / pipelines — a contact can sit in several at once; each shows distinctly. */}
+          <Card title="Deals / Pipelines" count={opps.length}>
+            <div className="space-y-1.5">
+              {opps.length === 0 && <div className="text-xs text-slate-400">Not in any pipeline yet.</div>}
+              {opps.map((o) => (
+                <div key={o.opportunity_id} className="rounded-lg border border-line p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-semibold text-ink" title={o.pipeline_name}>{o.pipeline_name}</span>
+                    {o.is_standard && <span className="shrink-0 rounded bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-brand">Calls</span>}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-500">Stage: <span className="font-semibold text-slate-600">{o.stage_name || '—'}</span></div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setTab('details')} className="mt-2 text-[11px] font-semibold text-brand hover:underline">Manage pipelines →</button>
+          </Card>
+
+          {/* Placeholders — wired to real backends in a later pass. */}
+          <Card title="Tasks"><div className="text-xs text-slate-400">No open tasks</div></Card>
+          <Card title="Appointments"><div className="text-xs text-slate-400">No upcoming appointments</div></Card>
+          <Card title="Files"><div className="text-xs text-slate-400">No files yet</div></Card>
+          <Card title="Automations"><div className="text-xs text-slate-400">No automations running</div></Card>
         </div>
       </div>
 
