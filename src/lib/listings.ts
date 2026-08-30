@@ -91,6 +91,9 @@ export const listings = {
   removeParty: (id: string) => call('removeParty', { method: 'POST', body: { id } }),
   searchContacts: (q: string) => call('searchContacts', { params: { q } }),
   members: () => call('members', {}),
+  userScopes: (userId: number) => call('userScopes', { params: { user_id: userId } }),
+  setUserScope: (body: { user_id: number; workspace: string; listing_scope: 'own' | 'all' }) =>
+    call('setUserScope', { method: 'POST', params: { workspace: body.workspace }, body }),
   getBranding: () => call('branding', {}),
   setBranding: (body: Partial<Branding>) => call('setBranding', { method: 'POST', body }),
   getProfile: () => call('profile', {}),

@@ -6,6 +6,7 @@
 // reset / invite / scope / view logic is shared so the two surfaces never drift.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, opm } from '../lib/api';
+import { listings } from '../lib/listings';
 import { audit, type AuditEvent } from '../lib/audit';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from './ui';
@@ -16,7 +17,8 @@ import {
 
 export type Ws = { slug: string; display_name: string; status?: string };
 type LeadScope = 'all' | 'assigned';
-type AccessRow = { workspace: string; agent_mode: 'all' | 'only' | 'except'; agent_ids: string[]; lead_scope: LeadScope };
+type ListingScope = 'own' | 'all';
+type AccessRow = { workspace: string; agent_mode: 'all' | 'only' | 'except'; agent_ids: string[]; lead_scope: LeadScope; listing_scope: ListingScope };
 
 const dt = (s: string | null) => (s ? new Date(s).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
 // Compact relative time ("3m", "5h", "2d") for the activity feed.
@@ -552,21 +554,37 @@ function AccessEditor({ user, workspaces, onClose, onSaved }: { user: any; works
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    api.admin.getAccess(user.id).then((d) => {
+    (async () => {
+      const [d, ls] = await Promise.all([
+        api.admin.getAccess(user.id),
+        listings.userScopes(user.id).then((r: any) => r.scopes || {}).catch(() => ({})),
+      ]);
       const map: Record<string, AccessRow> = {};
-      for (const r of d.access) map[r.workspace] = { workspace: r.workspace, agent_mode: r.agent_mode, agent_ids: r.agent_ids || [], lead_scope: r.lead_scope === 'assigned' ? 'assigned' : 'all' };
+      for (const r of d.access) map[r.workspace] = { workspace: r.workspace, agent_mode: r.agent_mode, agent_ids: r.agent_ids || [], lead_scope: r.lead_scope === 'assigned' ? 'assigned' : 'all', listing_scope: (ls as any)[r.workspace] === 'all' ? 'all' : 'own' };
       setRows(map);
-    });
+    })();
   }, [user.id]);
 
-  const toggleWs = (slug: string) => setRows((prev) => { const next = { ...prev }; if (next[slug]) delete next[slug]; else next[slug] = { workspace: slug, agent_mode: 'all', agent_ids: [], lead_scope: 'all' }; return next; });
+  const toggleWs = (slug: string) => setRows((prev) => { const next = { ...prev }; if (next[slug]) delete next[slug]; else next[slug] = { workspace: slug, agent_mode: 'all', agent_ids: [], lead_scope: 'all', listing_scope: 'own' }; return next; });
   const setLeadScope = (slug: string, scope: LeadScope) => setRows((p) => ({ ...p, [slug]: { ...p[slug], lead_scope: scope } }));
+  const setListingScope = (slug: string, scope: ListingScope) => setRows((p) => ({ ...p, [slug]: { ...p[slug], listing_scope: scope } }));
   const loadAgents = async (slug: string) => { setExpanded(expanded === slug ? null : slug); if (!agentsByWs[slug]) { const d = await api.admin.workspaceAgents(slug); setAgentsByWs((p) => ({ ...p, [slug]: d.agents })); } };
   const setMode = (slug: string, mode: AccessRow['agent_mode']) => setRows((p) => ({ ...p, [slug]: { ...p[slug], agent_mode: mode } }));
   const toggleAgent = (slug: string, id: string) => setRows((p) => { const cur = p[slug]; const has = cur.agent_ids.includes(id); return { ...p, [slug]: { ...cur, agent_ids: has ? cur.agent_ids.filter((x) => x !== id) : [...cur.agent_ids, id] } }; });
   // NOTE: rows carries the user's FULL access set (loaded above), so saving preserves grants to
   // workspaces outside `workspaces` — scoping the editor never wipes other customers' access.
-  const save = async () => { setBusy(true); try { await api.admin.setAccess({ userId: user.id, access: Object.values(rows) }); setSaved(true); onSaved?.(); setTimeout(onClose, 700); } finally { setBusy(false); } };
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.admin.setAccess({ userId: user.id, access: Object.values(rows) });
+      // listing_scope lives on user_workspace_access but is persisted via opm-listings (setAccess
+      // re-inserts rows at the default 'own'), so apply each workspace's chosen scope afterward.
+      await Promise.all(Object.values(rows).map((r) =>
+        listings.setUserScope({ user_id: user.id, workspace: r.workspace, listing_scope: r.listing_scope }).catch(() => {})
+      ));
+      setSaved(true); onSaved?.(); setTimeout(onClose, 700);
+    } finally { setBusy(false); }
+  };
 
   return (
     <Modal title={`Access — ${user.name}`} onClose={onClose} wide>
@@ -598,6 +616,12 @@ function AccessEditor({ user, workspaces, onClose, onSaved }: { user: any; works
                     <option value="assigned">Only assigned leads (rep)</option>
                   </select>
                   <span className="text-[11px] text-slate-400">{row.lead_scope === 'assigned' ? 'Sees only leads where they are primary or a follower.' : 'Sees every lead in this workspace.'}</span>
+                  <span className="ml-2 text-xs font-semibold text-slate-500">Listing visibility</span>
+                  <select className="input w-auto !py-1 text-xs" value={row.listing_scope} onChange={(e) => setListingScope(w.slug, e.target.value as ListingScope)}>
+                    <option value="own">Only their own listings</option>
+                    <option value="all">All listings in workspace</option>
+                  </select>
+                  <span className="text-[11px] text-slate-400">{row.listing_scope === 'all' ? 'Sees every property listing in this workspace.' : 'Sees only listings assigned to them or where they are a party.'}</span>
                 </div>
               )}
               {on && row.agent_mode !== 'all' && expanded === w.slug && (
