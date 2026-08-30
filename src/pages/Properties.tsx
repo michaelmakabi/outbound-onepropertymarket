@@ -6,17 +6,18 @@ import { PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, ToolbarButt
 import {
   Building2, Plus, Search, MapPin, LayoutGrid, Map as MapIcon, Home, DollarSign, Globe, Lock,
   SlidersHorizontal, X, Palette, UserCircle, Save, BedDouble, Bath, Ruler, Tag, BadgeCheck,
+  Upload, Loader2, Lightbulb, Link as LinkIcon,
 } from 'lucide-react';
 
-const money = (n: number | null | undefined) => (n == null ? '—' : '$' + Math.round(Number(n)).toLocaleString());
+const money = (n: number | null | undefined) => (n == null ? '-' : '$' + Math.round(Number(n)).toLocaleString());
 const moneyK = (n: number | null | undefined) => {
-  if (n == null) return '—';
+  if (n == null) return '-';
   const v = Number(n);
   if (v >= 1_000_000) return '$' + (v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1) + 'M';
   if (v >= 1_000) return '$' + Math.round(v / 1_000) + 'K';
   return '$' + Math.round(v).toLocaleString();
 };
-const typeLabel = (v: string | null) => PROPERTY_TYPES.find((t) => t.v === v)?.label || (v ? v.replace(/_/g, ' ') : '—');
+const typeLabel = (v: string | null) => PROPERTY_TYPES.find((t) => t.v === v)?.label || (v ? v.replace(/_/g, ' ') : '-');
 const fullAddr = (p: Property) => [p.street, p.city, [p.state, p.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
 
 // ---- dependency-free pin map (bounding-box scaled SVG, mirrors CueReport CompMap) ----
@@ -102,6 +103,99 @@ function PanelSection({ title, children }: { title: string; children: any }) {
   );
 }
 
+// Two quick "tips" shown at the top of a panel for clarity.
+function Tips({ items }: { items: string[] }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+      {items.map((t, i) => (
+        <div key={i} className="flex items-start gap-2 text-[13px] leading-snug text-amber-900">
+          <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <span><span className="font-bold">Tip {i + 1}:</span> {t}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Image field: shows the current image, an Upload button (upload - store - display), and a
+// collapsible "paste a link instead" fallback. `round` renders a circular avatar preview.
+function ImageUpload({ label, value, onChange, kind, round }: { label: string; value: string; onChange: (url: string) => void; kind: 'logo' | 'photo'; round?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [showUrl, setShowUrl] = useState(false);
+  const shape = round ? 'rounded-full' : 'rounded-xl';
+  const onFile = async (file?: File | null) => {
+    if (!file) return;
+    setErr('');
+    if (!file.type.startsWith('image/')) { setErr('Please choose an image file.'); return; }
+    if (file.size > 5 * 1024 * 1024) { setErr('Image is too large (max 5MB).'); return; }
+    setBusy(true);
+    try {
+      const dataUrl: string = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error('read failed')); r.readAsDataURL(file); });
+      const d = await listings.uploadImage({ data: dataUrl, kind, content_type: file.type });
+      if (d?.url) onChange(d.url); else setErr('Upload failed.');
+    } catch (e: any) { setErr(e?.message || 'Upload failed.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="flex flex-col gap-2.5 rounded-2xl border border-line bg-surface p-4">
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+      <div className="flex items-center gap-4">
+        {value
+          ? <img src={value} alt={label} className={`h-16 w-16 border border-line bg-white object-${round ? 'cover' : 'contain'} p-${round ? '0' : '1'} ${shape}`} />
+          : <div className={`flex h-16 w-16 items-center justify-center border border-dashed border-line bg-white text-slate-300 ${shape}`}>{round ? <UserCircle className="h-8 w-8" /> : <Building2 className="h-7 w-7" />}</div>}
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand/90">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} {busy ? 'Uploading...' : (value ? 'Replace image' : 'Upload image')}
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} disabled={busy} />
+            </label>
+            {value && <button type="button" onClick={() => onChange('')} className="text-xs font-semibold text-slate-400 hover:text-red-600">Remove</button>}
+            <button type="button" onClick={() => setShowUrl((s) => !s)} className="inline-flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-brand"><LinkIcon className="h-3.5 w-3.5" /> {showUrl ? 'Hide link' : 'Paste a link'}</button>
+          </div>
+          {showUrl && <input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="https://.../image.png" className="rounded-xl border border-line bg-white px-3.5 py-2 text-sm outline-none focus:border-brand" />}
+          {err && <span className="text-[11px] font-medium text-red-600">{err}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Structured physical address (street / city / state / zip). Recombines into a single `address`
+// string on every change so everywhere else that reads `address` keeps working unchanged.
+function joinAddress(a: { street?: string; city?: string; state?: string; zip?: string }) {
+  const cityStateZip = [a.city, [a.state, a.zip].filter(Boolean).join(' ').trim()].filter(Boolean).join(', ');
+  return [a.street, cityStateZip].filter(Boolean).join(', ').trim();
+}
+// Best-effort parse of an existing free-form "street, city, ST zip" back into parts.
+function splitAddress(addr?: string | null): { street: string; city: string; state: string; zip: string } {
+  const s = String(addr || '').trim();
+  if (!s) return { street: '', city: '', state: '', zip: '' };
+  const parts = s.split(',').map((x) => x.trim()).filter(Boolean);
+  const street = parts[0] || '';
+  const city = parts.length >= 3 ? parts[1] : (parts.length === 2 && !/\d{5}/.test(parts[1]) && !/^[A-Za-z]{2}\b/.test(parts[1]) ? parts[1] : '');
+  const tail = parts.length >= 3 ? parts.slice(2).join(' ') : (parts[1] && parts.length === 2 ? parts[1] : '');
+  const m = tail.match(/([A-Za-z]{2})\s*(\d{5}(?:-\d{4})?)?/);
+  return { street, city, state: m?.[1] || '', zip: m?.[2] || (tail.match(/\d{5}(?:-\d{4})?/)?.[0] || '') };
+}
+function AddressFields({ value, onChange }: { value?: string | null; onChange: (combined: string) => void }) {
+  // Seed once from the address loaded when the panel opened; we drive `value` after that, so we do
+  // NOT re-split on every change (round-tripping the combined string would fight the user's typing).
+  const [a, setA] = useState(() => splitAddress(value));
+  const upd = (k: 'street' | 'city' | 'state' | 'zip', v: string) => { const next = { ...a, [k]: v }; setA(next); onChange(joinAddress(next)); };
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500"><MapPin className="h-3.5 w-3.5 text-slate-400" />Physical address</span>
+      <input value={a.street} onChange={(e) => upd('street', e.target.value)} placeholder="Street address" className="rounded-xl border border-line bg-white px-3.5 py-2.5 text-[15px] outline-none focus:border-brand focus:ring-2 focus:ring-brand/15" />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <input value={a.city} onChange={(e) => upd('city', e.target.value)} placeholder="City" className="col-span-2 rounded-xl border border-line bg-white px-3.5 py-2.5 text-[15px] outline-none focus:border-brand focus:ring-2 focus:ring-brand/15" />
+        <input value={a.state} onChange={(e) => upd('state', e.target.value.toUpperCase().slice(0, 2))} placeholder="ST" maxLength={2} className="rounded-xl border border-line bg-white px-3.5 py-2.5 text-center text-[15px] uppercase outline-none focus:border-brand focus:ring-2 focus:ring-brand/15" />
+        <input value={a.zip} onChange={(e) => upd('zip', e.target.value.replace(/[^0-9-]/g, '').slice(0, 10))} placeholder="ZIP" inputMode="numeric" className="rounded-xl border border-line bg-white px-3.5 py-2.5 text-[15px] outline-none focus:border-brand focus:ring-2 focus:ring-brand/15" />
+      </div>
+    </div>
+  );
+}
+
 // ---- Branding editor (admin) ----
 function BrandingPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [b, setB] = useState<Branding | null>(null);
@@ -112,16 +206,18 @@ function BrandingPanel({ open, onClose }: { open: boolean; onClose: () => void }
   const color = b?.primary_color && /^#?[0-9a-fA-F]{6}$/.test((b.primary_color || '').replace('#', '')) ? (b!.primary_color!.startsWith('#') ? b!.primary_color! : '#' + b!.primary_color) : '#0f766e';
   return (
     <SlideOver open={open} onClose={onClose} title="Workspace branding" icon={Palette} width="w-full sm:max-w-xl"
-      footer={b ? <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save branding'}</button> : undefined}>
+      footer={b ? <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? 'Saving...' : 'Save branding'}</button> : undefined}>
       {!b ? <LoadingBlock /> : (
         <div className="flex flex-col gap-6">
-          <p className="text-sm text-slate-500">Shown on every public listing page for this workspace — logo, firm name, license and contact details.</p>
+          <p className="text-sm text-slate-500">Shown on every public listing page for this workspace - logo, firm name, license and contact details.</p>
+
+          <Tips items={[
+            'Upload your logo instead of pasting a link. It is stored for you and shown on every public listing page. A square PNG with a transparent background looks best.',
+            'The firm name, license number and physical address here appear on your public listings, so use the exact legal details your brokerage requires.',
+          ]} />
 
           <PanelSection title="Brand">
-            <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-4">
-              {b.logo_url ? <img src={b.logo_url} alt="logo" className="h-16 w-16 rounded-xl border border-line bg-white object-contain p-1" /> : <div className="flex h-16 w-16 items-center justify-center rounded-xl border border-dashed border-line bg-white text-slate-300"><Building2 className="h-7 w-7" /></div>}
-              <div className="min-w-0 flex-1"><PInput label="Logo URL" value={b.logo_url || ''} onChange={(v) => set('logo_url', v)} placeholder="https://…/logo.png" /></div>
-            </div>
+            <ImageUpload label="Logo" value={b.logo_url || ''} onChange={(v) => set('logo_url', v)} kind="logo" />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <PInput label="Brand name" value={b.brand_name || ''} onChange={(v) => set('brand_name', v)} placeholder="1PropertyMarket" />
               <PInput label="Firm / company name" value={b.firm_name || ''} onChange={(v) => set('firm_name', v)} placeholder="Pitman Real Estate LLC" />
@@ -139,8 +235,8 @@ function BrandingPanel({ open, onClose }: { open: boolean; onClose: () => void }
               <PInput label="Website" value={b.website || ''} onChange={(v) => set('website', v)} icon={Globe} placeholder="firm.com" />
               <PInput label="Email" value={b.email || ''} onChange={(v) => set('email', v)} placeholder="hello@firm.com" />
               <PInput label="Phone" value={b.phone || ''} onChange={(v) => set('phone', v)} placeholder="(555) 555-5555" />
-              <PInput label="Physical address" value={b.address || ''} onChange={(v) => set('address', v)} placeholder="123 Main St, City, ST" />
             </div>
+            <AddressFields value={b.address || ''} onChange={(v) => set('address', v)} />
           </PanelSection>
         </div>
       )}
@@ -157,15 +253,17 @@ function ProfilePanel({ open, onClose }: { open: boolean; onClose: () => void })
   const save = async () => { if (!p) return; setSaving(true); try { await listings.setProfile(p); onClose(); } catch (e: any) { alert(e.message); } finally { setSaving(false); } };
   return (
     <SlideOver open={open} onClose={onClose} title="My profile (shown on my listings)" icon={UserCircle} width="w-full sm:max-w-xl"
-      footer={p ? <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save profile'}</button> : undefined}>
+      footer={p ? <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? 'Saving...' : 'Save profile'}</button> : undefined}>
       {!p ? <LoadingBlock /> : (
         <div className="flex flex-col gap-6">
           <p className="text-sm text-slate-500">Your details appear as the listing agent on properties assigned to you.</p>
 
-          <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-4">
-            {p.photo_url ? <img src={p.photo_url} alt="me" className="h-16 w-16 rounded-full border border-line object-cover" /> : <div className="flex h-16 w-16 items-center justify-center rounded-full border border-dashed border-line bg-white text-slate-300"><UserCircle className="h-8 w-8" /></div>}
-            <div className="min-w-0 flex-1"><PInput label="Photo URL" value={p.photo_url || ''} onChange={(v) => set('photo_url', v)} placeholder="https://…/me.jpg" /></div>
-          </div>
+          <Tips items={[
+            'Upload a clear, front-facing headshot. It is stored for you and shown as the listing agent on every property assigned to you. A square photo crops cleanest.',
+            'Fill in your title, license number and direct phone so buyers and sellers can reach you and can see you are a licensed agent.',
+          ]} />
+
+          <ImageUpload label="Profile photo" value={p.photo_url || ''} onChange={(v) => set('photo_url', v)} kind="photo" round />
 
           <PanelSection title="Identity">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -181,8 +279,8 @@ function ProfilePanel({ open, onClose }: { open: boolean; onClose: () => void })
               <PInput label="Direct phone" value={p.phone || ''} onChange={(v) => set('phone', v)} />
               <PInput label="Company phone" value={p.company_phone || ''} onChange={(v) => set('company_phone', v)} />
               <PInput label="Website" value={p.website || ''} onChange={(v) => set('website', v)} icon={Globe} />
-              <PInput label="Physical address" value={p.address || ''} onChange={(v) => set('address', v)} />
             </div>
+            <AddressFields value={p.address || ''} onChange={(v) => set('address', v)} />
           </PanelSection>
         </div>
       )}
@@ -267,15 +365,15 @@ export default function Properties() {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title, address, city…"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title, address, city..."
             className="w-full rounded-lg border border-line bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-brand" />
         </div>
         <ToolbarButton icon={SlidersHorizontal} label="Filters" count={activeFilterCount} active={showFilters} onClick={() => setShowFilters((s) => !s)} />
         <select value={sort} onChange={(e) => setSort(e.target.value)} className="rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-brand">
           <option value="updated">Recently updated</option>
-          <option value="price_desc">Price: high → low</option>
-          <option value="price_asc">Price: low → high</option>
-          <option value="title">Title A–Z</option>
+          <option value="price_desc">Price: high - low</option>
+          <option value="price_asc">Price: low - high</option>
+          <option value="title">Title A-Z</option>
         </select>
         <div className="flex overflow-hidden rounded-lg border border-line">
           <button onClick={() => setView('grid')} className={`inline-flex items-center gap-1 px-3 py-2 text-sm font-semibold ${view === 'grid' ? 'bg-brand text-white' : 'bg-white text-slate-600'}`}><LayoutGrid className="h-4 w-4" /> Grid</button>
@@ -300,9 +398,9 @@ export default function Properties() {
         </div>
       )}
 
-      {loading ? <LoadingBlock label="Loading listings…" /> :
+      {loading ? <LoadingBlock label="Loading listings..." /> :
        err ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{err}</div> :
-       filtered.length === 0 ? <EmptyState text={rows.length === 0 ? 'No listings yet. Click “Add property” to create your first one — you can auto-fill it from an address.' : 'No listings match your filters.'} /> :
+       filtered.length === 0 ? <EmptyState text={rows.length === 0 ? 'No listings yet. Click "Add property" to create your first one - you can auto-fill it from an address.' : 'No listings match your filters.'} /> :
        view === 'map' ? <SectionCard title="Map" description="Click a pin to open the listing"><PinMap items={filtered} onPick={(p) => nav(`/properties/${p.id}`)} /></SectionCard> :
        (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -321,14 +419,14 @@ export default function Properties() {
                 <div className="p-3">
                   <div className="truncate text-sm font-bold text-ink">{p.title || 'Untitled listing'}</div>
                   <div className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-500">
-                    <MapPin className="h-3 w-3 shrink-0" />{p.status === 'off_market' ? [p.city, p.state].filter(Boolean).join(', ') || 'Location hidden' : fullAddr(p) || '—'}
+                    <MapPin className="h-3 w-3 shrink-0" />{p.status === 'off_market' ? [p.city, p.state].filter(Boolean).join(', ') || 'Location hidden' : fullAddr(p) || '-'}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-slate-600">
                     <span className="flex items-center gap-1"><Tag className="h-3 w-3" />{typeLabel(p.property_type)}</span>
                     {p.beds != null && <span className="flex items-center gap-1"><BedDouble className="h-3 w-3" />{p.beds}</span>}
                     {p.baths != null && <span className="flex items-center gap-1"><Bath className="h-3 w-3" />{p.baths}</span>}
                     {p.sqft != null && <span className="flex items-center gap-1"><Ruler className="h-3 w-3" />{Math.round(p.sqft).toLocaleString()} sf</span>}
-                    {(p.party_count || 0) > 0 && <span className="text-slate-400">· {p.party_count} contact{p.party_count === 1 ? '' : 's'}</span>}
+                    {(p.party_count || 0) > 0 && <span className="text-slate-400">- {p.party_count} contact{p.party_count === 1 ? '' : 's'}</span>}
                   </div>
                 </div>
               </button>

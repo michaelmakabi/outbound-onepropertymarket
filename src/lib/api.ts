@@ -421,6 +421,42 @@ export const opm = {
   routingStats: (workspace?: string) => opmExtCall('routing_stats', workspace ? { params: { workspace } } : {}),
 };
 
+// ---- Calendar / Booked Appointments (dedicated `opm-calendar` edge function). AI agents book via
+// agent-live; this is the human-facing list/create/edit/cancel. Shares OPM auth + active-workspace scoping. ----
+export interface Appointment {
+  id?: string; workspace?: string; lead_id?: string | null; contact_name?: string | null;
+  phone?: string | null; email?: string | null; title?: string | null;
+  starts_at: string; ends_at?: string | null; timezone?: string | null;
+  status?: 'scheduled' | 'completed' | 'canceled' | 'no_show'; source?: string; agent_id?: string | null;
+  call_id?: string | null; notes?: string | null; created_at?: string; updated_at?: string;
+}
+const OPMCAL_BASE =
+  (import.meta as any).env?.VITE_OPMCAL_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-calendar') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-calendar');
+
+async function opmCalCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMCAL_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) { if (v === undefined || v === null || v === '') continue; url.searchParams.set(k, String(v)); }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+export const calendar = {
+  // Appointments in a date range (ISO bounds) for the active workspace, soonest first.
+  list: (p: { from?: string; to?: string; status?: string; workspace?: string } = {}) =>
+    opmCalCall('appt_list', { params: p }) as Promise<{ appointments: Appointment[] }>,
+  save: (b: Partial<Appointment> & { starts_at?: string }) =>
+    opmCalCall('appt_save', { method: 'POST', body: b }) as Promise<{ ok: boolean; appointment: Appointment }>,
+  cancel: (id: string) => opmCalCall('appt_delete', { method: 'POST', body: { id } }),
+};
+
 // ---- Notifications (Phase 3) - dedicated `opm-notif` edge function; shares OPM auth + active-workspace scoping. ----
 const OPMNOTIF_BASE =
   (import.meta as any).env?.VITE_OPMNOTIF_BASE ||
