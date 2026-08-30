@@ -422,9 +422,17 @@ export default function SellerContacts() {
   const activeFilterCount = (pipelineId ? 1 : 0) + (stageId ? 1 : 0) + (verified ? 1 : 0) + tagFilter.length + ((commDir || commFrom || commTo) ? 1 : 0) + colFilters.activeCount;
   const clearAllFilters = () => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setCommFrom(''); setCommTo(''); setCommDir(''); colFilters.clear(); };
 
-  const dialableNumbers = records.reduce((s, r) => s + r.numbersCount, 0);
-  const verifiedNumbers = records.reduce((s, r) => s + r.verifiedCount, 0);
-  const inPipeline = records.filter((r) => r.pipeline_id != null).length;
+  // KPI roll-ups. When any filter/search is active, the top numbers recompute against the FILTERED
+  // set (`rows`) and show "of N total", so the counts move live as you filter. Otherwise they show
+  // the whole book.
+  const isFiltered = activeFilterCount > 0 || !!search.trim();
+  const kpiRows = isFiltered ? rows : records;
+  const dialableNumbers = kpiRows.reduce((s, r) => s + r.numbersCount, 0);
+  const verifiedNumbers = kpiRows.reduce((s, r) => s + r.verifiedCount, 0);
+  const inPipeline = kpiRows.filter((r) => r.pipeline_id != null).length;
+  const totalDialable = records.reduce((s, r) => s + r.numbersCount, 0);
+  const totalVerified = records.reduce((s, r) => s + r.verifiedCount, 0);
+  const totalInPipeline = records.filter((r) => r.pipeline_id != null).length;
 
   const allOnPage = pageRows.length > 0 && pageRows.every((r) => selected.has(r.lead_id));
   const toggleAll = () => { setMatchAll(false); setSelected((s) => { const n = new Set(s); if (allOnPage) pageRows.forEach((r) => n.delete(r.lead_id)); else pageRows.forEach((r) => n.add(r.lead_id)); return n; }); };
@@ -535,10 +543,10 @@ export default function SellerContacts() {
       {showTags && <TagManagerModal onClose={() => setShowTags(false)} onChanged={() => load()} />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Records" value={num(records.length)} sub="one per seller / property" icon={Contact} accent="blue" />
-        <KpiCard label="Dialable Numbers" value={num(dialableNumbers)} sub="across all records" icon={Phone} accent="green" />
-        <KpiCard label="Verified Numbers" value={num(verifiedNumbers)} sub="confirmed working" icon={BadgeCheck} accent="amber" />
-        <KpiCard label="In a Pipeline" value={num(inPipeline)} sub="assigned to a board" icon={Layers} />
+        <KpiCard label={isFiltered ? 'Records (filtered)' : 'Records'} value={num(kpiRows.length)} sub={isFiltered ? `of ${num(records.length)} total` : 'one per seller / property'} icon={Contact} accent="blue" />
+        <KpiCard label="Dialable Numbers" value={num(dialableNumbers)} sub={isFiltered ? `of ${num(totalDialable)} total` : 'across all records'} icon={Phone} accent="green" />
+        <KpiCard label="Verified Numbers" value={num(verifiedNumbers)} sub={isFiltered ? `of ${num(totalVerified)} total` : 'confirmed working'} icon={BadgeCheck} accent="amber" />
+        <KpiCard label="In a Pipeline" value={num(inPipeline)} sub={isFiltered ? `of ${num(totalInPipeline)} total` : 'assigned to a board'} icon={Layers} />
       </div>
 
       {/* Compact toolbar — filters + columns tuck away into right-side drawers (GHL-style). */}
