@@ -26,6 +26,16 @@ function minLocalDateTime() {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// Day-of-week labels (index 0=Sunday, matching JS Date.getDay() and the backend's window_days).
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// Human 12-hour label for an hour-of-day 0..24 (24 and 0 both read as midnight).
+function hourLabel(h: number) {
+  const ap = h < 12 || h === 24 ? 'AM' : 'PM';
+  let hh = h % 12; if (hh === 0) hh = 12;
+  const tag = h === 0 || h === 24 ? ' (midnight)' : h === 12 ? ' (noon)' : '';
+  return `${hh}:00 ${ap}${tag}`;
+}
+
 // Shared, generously-sized button styles for the launch wizard footer + actions.
 const BTN_GHOST = 'inline-flex items-center gap-2 rounded-xl border border-line px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-surface disabled:opacity-40';
 const BTN_PRIMARY = 'inline-flex items-center gap-2 rounded-xl bg-brand px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand/90 disabled:opacity-40';
@@ -101,6 +111,11 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
   // Launch timing: 'now' starts immediately; 'schedule' holds the campaign until scheduleAt.
   const [launchMode, setLaunchMode] = useState<'now' | 'schedule'>('now');
   const [scheduleAt, setScheduleAt] = useState(''); // <input type="datetime-local"> value (local time)
+  // Calling window: the hours + weekdays calls are allowed to go out (evaluated per lead's local tz).
+  // Defaults match the platform-wide 9am–8pm, all days. Users can narrow it (e.g. Mon–Fri, 6pm–9pm).
+  const [windowStart, setWindowStart] = useState(9);
+  const [windowEnd, setWindowEnd] = useState(20);
+  const [windowDays, setWindowDays] = useState<Set<number>>(() => new Set([0, 1, 2, 3, 4, 5, 6]));
 
   // Pre-flight + projection.
   const [preflight, setPreflight] = useState<any>(null);
@@ -292,14 +307,15 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
   }, [step, ws, agentId, dialMode, selected.size]);
 
   const preflightOk = !!preflight?.ok;
-  // Calls only go out 9am-8pm local, so a scheduled START must also fall inside that window.
-  const BH_START = 9, BH_END = 20;
   const schedDate = scheduleAt ? new Date(scheduleAt) : null;
-  const schedHour = schedDate ? schedDate.getHours() : null;
-  const scheduleHourOk = schedHour == null || (schedHour >= BH_START && schedHour < BH_END);
   const scheduleFuture = !!scheduleAt && !!schedDate && schedDate.getTime() > Date.now();
-  // When scheduling, require a valid FUTURE time that is also inside calling hours.
-  const scheduleReady = launchMode === 'now' || (scheduleFuture && scheduleHourOk);
+  // The calling window must be non-empty (end after start) with at least one selected day.
+  const windowValid = windowEnd > windowStart && windowDays.size > 0;
+  // A scheduled start need not fall inside the calling window — the campaign simply waits for the
+  // next open window after that time. We only require the start to be in the future.
+  const scheduleReady = launchMode === 'now' || scheduleFuture;
+  // Is the chosen start moment actually inside the calling window (informational only)?
+  const startInWindow = !schedDate || (windowDays.has(schedDate.getDay()) && schedDate.getHours() >= windowStart && schedDate.getHours() < windowEnd);
 
   const launch = async () => {
     if (busy) return;
@@ -313,6 +329,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
       return;
     }
     if (!scheduleReady) { setInvalidField('schedule'); return; }
+    if (!windowValid) { setInvalidField('schedule'); setErr('Pick a valid calling window: an end hour after the start hour, and at least one day.'); return; }
     if (!preflightOk) { setInvalidField('preflight'); return; }
     setErr(''); setInvalidField(''); setBusy(true); setLaunchStep(0);
     try {
@@ -320,10 +337,18 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
       if (launchMode === 'schedule' && scheduleAt) payload.scheduled_at = new Date(scheduleAt).toISOString();
       const r = await opm.campaignLaunch(payload);
       const newId = r?.campaign?.id || r?.id || null;
-      // Disposition campaign: attach the kind + assigned listing so the drip injects the property's
-      // context (address-safe) into every buyer call. Set immediately, before the first drip tick.
-      if (newId && campaignKind === 'disposition') {
-        try { await opm.campaignSetMeta({ id: newId, workspace: ws, campaign_kind: 'disposition', property_id: propertyId || null }); } catch (_e) { /* non-fatal */ }
+      // Persist the campaign's meta immediately, before the first drip tick: the calling window (hours +
+      // weekdays) for every campaign, plus disposition kind + assigned listing when applicable. The drip
+      // reads these off the row so calls only fire inside the window and buyer calls get the listing context.
+      if (newId) {
+        const meta: any = {
+          id: newId, workspace: ws,
+          campaign_kind: campaignKind,
+          window_start_hour: windowStart, window_end_hour: windowEnd,
+          window_days: [...windowDays].sort((a, b) => a - b),
+        };
+        if (campaignKind === 'disposition') meta.property_id = propertyId || null;
+        try { await opm.campaignSetMeta(meta); } catch (_e) { /* non-fatal */ }
       }
       // Let the final "Launching…" frame breathe for a beat so the transition doesn't feel abrupt.
       setLaunchStep(LAUNCH_STEPS.length - 1);
@@ -582,7 +607,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
               <div className="grid gap-3 sm:grid-cols-2">
                 <button type="button" onClick={() => setLaunchMode('now')} className={`rounded-2xl border-2 p-4 text-left transition ${launchMode === 'now' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
                   <div className="flex items-center gap-2 text-base font-bold text-ink"><PhoneOutgoing className="h-5 w-5 text-brand" /> Launch now</div>
-                  <div className="mt-1.5 text-sm text-slate-500">Start dialing right away (within the 9am–8pm window).</div>
+                  <div className="mt-1.5 text-sm text-slate-500">Start dialing right away (within the calling window below).</div>
                 </button>
                 <button type="button" onClick={() => setLaunchMode('schedule')} className={`rounded-2xl border-2 p-4 text-left transition ${launchMode === 'schedule' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
                   <div className="flex items-center gap-2 text-base font-bold text-ink"><Clock className="h-5 w-5 text-brand" /> Schedule for later</div>
@@ -593,20 +618,69 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
                 <div className="mt-3 space-y-2">
                   <input type="datetime-local" className="input !py-3 text-base" value={scheduleAt} min={minLocalDateTime()} onChange={(e) => setScheduleAt(e.target.value)} />
                   <p className="text-xs text-slate-500">Your timezone: <span className="font-semibold text-ink">{timezone}</span> (auto-detected). Times are shown and scheduled in your local timezone.</p>
-                  {scheduleAt && !scheduleHourOk ? (
-                    <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <span>Campaigns can only start between <span className="font-semibold">9:00 AM and 8:00 PM</span>. Please pick a start time inside that window.</span>
-                    </div>
-                  ) : scheduleAt && !scheduleFuture ? (
+                  {scheduleAt && !scheduleFuture ? (
                     <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                       <span>Please pick a start time in the future.</span>
                     </div>
+                  ) : scheduleAt && !startInWindow ? (
+                    <p className="text-sm text-slate-500">Held until {new Date(scheduleAt).toLocaleString()}. That moment is outside the calling window below, so dialing begins at the next open window after it.</p>
                   ) : (
-                    <p className="text-sm text-slate-500">{scheduleAt ? `Starts ${new Date(scheduleAt).toLocaleString()}. Then leads dial East Coast first and move West — each person is called within their own 9am–8pm local window.` : 'Choose when the campaign should begin (between 9:00 AM and 8:00 PM). It stays idle until then, then starts on its own — you can cancel or launch it early anytime.'}</p>
+                    <p className="text-sm text-slate-500">{scheduleAt ? `Starts ${new Date(scheduleAt).toLocaleString()}, then dials inside the calling window below.` : 'Choose when the campaign should begin. It stays idle until then, then starts on its own inside the calling window — you can cancel or launch it early anytime.'}</p>
                   )}
                 </div>
+              )}
+            </div>
+
+            {/* Calling window: the hours + weekdays calls are allowed to go out (per lead's local time). */}
+            <div className={`rounded-2xl border p-4 ${invalidField === 'schedule' && !windowValid ? 'border-red-300 bg-red-50/40' : 'border-line'}`}>
+              <div className="mb-1 text-base font-bold text-ink">Calling window</div>
+              <p className="mb-3 text-sm text-slate-500">Calls only go out during these hours, on the days you pick — measured in each lead's own local time. Default is 9:00 AM–8:00 PM, every day.</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Start time</label>
+                  <select className="input !py-3 text-base" value={windowStart} onChange={(e) => setWindowStart(Number(e.target.value))}>
+                    {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">End time</label>
+                  <select className="input !py-3 text-base" value={windowEnd} onChange={(e) => setWindowEnd(Number(e.target.value))}>
+                    {Array.from({ length: 24 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}
+                  </select>
+                </div>
+              </div>
+              {windowEnd <= windowStart && (
+                <div className="mt-2 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>End time must be after start time.</span>
+                </div>
+              )}
+              <div className="mt-4">
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Days to call</label>
+                <div className="flex flex-wrap gap-2">
+                  {DOW.map((d, i) => {
+                    const on = windowDays.has(i);
+                    return (
+                      <button key={d} type="button" onClick={() => setWindowDays((prev) => { const next = new Set(prev); if (next.has(i)) next.delete(i); else next.add(i); return next; })}
+                        className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${on ? 'border-brand bg-brand text-white shadow-sm' : 'border-line bg-white text-slate-500 hover:bg-surface'}`}>
+                        {d}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs font-semibold text-brand">
+                  <button type="button" className="hover:underline" onClick={() => setWindowDays(new Set([0, 1, 2, 3, 4, 5, 6]))}>Every day</button>
+                  <button type="button" className="hover:underline" onClick={() => setWindowDays(new Set([1, 2, 3, 4, 5]))}>Weekdays</button>
+                  <button type="button" className="hover:underline" onClick={() => setWindowDays(new Set([0, 6]))}>Weekends</button>
+                </div>
+                {windowDays.size === 0 && (
+                  <div className="mt-2 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>Pick at least one day.</span>
+                  </div>
+                )}
+              </div>
+              {windowValid && (
+                <p className="mt-3 text-sm text-slate-500">Calls go out <span className="font-semibold text-ink">{hourLabel(windowStart)}–{hourLabel(windowEnd)}</span> on <span className="font-semibold text-ink">{windowDays.size === 7 ? 'every day' : [...windowDays].sort((a, b) => a - b).map((i) => DOW[i]).join(', ')}</span>, per lead's local time.</p>
               )}
             </div>
 
@@ -701,7 +775,7 @@ function DialingPolicyCard() {
         <li className="flex gap-2"><span className="text-brand">•</span> Calls are paced automatically — about <span className="font-semibold text-ink">1 call every 15 seconds</span>.</li>
         <li className="flex gap-2"><span className="text-brand">•</span> Dialing <span className="font-semibold text-ink">rotates across the agent's assigned numbers</span> to stay healthy.</li>
         <li className="flex gap-2"><span className="text-brand">•</span> Each number places at most <span className="font-semibold text-ink">100 calls per day</span>.</li>
-        <li className="flex gap-2"><span className="text-brand">•</span> Calls only go out between <span className="font-semibold text-ink">9:00am and 8:00pm</span> in the lead's local time.</li>
+        <li className="flex gap-2"><span className="text-brand">•</span> Calls only go out inside the <span className="font-semibold text-ink">calling window you set above</span> (hours + days), in the lead's local time.</li>
         <li className="flex gap-2"><span className="text-brand">•</span> Leads are dialed <span className="font-semibold text-ink">East Coast first, then westward</span> — by area code, so each person is reached during their own local hours.</li>
         <li className="flex gap-2"><span className="text-brand">•</span> If every number is maxed for the day it <span className="font-semibold text-ink">auto-pauses and resumes the next morning</span> — no action needed.</li>
       </ul>
