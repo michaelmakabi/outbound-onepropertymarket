@@ -1,5 +1,5 @@
 // Shared AI-calling launch wizard. Used by BOTH the Campaigns page (New campaign) and the
-// Contacts page (select leads → Launch AI calls). Four steps: Workspace → Agent → Leads → Confirm,
+// Contacts page (select leads -> Launch AI calls). Four steps: Workspace -> Agent -> Leads -> Confirm,
 // including the "Primary number only" vs "All numbers per lead" dial-mode choice, agent + caller-ID
 // panel, live projection (calls/cost/duration) and launch-now / schedule.
 //
@@ -12,10 +12,15 @@ import { listings as listingsApi } from '../lib/listings';
 import { num } from '../lib/format';
 import { LOGO_MARK } from '../lib/logo';
 import ImportWizard from './ImportWizard';
+import type { AgentIdentity } from '../lib/api';
 import {
   Radio, X, CheckCircle2, Loader2, ChevronLeft, ChevronRight, ArrowLeft, ArrowRight, Search, Upload,
   ListFilter, Users, Phone, PhoneOutgoing, Clock, AlertTriangle, Info, Hash, Timer, Plus, Sparkles,
+  Building2, IdCard, Save, Trash2,
 } from 'lucide-react';
+
+// Empty working identity - the fields a prospect might probe on a cold call.
+const BLANK_IDENTITY: AgentIdentity = { agent_name: '', company_name: '', company_blurb: '', caller_context: '', phone: '', website: '' };
 
 const LEADS_PAGE_SIZE = 50;
 
@@ -48,14 +53,14 @@ const STEP_INTRO: { title: string; desc: string }[] = [
   { title: 'Name it & review', desc: 'Give the campaign a name, choose to launch now or schedule it, and review the projected calls, cost and timing.' },
 ];
 
-// Narration for the branded launch overlay — each line explains a real thing happening behind the
+// Narration for the branded launch overlay - each line explains a real thing happening behind the
 // scenes as the campaign spins up. The final line is shown once the server confirms.
 const LAUNCH_STEPS: { label: string; sub: string }[] = [
   { label: 'Validating your campaign', sub: 'Checking the agent, caller-ID numbers and dialer credit.' },
   { label: 'Reserving your caller-ID numbers', sub: 'Locking in the numbers this campaign will dial from.' },
   { label: 'Queuing your leads', sub: 'Ordering them East Coast first so everyone is called in-hours.' },
   { label: 'Starting the dialer', sub: 'Handing the batch to the AI agent to begin placing calls.' },
-  { label: 'Campaign is live', sub: 'Taking you to the live campaign view…' },
+  { label: 'Campaign is live', sub: 'Taking you to the live campaign view...' },
 ];
 
 export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadIds, initialName, startStep, onClose, onLaunched }: {
@@ -112,10 +117,24 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
   const [launchMode, setLaunchMode] = useState<'now' | 'schedule'>('now');
   const [scheduleAt, setScheduleAt] = useState(''); // <input type="datetime-local"> value (local time)
   // Calling window: the hours + weekdays calls are allowed to go out (evaluated per lead's local tz).
-  // Defaults match the platform-wide 9am–8pm, all days. Users can narrow it (e.g. Mon–Fri, 6pm–9pm).
+  // Defaults match the platform-wide 9am-8pm, all days. Users can narrow it (e.g. Mon-Fri, 6pm-9pm).
   const [windowStart, setWindowStart] = useState(9);
   const [windowEnd, setWindowEnd] = useState(20);
   const [windowDays, setWindowDays] = useState<Set<number>>(() => new Set([0, 1, 2, 3, 4, 5, 6]));
+
+  // ---- Dynamic agent identity: who the AI says it is on the call ("who is this?", "what company?",
+  // "how'd you get my number?"). 'generic' uses the Adrian / BB Real Estate persona; 'custom' plugs in
+  // this team's own name + company, front-loaded from their saved details and reusable across campaigns.
+  const [identityMode, setIdentityMode] = useState<'generic' | 'custom'>('generic');
+  const [identity, setIdentity] = useState<AgentIdentity>({ ...BLANK_IDENTITY });
+  const [identityGeneric, setIdentityGeneric] = useState<AgentIdentity | null>(null);
+  const [identityProfiles, setIdentityProfiles] = useState<AgentIdentity[]>([]);
+  const [identityProfileId, setIdentityProfileId] = useState('');   // '' = manual entry
+  const [identityPrefilled, setIdentityPrefilled] = useState<AgentIdentity | null>(null);
+  const [identitySaveReuse, setIdentitySaveReuse] = useState(false);
+  const [identitySaveLabel, setIdentitySaveLabel] = useState('');
+  const [identityLoading, setIdentityLoading] = useState(false);
+  const [identityBusy, setIdentityBusy] = useState(false);
 
   // Pre-flight + projection.
   const [preflight, setPreflight] = useState<any>(null);
@@ -134,7 +153,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  // Agents come from THIS workspace's own dialer account (its Retell subaccount) — never the shared
+  // Agents come from THIS workspace's own dialer account (its Retell subaccount) - never the shared
   // 1PM account. We resolve the tenant's dialer routing first (dialer_slug + the agent configured to
   // actually place its calls), list that account's agents, and preselect the configured agent so the
   // wizard shows exactly the agents that will dial for this workspace.
@@ -155,7 +174,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
         setAgentId(pick);
       }).catch(() => { setAgents([]); setAgentId(''); });
     }).catch(() => {
-      // No dialer config row — fall back to listing the workspace's own account directly.
+      // No dialer config row - fall back to listing the workspace's own account directly.
       loadInfo(slug);
       testai.agents(slug).then((d: any) => { const list = d.agents || []; setAgents(list); if (list.length) setAgentId(list[0].agent_id); }).catch(() => { setAgents([]); setAgentId(''); });
     });
@@ -198,20 +217,90 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
     }).catch(() => setLists([])).finally(() => setListsLoading(false));
   }, []);
 
+  // Load this workspace's saved identity profiles + the front-loaded "my company" prefill. If a profile
+  // is marked default, adopt it (custom mode); otherwise start on the generic persona.
+  const loadIdentity = useCallback((slug: string) => {
+    if (!slug) { setIdentityProfiles([]); setIdentityPrefilled(null); setIdentityGeneric(null); return; }
+    setIdentityLoading(true);
+    Promise.all([opm.identityList(slug).catch(() => null), opm.identityPrefill(slug).catch(() => null)])
+      .then(([listRes, pre]) => {
+        const profiles = (listRes?.profiles || []) as AgentIdentity[];
+        setIdentityProfiles(profiles);
+        setIdentityGeneric((listRes?.generic || pre?.generic || null) as AgentIdentity | null);
+        setIdentityPrefilled((pre?.prefill || null) as AgentIdentity | null);
+        const def = profiles.find((p) => p.is_default);
+        if (def) {
+          setIdentityMode('custom'); setIdentityProfileId(def.id || '');
+          setIdentity({ agent_name: def.agent_name || '', company_name: def.company_name || '', company_blurb: def.company_blurb || '', caller_context: def.caller_context || '', phone: def.phone || '', website: def.website || '' });
+        } else {
+          setIdentityMode('generic'); setIdentityProfileId('');
+          setIdentity({ ...BLANK_IDENTITY });
+        }
+      })
+      .finally(() => setIdentityLoading(false));
+  }, []);
+
   const onPickWorkspace = (slug: string) => {
     setWs(slug); setSelected(new Set()); setActiveLists(new Set()); setSearch(''); setPage(1);
     setPreflight(null); setProjection(null);
-    loadAgents(slug);
+    loadAgents(slug); loadIdentity(slug);
     if (slug) { fetchLeads(slug); loadLists(slug); } else { setLeads([]); setLists([]); }
   };
 
+  // Adopt a saved identity profile (or clear back to manual entry when '' is chosen).
+  const applyIdentityProfile = (id: string) => {
+    setIdentityProfileId(id);
+    if (!id) return;
+    const p = identityProfiles.find((x) => x.id === id);
+    if (p) setIdentity({ agent_name: p.agent_name || '', company_name: p.company_name || '', company_blurb: p.company_blurb || '', caller_context: p.caller_context || '', phone: p.phone || '', website: p.website || '' });
+  };
+
+  // Front-load the identity fields from the team's saved user + workspace-branding details.
+  const useMyCompanyPrefill = () => {
+    const p = identityPrefilled;
+    if (!p) return;
+    setIdentityProfileId('');
+    setIdentity({ agent_name: p.agent_name || '', company_name: p.company_name || '', company_blurb: p.company_blurb || '', caller_context: p.caller_context || '', phone: p.phone || '', website: p.website || '' });
+  };
+
+  const setIdent = (k: keyof AgentIdentity, v: string) => { setIdentity((s) => ({ ...s, [k]: v })); setIdentityProfileId(''); };
+
+  // Persist the current custom identity as a reusable profile for this workspace.
+  const saveIdentityProfile = async () => {
+    if (identityBusy || !ws) return;
+    const label = identitySaveLabel.trim() || (identity.company_name || identity.agent_name || 'My identity');
+    setIdentityBusy(true);
+    try {
+      const r = await opm.identitySave({ ...identity, label, workspace: ws });
+      const saved = r?.profile;
+      if (saved) {
+        setIdentityProfiles((list) => [saved, ...list.filter((x) => x.id !== saved.id)]);
+        setIdentityProfileId(saved.id || '');
+      }
+      setIdentitySaveReuse(false); setIdentitySaveLabel('');
+    } catch (e: any) { setErr(String(e?.message || e)); }
+    finally { setIdentityBusy(false); }
+  };
+
+  const deleteIdentityProfile = async (id?: string) => {
+    if (!id || identityBusy) return;
+    setIdentityBusy(true);
+    try {
+      await opm.identityDelete(id, ws);
+      setIdentityProfiles((list) => list.filter((x) => x.id !== id));
+      if (identityProfileId === id) { setIdentityProfileId(''); setIdentity({ ...BLANK_IDENTITY }); }
+    } catch (e: any) { setErr(String(e?.message || e)); }
+    finally { setIdentityBusy(false); }
+  };
+
   // Locked-workspace mode (Campaigns single-tenant, or Contacts launch): load the workspace's leads,
-  // agents and smart lists on mount — but NEVER clear `selected`, which may be pre-seeded from a
+  // agents and smart lists on mount - but NEVER clear `selected`, which may be pre-seeded from a
   // Contacts selection.
   useEffect(() => {
     if (!lockedWorkspace) return;
     setWs(lockedWorkspace);
     loadAgents(lockedWorkspace);
+    loadIdentity(lockedWorkspace);
     fetchLeads(lockedWorkspace);
     loadLists(lockedWorkspace);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -237,7 +326,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  // "Select all N matching" — resolve the full search set server-side; fall back to the loaded page's filtered ids.
+  // "Select all N matching" - resolve the full search set server-side; fall back to the loaded page's filtered ids.
   const selectAllMatching = async () => {
     if (resolving) return;
     setResolving(true);
@@ -311,7 +400,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
   const scheduleFuture = !!scheduleAt && !!schedDate && schedDate.getTime() > Date.now();
   // The calling window must be non-empty (end after start) with at least one selected day.
   const windowValid = windowEnd > windowStart && windowDays.size > 0;
-  // A scheduled start need not fall inside the calling window — the campaign simply waits for the
+  // A scheduled start need not fall inside the calling window - the campaign simply waits for the
   // next open window after that time. We only require the start to be in the future.
   const scheduleReady = launchMode === 'now' || scheduleFuture;
   // Is the chosen start moment actually inside the calling window (informational only)?
@@ -319,7 +408,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
   const launch = async () => {
     if (busy) return;
-    // Form-style validation: don't silently disable — point the user at exactly what's incomplete.
+    // Form-style validation: don't silently disable - point the user at exactly what's incomplete.
     if (!ws) { setInvalidField('agent'); setStep(0); return; }
     if (!agentId) { setInvalidField('agent'); setStep(1); return; }
     if (selected.size === 0) { setInvalidField('leads'); setStep(2); setErr('Add at least one lead before launching.'); return; }
@@ -348,9 +437,25 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
           window_days: [...windowDays].sort((a, b) => a - b),
         };
         if (campaignKind === 'disposition') meta.property_id = propertyId || null;
+        // Agent identity: null (generic Adrian / BB persona) unless the user chose a custom identity
+        // with at least a name or company. Save-for-reuse (if ticked and unsaved) persists it first.
+        const hasCustom = identityMode === 'custom' && !!((identity.agent_name || '').trim() || (identity.company_name || '').trim());
+        if (hasCustom) {
+          if (identitySaveReuse && !identityProfileId) { try { await saveIdentityProfile(); } catch (_e) { /* non-fatal */ } }
+          meta.agent_identity = {
+            agent_name: (identity.agent_name || '').trim() || null,
+            company_name: (identity.company_name || '').trim() || null,
+            company_blurb: (identity.company_blurb || '').trim() || null,
+            caller_context: (identity.caller_context || '').trim() || null,
+            phone: (identity.phone || '').trim() || null,
+            website: (identity.website || '').trim() || null,
+          };
+        } else {
+          meta.agent_identity = null;
+        }
         try { await opm.campaignSetMeta(meta); } catch (_e) { /* non-fatal */ }
       }
-      // Let the final "Launching…" frame breathe for a beat so the transition doesn't feel abrupt.
+      // Let the final "Launching..." frame breathe for a beat so the transition doesn't feel abrupt.
       setLaunchStep(LAUNCH_STEPS.length - 1);
       await new Promise((res) => setTimeout(res, 500));
       onLaunched(newId);
@@ -391,7 +496,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
         {/* Per-step guiding header */}
         <div className="mb-6 rounded-2xl border border-brand/15 bg-brand-light/20 px-5 py-4">
-          <div className="text-lg font-bold text-ink">Step {step + 1} of {steps.length} — {STEP_INTRO[step].title}</div>
+          <div className="text-lg font-bold text-ink">Step {step + 1} of {steps.length} - {STEP_INTRO[step].title}</div>
           <p className="mt-1 text-sm text-slate-600">{STEP_INTRO[step].desc}</p>
         </div>
 
@@ -404,11 +509,11 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
               <div className="input !py-3.5 flex items-center bg-surface text-base font-semibold text-slate-700">{workspaces.find((w) => w.slug === lockedWorkspace)?.display_name || lockedWorkspace}</div>
             ) : (
               <select autoFocus className="input !py-3.5 text-base" value={ws} onChange={(e) => onPickWorkspace(e.target.value)}>
-                <option value="">Select a workspace…</option>
+                <option value="">Select a workspace...</option>
                 {workspaces.map((w) => <option key={w.slug} value={w.slug}>{w.display_name}</option>)}
               </select>
             )}
-            <p className="mt-3 text-sm text-slate-500">{lockedWorkspace ? 'Locked to your active workspace — leads, tagging and analytics all scope here. Switch workspaces from the sidebar to launch for a different tenant.' : 'Leads, tagging and analytics all scope to this workspace. Calls are placed via this workspace’s configured dialer account.'}</p>
+            <p className="mt-3 text-sm text-slate-500">{lockedWorkspace ? 'Locked to your active workspace - leads, tagging and analytics all scope here. Switch workspaces from the sidebar to launch for a different tenant.' : 'Leads, tagging and analytics all scope to this workspace. Calls are placed via this workspace\'s configured dialer account.'}</p>
           </div>
         )}
 
@@ -432,10 +537,10 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
               <div className="mb-4">
                 <label className="mb-1.5 block text-sm font-bold text-ink">Property / listing to pitch</label>
                 <select className="input !py-3 text-base" value={propertyId} onChange={(e) => setPropertyId(e.target.value)}>
-                  <option value="">No specific listing — source buyers for our inventory generally</option>
+                  <option value="">No specific listing - source buyers for our inventory generally</option>
                   {properties.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.title || 'Untitled'} · {p.status === 'on_market' ? 'On-market' : 'Off-market'}{[p.city, p.state].filter(Boolean).length ? ' · ' + [p.city, p.state].filter(Boolean).join(', ') : ''}{p.disposition_price != null ? ' · $' + Math.round(Number(p.disposition_price)).toLocaleString() : ''}
+                      {p.title || 'Untitled'} - {p.status === 'on_market' ? 'On-market' : 'Off-market'}{[p.city, p.state].filter(Boolean).length ? ' - ' + [p.city, p.state].filter(Boolean).join(', ') : ''}{p.disposition_price != null ? ' - $' + Math.round(Number(p.disposition_price)).toLocaleString() : ''}
                     </option>
                   ))}
                 </select>
@@ -444,16 +549,16 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
             )}
             <label className="mb-2 block text-base font-bold text-ink">AI voice agent</label>
             <select className="input !py-3.5 text-base" value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-              {!agents.length && <option value="">Loading agents…</option>}
+              {!agents.length && <option value="">Loading agents...</option>}
               {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
             </select>
-            <p className="mt-3 text-sm text-slate-500">These are the agents on this workspace’s own dialer account. Its script, voice and assigned phone numbers will be used for every call in the campaign.</p>
+            <p className="mt-3 text-sm text-slate-500">These are the agents on this workspace's own dialer account. Its script, voice and assigned phone numbers will be used for every call in the campaign.</p>
 
-            {/* What this agent does — pulled from the AI Agents directory. */}
+            {/* What this agent does - pulled from the AI Agents directory. */}
             {agentId && agentInfo[agentId] && (
               <div className="mt-4 rounded-2xl border border-brand/20 bg-brand-light/20 p-4">
                 <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand"><Info className="h-3.5 w-3.5" /> What this agent does</div>
-                <div className="mt-1.5 text-sm leading-relaxed text-slate-700">{agentInfo[agentId].description || 'No description on file for this agent yet — open AI Agents to add one.'}</div>
+                <div className="mt-1.5 text-sm leading-relaxed text-slate-700">{agentInfo[agentId].description || 'No description on file for this agent yet - open AI Agents to add one.'}</div>
                 <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                   {agentInfo[agentId].type && <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">{agentInfo[agentId].type}</span>}
                   {agentInfo[agentId].voice_name && <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">Voice: {agentInfo[agentId].voice_name}</span>}
@@ -465,10 +570,10 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
             <div className="mt-4 rounded-2xl border border-line bg-surface p-4">
               <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500"><Hash className="h-3.5 w-3.5" /> Numbers this agent dials from</div>
               {numUsage.length === 0 ? (
-                <div className="mt-2 flex items-center gap-2 text-sm text-amber-700"><AlertTriangle className="h-4 w-4 shrink-0" /> No caller-ID numbers are assigned to this workspace yet — assign numbers before launching.</div>
+                <div className="mt-2 flex items-center gap-2 text-sm text-amber-700"><AlertTriangle className="h-4 w-4 shrink-0" /> No caller-ID numbers are assigned to this workspace yet - assign numbers before launching.</div>
               ) : (
                 <>
-                  <p className="mt-1.5 text-xs text-slate-500">Dialing rotates across these numbers to stay healthy. Ordered by most used; “last used” shows recent activity.</p>
+                  <p className="mt-1.5 text-xs text-slate-500">Dialing rotates across these numbers to stay healthy. Ordered by most used; "last used" shows recent activity.</p>
                   <div className="mt-2.5 space-y-1.5">
                     {numUsage.slice(0, 8).map((n, i) => (
                       <div key={n.phone} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm">
@@ -476,12 +581,100 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
                           {n.phone}
                           {i === 0 && n.total_calls > 0 && <span className="rounded bg-brand-light px-1.5 py-0.5 text-[10px] font-semibold text-brand">most used</span>}
                         </span>
-                        <span className="text-xs text-slate-500">{num(n.total_calls)} call{n.total_calls === 1 ? '' : 's'}{n.last_used ? ` · last ${n.last_used}` : ' · never used'}</span>
+                        <span className="text-xs text-slate-500">{num(n.total_calls)} call{n.total_calls === 1 ? '' : 's'}{n.last_used ? ` - last ${n.last_used}` : ' - never used'}</span>
                       </div>
                     ))}
                     {numUsage.length > 8 && <div className="text-xs text-slate-400">+ {numUsage.length - 8} more number{numUsage.length - 8 === 1 ? '' : 's'}</div>}
                   </div>
                 </>
+              )}
+            </div>
+
+            {/* Agent identity: who the AI says it is when a prospect asks "who is this / what company / how'd you get my number". */}
+            <div className="mt-4 rounded-2xl border border-line bg-white p-4">
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500"><IdCard className="h-3.5 w-3.5" /> Agent identity {identityLoading && <Loader2 className="h-3 w-3 animate-spin" />}</div>
+              <p className="mt-1.5 text-xs text-slate-500">What the AI says when someone asks <span className="font-medium text-slate-600">"who is this?"</span>, <span className="font-medium text-slate-600">"what company are you with?"</span> or <span className="font-medium text-slate-600">"how'd you get my number?"</span></p>
+
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <button type="button" onClick={() => setIdentityMode('generic')}
+                  className={`rounded-2xl border p-4 text-left transition ${identityMode === 'generic' ? 'border-brand bg-brand-light/30' : 'border-line hover:bg-surface'}`}>
+                  <div className="flex items-center gap-2 text-sm font-bold text-ink"><Sparkles className="h-4 w-4 text-brand" /> Generic cold-outreach</div>
+                  <div className="mt-0.5 text-xs text-slate-500">{identityGeneric ? `"${identityGeneric.agent_name}" with ${identityGeneric.company_name}.` : 'Adrian with BB Real Estate Fund.'} Neutral, no company details.</div>
+                </button>
+                <button type="button" onClick={() => { setIdentityMode('custom'); if (!identity.agent_name && !identity.company_name && identityPrefilled) useMyCompanyPrefill(); }}
+                  className={`rounded-2xl border p-4 text-left transition ${identityMode === 'custom' ? 'border-brand bg-brand-light/30' : 'border-line hover:bg-surface'}`}>
+                  <div className="flex items-center gap-2 text-sm font-bold text-ink"><Building2 className="h-4 w-4 text-brand" /> Use my company</div>
+                  <div className="mt-0.5 text-xs text-slate-500">The AI introduces itself with your name &amp; company. Saveable and reusable across campaigns.</div>
+                </button>
+              </div>
+
+              {identityMode === 'custom' && (
+                <div className="mt-4 space-y-3 rounded-2xl border border-brand/20 bg-brand-light/10 p-4">
+                  {/* Saved profiles + prefill shortcut */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {identityProfiles.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <select className="input !py-2 text-sm" value={identityProfileId} onChange={(e) => applyIdentityProfile(e.target.value)}>
+                          <option value="">Manual entry...</option>
+                          {identityProfiles.map((p) => <option key={p.id} value={p.id}>{p.label}{p.is_default ? ' (default)' : ''}</option>)}
+                        </select>
+                        {identityProfileId && (
+                          <button type="button" title="Delete this saved identity" onClick={() => deleteIdentityProfile(identityProfileId)} disabled={identityBusy} className="rounded-lg border border-line p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>
+                        )}
+                      </div>
+                    )}
+                    {identityPrefilled && (identityPrefilled.company_name || identityPrefilled.agent_name) && (
+                      <button type="button" onClick={useMyCompanyPrefill} className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-white px-3 py-2 text-xs font-semibold text-brand hover:bg-brand-light/40"><Sparkles className="h-3.5 w-3.5" /> Fill from my saved details</button>
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Agent name</label>
+                      <input className="input !py-2.5 text-sm" value={identity.agent_name || ''} onChange={(e) => setIdent('agent_name', e.target.value)} placeholder="e.g. Adrian" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Company name</label>
+                      <input className="input !py-2.5 text-sm" value={identity.company_name || ''} onChange={(e) => setIdent('company_name', e.target.value)} placeholder="e.g. Summit Realty Group" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Company info - one line the AI can say</label>
+                    <input className="input !py-2.5 text-sm" value={identity.company_blurb || ''} onChange={(e) => setIdent('company_blurb', e.target.value)} placeholder="e.g. a local brokerage that helps owners sell fast for cash" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">"How'd you get my number?"</label>
+                    <input className="input !py-2.5 text-sm" value={identity.caller_context || ''} onChange={(e) => setIdent('caller_context', e.target.value)} placeholder="e.g. I work this area and came across your property in public records" />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Callback phone <span className="normal-case text-slate-400">(optional)</span></label>
+                      <input className="input !py-2.5 text-sm" value={identity.phone || ''} onChange={(e) => setIdent('phone', e.target.value)} placeholder="(555) 123-4567" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Website <span className="normal-case text-slate-400">(optional)</span></label>
+                      <input className="input !py-2.5 text-sm" value={identity.website || ''} onChange={(e) => setIdent('website', e.target.value)} placeholder="summitrealty.com" />
+                    </div>
+                  </div>
+
+                  {/* Save for reuse */}
+                  {!identityProfileId && (
+                    <div className="rounded-xl border border-line bg-white p-3">
+                      <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+                        <input type="checkbox" className="h-4 w-4 accent-[#1f6feb]" checked={identitySaveReuse} onChange={(e) => setIdentitySaveReuse(e.target.checked)} />
+                        Save this identity for future campaigns
+                      </label>
+                      {identitySaveReuse && (
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                          <input className="input !py-2 text-sm min-w-[200px] flex-1" value={identitySaveLabel} onChange={(e) => setIdentitySaveLabel(e.target.value)} placeholder="Name it, e.g. Summit Realty" />
+                          <button type="button" onClick={saveIdentityProfile} disabled={identityBusy} className="inline-flex items-center gap-1.5 rounded-xl border border-brand/30 bg-brand-light/30 px-4 py-2 text-sm font-semibold text-brand hover:bg-brand-light disabled:opacity-40">{identityBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save now</button>
+                          <span className="text-xs text-slate-400">Or it saves automatically on launch.</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500">This plugs into every call in the campaign - acquisition, disposition and prospecting agents all speak this identity.</p>
+                </div>
               )}
             </div>
           </div>
@@ -493,7 +686,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
             {hasPreseed && (
               <div className="rounded-2xl border-2 border-brand/30 bg-brand-light/30 p-5">
                 <div className="flex items-center gap-2 text-base font-bold text-ink"><CheckCircle2 className="h-5 w-5 text-brand" /> Targeting {num(preseeded.size)} lead{preseeded.size === 1 ? '' : 's'} you selected</div>
-                <p className="mt-1 text-sm text-slate-600">These are the exact contacts you picked — they're the campaign's target. You don't need to add anything else. If you'd like, you can <span className="font-semibold text-ink">also include more</span> leads below.{addedBeyondPreseed > 0 && <> You've added <span className="font-semibold text-brand">{num(addedBeyondPreseed)} more</span> so far.</>}</p>
+                <p className="mt-1 text-sm text-slate-600">These are the exact contacts you picked - they're the campaign's target. You don't need to add anything else. If you'd like, you can <span className="font-semibold text-ink">also include more</span> leads below.{addedBeyondPreseed > 0 && <> You've added <span className="font-semibold text-brand">{num(addedBeyondPreseed)} more</span> so far.</>}</p>
                 {!showAddMore && (
                   <button onClick={() => setShowAddMore(true)} className="mt-3 inline-flex items-center gap-2 rounded-xl border border-brand/40 bg-white px-4 py-2.5 text-sm font-semibold text-brand hover:bg-brand-light/40"><Plus className="h-4 w-4" /> Also include more leads (optional)</button>
                 )}
@@ -502,14 +695,14 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
             {(showAddMore || !hasPreseed) && (<>
             {hasPreseed && (
-              <div className="flex items-center gap-2 text-sm font-bold text-brand"><Sparkles className="h-4 w-4" /> Add more leads on top of your {num(preseeded.size)} selected <span className="ml-1 font-normal text-slate-400">— optional</span></div>
+              <div className="flex items-center gap-2 text-sm font-bold text-brand"><Sparkles className="h-4 w-4" /> Add more leads on top of your {num(preseeded.size)} selected <span className="ml-1 font-normal text-slate-400">- optional</span></div>
             )}
             {/* Smart-list batch selection */}
             <div>
               <div className="mb-2 flex items-center gap-2 text-sm font-bold text-ink"><ListFilter className="h-4 w-4 text-brand" /> Smart lists {listsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}</div>
               <p className="mb-2.5 text-xs text-slate-500">Tap a saved list to add everyone in it. Tap again to remove them.</p>
               {lists.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-line px-4 py-3.5 text-sm text-slate-400">{listsLoading ? 'Loading saved lists…' : 'No saved smart lists in this workspace.'}</div>
+                <div className="rounded-xl border border-dashed border-line px-4 py-3.5 text-sm text-slate-400">{listsLoading ? 'Loading saved lists...' : 'No saved smart lists in this workspace.'}</div>
               ) : (
                 <div className="flex flex-wrap gap-2.5">
                   {lists.map((l) => {
@@ -520,7 +713,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
                         className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold disabled:opacity-50 ${on ? 'border-brand bg-brand text-white shadow-sm' : 'border-line bg-white text-slate-600 hover:bg-surface'}`}>
                         {on ? <CheckCircle2 className="h-4 w-4" /> : <ListFilter className="h-4 w-4" />}
                         {l.name}
-                        <span className={`rounded-lg px-2 py-0.5 text-xs ${on ? 'bg-white/20' : 'bg-surface text-slate-500'}`}>{meta ? num(meta.count) : '…'}</span>
+                        <span className={`rounded-lg px-2 py-0.5 text-xs ${on ? 'bg-white/20' : 'bg-surface text-slate-500'}`}>{meta ? num(meta.count) : '...'}</span>
                       </button>
                     );
                   })}
@@ -534,9 +727,9 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
               <div className="mb-3 flex flex-wrap items-center gap-2.5">
                 <div className="relative min-w-[220px] flex-1">
                   <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name or property…" className="input w-full !py-3 pl-11 text-sm" />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search leads by name or property..." className="input w-full !py-3 pl-11 text-sm" />
                 </div>
-                <button className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-brand/30 bg-brand-light/40 px-4 py-3 text-sm font-semibold text-brand hover:bg-brand-light disabled:opacity-50" disabled={resolving || filtered.length === 0} onClick={selectAllMatching}>{resolving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {resolving ? 'Selecting…' : `Select all ${num(filtered.length)}`}</button>
+                <button className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-brand/30 bg-brand-light/40 px-4 py-3 text-sm font-semibold text-brand hover:bg-brand-light disabled:opacity-50" disabled={resolving || filtered.length === 0} onClick={selectAllMatching}>{resolving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} {resolving ? 'Selecting...' : `Select all ${num(filtered.length)}`}</button>
                 <button className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-line px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-surface" onClick={openImport}><Upload className="h-4 w-4" /> Import leads</button>
               </div>
               <div className="max-h-80 overflow-y-auto rounded-2xl border border-line">
@@ -568,11 +761,11 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
               <div className="grid gap-3 sm:grid-cols-2">
                 <button onClick={() => setDialMode('primary')} className={`rounded-2xl border-2 p-5 text-left transition ${dialMode === 'primary' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
                   <div className="flex items-center gap-2 text-base font-bold text-ink"><Phone className="h-5 w-5 text-brand" /> Primary number only</div>
-                  <div className="mt-1.5 text-sm text-slate-500">One call per lead — dials each lead's primary dialable number.</div>
+                  <div className="mt-1.5 text-sm text-slate-500">One call per lead - dials each lead's primary dialable number.</div>
                 </button>
                 <button onClick={() => setDialMode('all_numbers')} className={`rounded-2xl border-2 p-5 text-left transition ${dialMode === 'all_numbers' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
                   <div className="flex items-center gap-2 text-base font-bold text-ink"><PhoneOutgoing className="h-5 w-5 text-brand" /> All numbers on each lead</div>
-                  <div className="mt-1.5 text-sm text-slate-500">Dials every dialable number — expands the total call count.</div>
+                  <div className="mt-1.5 text-sm text-slate-500">Dials every dialable number - expands the total call count.</div>
                 </button>
               </div>
             </div>
@@ -580,15 +773,15 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
             {/* Live summary */}
             <div className="flex items-center gap-2.5 rounded-2xl bg-brand-light/30 px-5 py-4 text-base font-bold text-ink">
               <Users className="h-5 w-5 text-brand" />
-              {num(selected.size)} lead{selected.size === 1 ? '' : 's'} selected · ~{num(estimatedCalls)} call{estimatedCalls === 1 ? '' : 's'} <span className="text-sm font-normal text-slate-500">({dialMode === 'all_numbers' ? 'all numbers' : 'primary only'})</span>{leadsLoading ? ' · loading…' : ''}
+              {num(selected.size)} lead{selected.size === 1 ? '' : 's'} selected - ~{num(estimatedCalls)} call{estimatedCalls === 1 ? '' : 's'} <span className="text-sm font-normal text-slate-500">({dialMode === 'all_numbers' ? 'all numbers' : 'primary only'})</span>{leadsLoading ? ' - loading...' : ''}
             </div>
           </div>
         )}
 
         {step === 3 && (
           <div className="space-y-5">
-            <div><label className="mb-2 block text-base font-bold text-ink">Campaign name {invalidField === 'name' && <span className="ml-1 text-sm font-semibold text-red-600">— required</span>}</label>
-              <input ref={nameRef} autoFocus className={`input !py-3.5 text-base ${invalidField === 'name' ? 'border-red-400 ring-2 ring-red-200 focus:border-red-400' : ''}`} value={name} onChange={(e) => { setName(e.target.value); if (invalidField === 'name') setInvalidField(''); }} placeholder="e.g. Miami Off-Market — August" />
+            <div><label className="mb-2 block text-base font-bold text-ink">Campaign name {invalidField === 'name' && <span className="ml-1 text-sm font-semibold text-red-600">- required</span>}</label>
+              <input ref={nameRef} autoFocus className={`input !py-3.5 text-base ${invalidField === 'name' ? 'border-red-400 ring-2 ring-red-200 focus:border-red-400' : ''}`} value={name} onChange={(e) => { setName(e.target.value); if (invalidField === 'name') setInvalidField(''); }} placeholder="e.g. Miami Off-Market - August" />
               {invalidField === 'name'
                 ? <p className="mt-2 flex items-center gap-1.5 text-sm font-medium text-red-600"><AlertTriangle className="h-4 w-4" /> Give your campaign a name so you can find it later.</p>
                 : <p className="mt-2 text-sm text-slate-500">This is how the campaign appears in your dashboard and reports.</p>}</div>
@@ -611,7 +804,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
                 </button>
                 <button type="button" onClick={() => setLaunchMode('schedule')} className={`rounded-2xl border-2 p-4 text-left transition ${launchMode === 'schedule' ? 'border-brand bg-brand-light/40 shadow-sm' : 'border-line hover:bg-surface'}`}>
                   <div className="flex items-center gap-2 text-base font-bold text-ink"><Clock className="h-5 w-5 text-brand" /> Schedule for later</div>
-                  <div className="mt-1.5 text-sm text-slate-500">Pick a future date &amp; time — it starts automatically then.</div>
+                  <div className="mt-1.5 text-sm text-slate-500">Pick a future date &amp; time - it starts automatically then.</div>
                 </button>
               </div>
               {launchMode === 'schedule' && (
@@ -626,7 +819,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
                   ) : scheduleAt && !startInWindow ? (
                     <p className="text-sm text-slate-500">Held until {new Date(scheduleAt).toLocaleString()}. That moment is outside the calling window below, so dialing begins at the next open window after it.</p>
                   ) : (
-                    <p className="text-sm text-slate-500">{scheduleAt ? `Starts ${new Date(scheduleAt).toLocaleString()}, then dials inside the calling window below.` : 'Choose when the campaign should begin. It stays idle until then, then starts on its own inside the calling window — you can cancel or launch it early anytime.'}</p>
+                    <p className="text-sm text-slate-500">{scheduleAt ? `Starts ${new Date(scheduleAt).toLocaleString()}, then dials inside the calling window below.` : 'Choose when the campaign should begin. It stays idle until then, then starts on its own inside the calling window - you can cancel or launch it early anytime.'}</p>
                   )}
                 </div>
               )}
@@ -635,7 +828,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
             {/* Calling window: the hours + weekdays calls are allowed to go out (per lead's local time). */}
             <div className={`rounded-2xl border p-4 ${invalidField === 'schedule' && !windowValid ? 'border-red-300 bg-red-50/40' : 'border-line'}`}>
               <div className="mb-1 text-base font-bold text-ink">Calling window</div>
-              <p className="mb-3 text-sm text-slate-500">Calls only go out during these hours, on the days you pick — measured in each lead's own local time. Default is 9:00 AM–8:00 PM, every day.</p>
+              <p className="mb-3 text-sm text-slate-500">Calls only go out during these hours, on the days you pick - measured in each lead's own local time. Default is 9:00 AM-8:00 PM, every day.</p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Start time</label>
@@ -680,7 +873,7 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
                 )}
               </div>
               {windowValid && (
-                <p className="mt-3 text-sm text-slate-500">Calls go out <span className="font-semibold text-ink">{hourLabel(windowStart)}–{hourLabel(windowEnd)}</span> on <span className="font-semibold text-ink">{windowDays.size === 7 ? 'every day' : [...windowDays].sort((a, b) => a - b).map((i) => DOW[i]).join(', ')}</span>, per lead's local time.</p>
+                <p className="mt-3 text-sm text-slate-500">Calls go out <span className="font-semibold text-ink">{hourLabel(windowStart)}-{hourLabel(windowEnd)}</span> on <span className="font-semibold text-ink">{windowDays.size === 7 ? 'every day' : [...windowDays].sort((a, b) => a - b).map((i) => DOW[i]).join(', ')}</span>, per lead's local time.</p>
               )}
             </div>
 
@@ -692,16 +885,16 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
             {/* Pre-flight gate */}
             {preflightLoading ? (
-              <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Checking the agent's numbers and dialer credit…</div>
+              <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Checking the agent's numbers and dialer credit...</div>
             ) : preflight && !preflightOk ? (
               <div className={`rounded-lg border p-3 text-sm ${invalidField === 'preflight' ? 'border-red-400 bg-red-50 ring-2 ring-red-200' : 'border-red-200 bg-red-50'}`}>
                 <div className="flex items-center gap-1.5 font-semibold text-red-700"><AlertTriangle className="h-4 w-4" /> Can't launch yet</div>
                 <ul className="mt-1.5 space-y-1 text-xs text-red-600">
-                  {(preflight.issues || ['This agent has no dialable numbers assigned.']).map((iss: string, i: number) => <li key={i} className="flex gap-1.5"><span>•</span> {iss}</li>)}
+                  {(preflight.issues || ['This agent has no dialable numbers assigned.']).map((iss: string, i: number) => <li key={i} className="flex gap-1.5"><span>-</span> {iss}</li>)}
                 </ul>
               </div>
             ) : preflight && preflightOk ? (
-              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Ready — {num(preflight.number_count || (preflight.numbers || []).length)} number{(preflight.number_count || (preflight.numbers || []).length) === 1 ? '' : 's'} assigned, agent reachable.</div>
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Ready - {num(preflight.number_count || (preflight.numbers || []).length)} number{(preflight.number_count || (preflight.numbers || []).length) === 1 ? '' : 's'} assigned, agent reachable.</div>
             ) : null}
           </div>
         )}
@@ -760,7 +953,7 @@ function LaunchOverlay({ step, scheduled, calls, name }: { step: number; schedul
           })}
         </div>
 
-        <p className="mt-5 text-xs text-slate-400">{scheduled ? 'Almost done — saving your schedule.' : `Placing ~${num(calls)} call${calls === 1 ? '' : 's'}. This only takes a moment — please don't close this window.`}</p>
+        <p className="mt-5 text-xs text-slate-400">{scheduled ? 'Almost done - saving your schedule.' : `Placing ~${num(calls)} call${calls === 1 ? '' : 's'}. This only takes a moment - please don't close this window.`}</p>
       </div>
     </div>
   );
@@ -772,12 +965,12 @@ function DialingPolicyCard() {
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
       <div className="mb-2 flex items-center gap-2 text-sm font-bold text-ink"><Timer className="h-4 w-4 text-brand" /> Dialing policy</div>
       <ul className="space-y-1 text-xs text-slate-600">
-        <li className="flex gap-2"><span className="text-brand">•</span> Calls are paced automatically — about <span className="font-semibold text-ink">1 call every 15 seconds</span>.</li>
-        <li className="flex gap-2"><span className="text-brand">•</span> Dialing <span className="font-semibold text-ink">rotates across the agent's assigned numbers</span> to stay healthy.</li>
-        <li className="flex gap-2"><span className="text-brand">•</span> Each number places at most <span className="font-semibold text-ink">100 calls per day</span>.</li>
-        <li className="flex gap-2"><span className="text-brand">•</span> Calls only go out inside the <span className="font-semibold text-ink">calling window you set above</span> (hours + days), in the lead's local time.</li>
-        <li className="flex gap-2"><span className="text-brand">•</span> Leads are dialed <span className="font-semibold text-ink">East Coast first, then westward</span> — by area code, so each person is reached during their own local hours.</li>
-        <li className="flex gap-2"><span className="text-brand">•</span> If every number is maxed for the day it <span className="font-semibold text-ink">auto-pauses and resumes the next morning</span> — no action needed.</li>
+        <li className="flex gap-2"><span className="text-brand">-</span> Calls are paced automatically - about <span className="font-semibold text-ink">1 call every 15 seconds</span>.</li>
+        <li className="flex gap-2"><span className="text-brand">-</span> Dialing <span className="font-semibold text-ink">rotates across the agent's assigned numbers</span> to stay healthy.</li>
+        <li className="flex gap-2"><span className="text-brand">-</span> Each number places at most <span className="font-semibold text-ink">100 calls per day</span>.</li>
+        <li className="flex gap-2"><span className="text-brand">-</span> Calls only go out inside the <span className="font-semibold text-ink">calling window you set above</span> (hours + days), in the lead's local time.</li>
+        <li className="flex gap-2"><span className="text-brand">-</span> Leads are dialed <span className="font-semibold text-ink">East Coast first, then westward</span> - by area code, so each person is reached during their own local hours.</li>
+        <li className="flex gap-2"><span className="text-brand">-</span> If every number is maxed for the day it <span className="font-semibold text-ink">auto-pauses and resumes the next morning</span> - no action needed.</li>
       </ul>
     </div>
   );
@@ -785,7 +978,7 @@ function DialingPolicyCard() {
 
 /* ---------------- Projection panel (renders defensively) ---------------- */
 function ProjectionPanel({ loading, error, projection, fallbackCalls }: { loading: boolean; error: string; projection: any; fallbackCalls: number }) {
-  if (loading) return <div className="flex items-center gap-2 rounded-xl border border-brand/20 bg-brand-light/20 px-4 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Estimating calls, cost and duration…</div>;
+  if (loading) return <div className="flex items-center gap-2 rounded-xl border border-brand/20 bg-brand-light/20 px-4 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Estimating calls, cost and duration...</div>;
 
   const calls = projection?.estimated_calls ?? fallbackCalls;
   const dur = projection?.estimated_duration || {};
@@ -798,14 +991,14 @@ function ProjectionPanel({ loading, error, projection, fallbackCalls }: { loadin
 
   return (
     <div className="rounded-xl border border-brand/30 bg-brand-light/20 p-4">
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand"><PhoneOutgoing className="h-3.5 w-3.5" /> Projection <span className="font-normal text-slate-400">· estimate</span></div>
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand"><PhoneOutgoing className="h-3.5 w-3.5" /> Projection <span className="font-normal text-slate-400">- estimate</span></div>
       <div className="text-lg font-extrabold text-ink">This campaign will place ~{num(calls)} call{calls === 1 ? '' : 's'}.</div>
       {dur.human && <div className="mt-1 flex items-center gap-1.5 text-sm text-slate-600"><Clock className="h-3.5 w-3.5 text-slate-400" /> Estimated to finish in <span className="font-semibold text-ink">{dur.human}</span>.</div>}
       {error ? (
-        <div className="mt-2 text-xs text-amber-600">Cost + timing estimate is unavailable right now — the campaign will still launch.</div>
+        <div className="mt-2 text-xs text-amber-600">Cost + timing estimate is unavailable right now - the campaign will still launch.</div>
       ) : hasCost ? (
         <div className="mt-2 text-sm text-slate-600">
-          Estimated cost: <span className="font-semibold text-ink">{low != null ? fmt.money(low) : '—'}–{high != null ? fmt.money(high) : '—'}</span>{blended != null && <> (≈<span className="font-semibold text-ink">{fmt.money(blended)}</span>)</>}
+          Estimated cost: <span className="font-semibold text-ink">{low != null ? fmt.money(low) : '-'}-{high != null ? fmt.money(high) : '-'}</span>{blended != null && <> (~<span className="font-semibold text-ink">{fmt.money(blended)}</span>)</>}
           <div className="mt-1 text-[11px] text-slate-400">{cr.note || 'A range from all-no-answer (cheapest) to all-connected (priciest), based on your calling history. Final cost depends on real outcomes.'}</div>
         </div>
       ) : null}
