@@ -93,10 +93,10 @@ export const PROPERTY_TYPES = [
 // What the listing is for. A property record can sit on either side of a deal, so the intent
 // pairs with the party it's associated with (seller/landlord = we hold it; buyer/tenant = we want it).
 export const LISTING_INTENTS = [
-  { v: 'for_sale', label: 'For Sale', hint: 'We are selling this — associate a seller.' },
-  { v: 'for_lease', label: 'For Lease', hint: 'We are leasing this out — associate a landlord.' },
-  { v: 'to_buy', label: 'To Buy', hint: 'A buyer is looking for this — associate a buyer.' },
-  { v: 'to_rent', label: 'To Rent', hint: 'A tenant is looking for this — associate a tenant.' },
+  { v: 'for_sale', label: 'For Sale', hint: 'We are selling this - associate a seller.' },
+  { v: 'for_lease', label: 'For Lease', hint: 'We are leasing this out - associate a landlord.' },
+  { v: 'to_buy', label: 'To Buy', hint: 'A buyer is looking for this - associate a buyer.' },
+  { v: 'to_rent', label: 'To Rent', hint: 'A tenant is looking for this - associate a tenant.' },
 ];
 
 export const PARTY_ROLES = [
@@ -104,7 +104,7 @@ export const PARTY_ROLES = [
 ];
 
 // Extended specification fields stored inside the `specs` jsonb (so we don't need a column each).
-// kind drives the input: money → comma-formatted $, percent → %, select → dropdown, number/text plain.
+// kind drives the input: money -> comma-formatted $, percent -> %, select -> dropdown, number/text plain.
 export type SpecKind = 'number' | 'money' | 'percent' | 'text' | 'select';
 export const SPEC_FIELDS: { key: string; label: string; kind: SpecKind; icon: string; options?: string[] }[] = [
   { key: 'lot_acres', label: 'Lot (acres)', kind: 'number', icon: 'Trees' },
@@ -150,4 +150,8 @@ export const listings = {
   setBranding: (body: Partial<Branding>) => call('setBranding', { method: 'POST', body }),
   getProfile: () => call('profile', {}),
   setProfile: (body: Partial<Profile>) => call('setProfile', { method: 'POST', body }),
+  // Upload a logo / profile photo to the public media bucket. `data` is a data: URL (base64).
+  // Returns { url } - store that in logo_url / photo_url.
+  uploadImage: (body: { data: string; kind: 'logo' | 'photo'; content_type?: string }) =>
+    call('image_upload', { method: 'POST', body }) as Promise<{ url: string; path: string }>,
 };
