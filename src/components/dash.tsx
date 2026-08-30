@@ -345,7 +345,7 @@ export function AudioPlayer({ src, compact, onTime, seekRef }: { src?: string | 
 
 /* ------------------------------------------------------------------ column toggle + sort */
 
-export type ColumnDef = { key: string; label: string; required?: boolean; sortKey?: string; align?: 'left' | 'right' };
+export type ColumnDef = { key: string; label: string; required?: boolean; sortKey?: string; align?: 'left' | 'right'; filterType?: 'text' | 'number' | 'select'; filterOptions?: { value: string; label: string }[] };
 export type SortState = { by: string; dir: 'asc' | 'desc' };
 
 export function useColumnVisibility(pageKey: string, columns: ColumnDef[]) {
@@ -457,7 +457,7 @@ export function SavedViews<T>({
 // One condition in the layered stack. `key` is a column key resolvable by the table's getValue.
 export type FilterOp =
   | 'contains' | 'not_contains' | 'equals' | 'starts' | 'ends'
-  | 'empty' | 'not_empty' | 'gt' | 'lt';
+  | 'empty' | 'not_empty' | 'gt' | 'lt' | 'between' | 'in';
 export type ColumnFilterCond = { id: string; key: string; op: FilterOp; value: string };
 export type ColumnFilterState = { combinator: 'AND' | 'OR'; conds: ColumnFilterCond[] };
 
@@ -466,11 +466,26 @@ const VALUELESS_OPS: FilterOp[] = ['empty', 'not_empty'];
 const OP_LABEL: Record<FilterOp, string> = {
   contains: 'contains', not_contains: 'does not contain', equals: 'is exactly',
   starts: 'starts with', ends: 'ends with', empty: 'is empty', not_empty: 'is not empty',
-  gt: '> (greater)', lt: '< (less)',
+  gt: 'more than', lt: 'less than', between: 'between', in: 'is any of',
 };
-const OP_ORDER: FilterOp[] = ['contains', 'not_contains', 'equals', 'starts', 'ends', 'gt', 'lt', 'empty', 'not_empty'];
+// The operators offered per column type. Text = string ops, number = numeric range/compare,
+// select = pick from known values (multi-select "is any of").
+export const OPS_BY_TYPE: Record<'text' | 'number' | 'select', FilterOp[]> = {
+  text: ['contains', 'not_contains', 'equals', 'starts', 'ends', 'empty', 'not_empty'],
+  number: ['between', 'gt', 'lt', 'equals', 'empty', 'not_empty'],
+  select: ['in', 'not_empty', 'empty'],
+};
+export const defaultOpFor = (t?: 'text' | 'number' | 'select'): FilterOp => (t === 'number' ? 'between' : t === 'select' ? 'in' : 'contains');
+const stripNum = (s: any) => { const n = Number(String(s ?? '').replace(/[^0-9.\-]/g, '')); return Number.isNaN(n) ? null : n; };
+const parseIn = (v: string): string[] => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a.map(String) : []; } catch { return []; } };
 
-const condActive = (c: ColumnFilterCond) => !!c.key && (VALUELESS_OPS.includes(c.op) || c.value.trim() !== '');
+const condActive = (c: ColumnFilterCond) => {
+  if (!c.key) return false;
+  if (VALUELESS_OPS.includes(c.op)) return true;
+  if (c.op === 'between') { const [a, b] = c.value.split('|'); return (a && a.trim() !== '') || (b && b.trim() !== ''); }
+  if (c.op === 'in') return parseIn(c.value).length > 0;
+  return c.value.trim() !== '';
+};
 
 // Evaluate one condition against a cell value produced by the table's getValue().
 function evalCond(cell: string | number, c: ColumnFilterCond): boolean {
@@ -479,16 +494,28 @@ function evalCond(cell: string | number, c: ColumnFilterCond): boolean {
   switch (c.op) {
     case 'contains': return s.includes(v);
     case 'not_contains': return !s.includes(v);
-    case 'equals': return s === v;
+    case 'equals': { const nb = stripNum(c.value); const na = stripNum(cell); if (nb != null && na != null) return na === nb; return s === v; }
     case 'starts': return s.startsWith(v);
     case 'ends': return s.endsWith(v);
     case 'empty': return s === '';
     case 'not_empty': return s !== '';
     case 'gt': case 'lt': {
-      const na = Number(cell), nb = Number(c.value);
-      const numeric = !Number.isNaN(na) && !Number.isNaN(nb) && c.value.trim() !== '';
-      const cmp = numeric ? (na - nb) : s.localeCompare(v);
+      const na = stripNum(cell), nb = stripNum(c.value);
+      const numeric = na != null && nb != null;
+      const cmp = numeric ? (na! - nb!) : s.localeCompare(v);
       return c.op === 'gt' ? cmp > 0 : cmp < 0;
+    }
+    case 'between': {
+      const n = stripNum(cell); if (n == null) return false;
+      const [aRaw, bRaw] = c.value.split('|');
+      const a = stripNum(aRaw), b = stripNum(bRaw);
+      if (a != null && n < a) return false;
+      if (b != null && n > b) return false;
+      return true;
+    }
+    case 'in': {
+      const arr = parseIn(c.value); if (!arr.length) return true;
+      return arr.some((x) => { const xx = String(x).toLowerCase(); return s === xx || s.includes(xx); });
     }
     default: return true;
   }
@@ -540,22 +567,47 @@ export function ColumnFilterStack({
       </div>
 
       {conds.length === 0 ? (
-        <div className="text-xs text-slate-400">No column filters. Add one to search a specific field — stack several and combine them with AND / OR.</div>
+        <div className="text-xs text-slate-400">No column filters. Add one to search a specific field — pick a column and it offers the right kind of filter (text search, a number range, or a pick-list). Stack several and combine with AND / OR.</div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2.5">
           {conds.map((c, i) => {
-            const valueless = VALUELESS_OPS.includes(c.op);
+            const col = columns.find((cc) => cc.key === c.key);
+            const ftype = (col?.filterType || 'text') as 'text' | 'number' | 'select';
+            const ops = OPS_BY_TYPE[ftype];
+            const op = ops.includes(c.op) ? c.op : ops[0];
+            const valueless = VALUELESS_OPS.includes(op);
+            const withCommas = (s: string) => { if (s == null || s === '') return ''; const [ii, dd] = String(s).split('.'); return ii.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (dd != null ? '.' + dd : ''); };
+            const onlyNum = (s: string) => s.replace(/[^0-9.]/g, '');
+            const [minRaw, maxRaw] = (c.value || '').split('|');
+            let valueEl: any;
+            if (valueless) {
+              valueEl = null;
+            } else if (ftype === 'select') {
+              valueEl = <MultiSelect options={col?.filterOptions || []} value={parseIn(c.value)} onChange={(arr) => update(c.id, { value: JSON.stringify(arr) })} placeholder="Choose one or more…" width={280} />;
+            } else if (ftype === 'number' && op === 'between') {
+              valueEl = (
+                <div className="inline-flex items-center gap-1.5">
+                  <input inputMode="decimal" value={withCommas(minRaw || '')} onChange={(e) => update(c.id, { value: `${onlyNum(e.target.value)}|${maxRaw || ''}` })} placeholder="min" title="Numbers only — commas optional (e.g. 250,000)" className="input !py-1.5 w-24 text-sm tabular-nums" />
+                  <span className="text-xs text-slate-400">to</span>
+                  <input inputMode="decimal" value={withCommas(maxRaw || '')} onChange={(e) => update(c.id, { value: `${minRaw || ''}|${onlyNum(e.target.value)}` })} placeholder="max" title="Numbers only — commas optional (e.g. 750,000)" className="input !py-1.5 w-24 text-sm tabular-nums" />
+                </div>
+              );
+            } else if (ftype === 'number') {
+              valueEl = <input inputMode="decimal" value={withCommas(c.value)} onChange={(e) => update(c.id, { value: onlyNum(e.target.value) })} placeholder="e.g. 250,000" title="Numbers only — commas optional" className="input !py-1.5 w-32 text-sm tabular-nums" />;
+            } else {
+              valueEl = <input value={c.value} onChange={(e) => update(c.id, { value: e.target.value })} placeholder="type to search…" className="input !py-1.5 text-sm" />;
+            }
             return (
               <div key={c.id} className="flex flex-wrap items-center gap-2">
                 <span className="w-9 shrink-0 text-[10px] font-bold uppercase text-slate-400">{i === 0 ? 'Where' : combinator}</span>
-                <select value={c.key} onChange={(e) => update(c.id, { key: e.target.value })} className="input !py-1.5 text-sm">
+                <select value={c.key} onChange={(e) => { const nc = columns.find((cc) => cc.key === e.target.value); update(c.id, { key: e.target.value, op: defaultOpFor(nc?.filterType), value: '' }); }} className="input !py-1.5 text-sm">
                   <option value="">Select column…</option>
-                  {columns.map((col) => <option key={col.key} value={col.key}>{col.label}</option>)}
+                  {columns.map((cc) => <option key={cc.key} value={cc.key}>{cc.label}</option>)}
                 </select>
-                <select value={c.op} onChange={(e) => update(c.id, { op: e.target.value as FilterOp })} className="input !py-1.5 text-sm">
-                  {OP_ORDER.map((op) => <option key={op} value={op}>{OP_LABEL[op]}</option>)}
+                <select value={op} onChange={(e) => update(c.id, { op: e.target.value as FilterOp, value: '' })} className="input !py-1.5 text-sm" disabled={!c.key}>
+                  {ops.map((o) => <option key={o} value={o}>{OP_LABEL[o]}</option>)}
                 </select>
-                <input value={valueless ? '' : c.value} disabled={valueless} onChange={(e) => update(c.id, { value: e.target.value })} placeholder={valueless ? '—' : 'value'} className="input !py-1.5 text-sm disabled:bg-surface disabled:opacity-50" />
+                {valueEl}
                 <button onClick={() => removeCond(c.id)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"><X className="h-3.5 w-3.5" /></button>
               </div>
             );

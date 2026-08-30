@@ -98,6 +98,7 @@ export default function SellerContacts() {
   const [commFrom, setCommFrom] = useState('');
   const [commTo, setCommTo] = useState('');
   const [commDir, setCommDir] = useState(''); // '' | 'inbound' | 'outbound' | 'none' (never contacted)
+  const [commPreset, setCommPreset] = useState('any'); // any | today | 7d | 30d | 90d | month | custom
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -354,6 +355,10 @@ export default function SellerContacts() {
   // Inclusive [from 00:00, to 23:59:59.999] epoch bounds for the last-interaction date filter.
   const commFromMs = useMemo(() => (commFrom ? new Date(commFrom + 'T00:00:00').getTime() : null), [commFrom]);
   const commToMs = useMemo(() => (commTo ? new Date(commTo + 'T23:59:59.999').getTime() : null), [commTo]);
+  // The last-interaction map loads asynchronously. Until it arrives, a date/direction filter would
+  // (wrongly) match nothing — so we only apply those once the map is present. "Never contacted" is
+  // safe to evaluate immediately (absence of a call is meaningful even with an empty map).
+  const commLoaded = useMemo(() => Object.keys(lastCalls).length > 0, [lastCalls]);
 
   const preFiltered = useMemo(() => records.filter((r) => {
     if (pipelineId && String(r.pipeline_id) !== pipelineId) return false;
@@ -362,7 +367,8 @@ export default function SellerContacts() {
     if (verified === 'no' && r.hasVerified) return false;
     if (tagFilter.length && !tagFilter.every((t) => (r.tags || []).includes(t))) return false;
     // Last-interaction filters (most recent call for the record).
-    if (commDir || commFromMs != null || commToMs != null) {
+    const commActive = commDir === 'none' || ((commDir || commFromMs != null || commToMs != null) && commLoaded);
+    if (commActive) {
       const lc = lastCalls[r.lead_id];
       if (commDir === 'none') { if (lc) return false; }
       else {
@@ -375,7 +381,7 @@ export default function SellerContacts() {
       }
     }
     return true;
-  }), [records, pipelineId, stageId, verified, tagFilter, lastCalls, commDir, commFromMs, commToMs]);
+  }), [records, pipelineId, stageId, verified, tagFilter, lastCalls, commLoaded, commDir, commFromMs, commToMs]);
 
   const getValue = useCallback((r: any, key: string): string | number => {
     switch (key) {
@@ -403,9 +409,23 @@ export default function SellerContacts() {
   // Include a hidden "__phones" column so useClientTable's search also scans phone digits.
   const searchColumns = useMemo<ColumnDef[]>(() => [...visibleColumns, { key: '__phones', label: '' }], [visibleColumns]);
 
-  // Per-column filter stack (GHL-style): choose any column, an operator, a value; stack several and
-  // combine them with AND / OR. Filterable set = every column except the audio-only Recording cell.
-  const filterCols = useMemo<ColumnDef[]>(() => visibleColumns.filter((c) => c.key !== 'last_rec'), [visibleColumns]);
+  // Per-column filter stack (GHL-style): choose any column, get the RIGHT kind of filter for it —
+  // a number range (with comma formatting) for prices/counts, a pick-list for stage/pipeline/tags/
+  // disposition, and typed search for names/emails/addresses. Recording (audio) is not filterable.
+  const dispoOptions = useMemo(() => {
+    const s = new Set<string>();
+    Object.values(lastCalls).forEach((lc: any) => { if (lc?.disposition) s.add(String(lc.disposition)); });
+    return Array.from(s).sort().map((v) => ({ value: v, label: humanizeDisposition(v) }));
+  }, [lastCalls]);
+  const NUMBER_COLS = useMemo(() => new Set(['numbers', 'deal_price', 'last_duration']), []);
+  const filterCols = useMemo<ColumnDef[]>(() => visibleColumns.filter((c) => c.key !== 'last_rec').map((c) => {
+    if (NUMBER_COLS.has(c.key)) return { ...c, filterType: 'number' as const };
+    if (c.key === 'last_disp') return { ...c, filterType: 'select' as const, filterOptions: dispoOptions };
+    if (c.key === 'crm_stage') return { ...c, filterType: 'select' as const, filterOptions: stages.map((s: any) => ({ value: s.name, label: s.name })) };
+    if (c.key === 'pipeline') return { ...c, filterType: 'select' as const, filterOptions: pipelines.map((p: any) => ({ value: p.name, label: p.name })) };
+    if (c.key === 'tags') return { ...c, filterType: 'select' as const, filterOptions: allTags };
+    return { ...c, filterType: 'text' as const };
+  }), [visibleColumns, NUMBER_COLS, dispoOptions, stages, pipelines, allTags]);
   const colFilters = useColumnFilters<any>(getValue);
 
   const { rows, search, setSearch, sort, setSort, isVisible, toggle } = useClientTable<any>({
@@ -420,7 +440,25 @@ export default function SellerContacts() {
   const orderedIds = useMemo(() => rows.map((r) => r.lead_id), [rows]);
   // Count of applied filters (excludes the always-visible toolbar search) → badge on the Filters button.
   const activeFilterCount = (pipelineId ? 1 : 0) + (stageId ? 1 : 0) + (verified ? 1 : 0) + tagFilter.length + ((commDir || commFrom || commTo) ? 1 : 0) + colFilters.activeCount;
-  const clearAllFilters = () => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setCommFrom(''); setCommTo(''); setCommDir(''); colFilters.clear(); };
+  const clearAllFilters = () => { setPipelineId(''); setStageId(''); setVerified(''); setTagFilter([]); setCommFrom(''); setCommTo(''); setCommDir(''); setCommPreset('any'); colFilters.clear(); };
+
+  // Relative date presets for "last interaction" — pick a window instead of typing two dates.
+  const applyCommPreset = (p: string) => {
+    setCommPreset(p);
+    if (p === 'custom') return; // keep whatever From/To are; user edits them directly
+    if (p === 'any') { setCommFrom(''); setCommTo(''); return; }
+    const ymd = (d: Date) => { const z = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`; };
+    const now = new Date(); let from = new Date(now);
+    if (p === '7d') from.setDate(now.getDate() - 6);
+    else if (p === '30d') from.setDate(now.getDate() - 29);
+    else if (p === '90d') from.setDate(now.getDate() - 89);
+    else if (p === 'month') from = new Date(now.getFullYear(), now.getMonth(), 1);
+    setCommFrom(ymd(from)); setCommTo(ymd(now));
+  };
+  const COMM_PRESETS = [
+    { v: 'any', label: 'Any time' }, { v: 'today', label: 'Today' }, { v: '7d', label: 'Last 7 days' },
+    { v: '30d', label: 'Last 30 days' }, { v: '90d', label: 'Last 90 days' }, { v: 'month', label: 'This month' }, { v: 'custom', label: 'Custom range…' },
+  ];
 
   // KPI roll-ups. When any filter/search is active, the top numbers recompute against the FILTERED
   // set (`rows`) and show "of N total", so the counts move live as you filter. Otherwise they show
@@ -553,6 +591,13 @@ export default function SellerContacts() {
       <div className="card mb-4 flex flex-wrap items-center gap-2 p-2.5">
         <ToolbarButton icon={Filter} label="Filters" count={activeFilterCount} active={activeFilterCount > 0} onClick={() => setShowFilters(true)} />
         {activeFilterCount > 0 && <button className="text-xs font-semibold text-slate-400 hover:text-red-600" onClick={clearAllFilters}>Clear</button>}
+        {/* Quick "last interaction" date window, surfaced on the top bar for fast access. */}
+        <div className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white pl-2.5 pr-1" title="Filter by each record's most recent call date">
+          <History className="h-3.5 w-3.5 text-slate-400" />
+          <select value={commPreset} onChange={(e) => applyCommPreset(e.target.value)} className="border-0 bg-transparent py-1.5 pr-6 text-sm font-medium text-slate-600 outline-none focus:ring-0">
+            {COMM_PRESETS.map((p) => <option key={p.v} value={p.v}>{p.v === 'any' ? 'Last interaction: any' : p.label}</option>)}
+          </select>
+        </div>
         <span className="text-xs text-slate-500">{total.toLocaleString()} record{total === 1 ? '' : 's'}</span>
         <div className="relative ml-auto w-full sm:w-auto">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
@@ -604,14 +649,21 @@ export default function SellerContacts() {
               <option value="inbound">Inbound (they called)</option>
               <option value="none">Never contacted</option>
             </select>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="text-xs font-semibold text-slate-500">From
-                <input type="date" value={commFrom} onChange={(e) => setCommFrom(e.target.value)} disabled={commDir === 'none'} className="input mt-1 w-full !py-1.5 text-sm disabled:opacity-50" />
-              </label>
-              <label className="text-xs font-semibold text-slate-500">To
-                <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)} disabled={commDir === 'none'} className="input mt-1 w-full !py-1.5 text-sm disabled:opacity-50" />
-              </label>
-            </div>
+            <label className="mb-1 block text-xs font-semibold text-slate-500">When</label>
+            <select value={commPreset} onChange={(e) => applyCommPreset(e.target.value)} disabled={commDir === 'none'} className="input mb-2 w-full !py-1.5 text-sm disabled:opacity-50">
+              {COMM_PRESETS.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
+            </select>
+            {commPreset === 'custom' && (
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs font-semibold text-slate-500">From
+                  <input type="date" value={commFrom} onChange={(e) => { setCommFrom(e.target.value); }} disabled={commDir === 'none'} className="input mt-1 w-full !py-1.5 text-sm disabled:opacity-50" />
+                </label>
+                <label className="text-xs font-semibold text-slate-500">To
+                  <input type="date" value={commTo} onChange={(e) => { setCommTo(e.target.value); }} disabled={commDir === 'none'} className="input mt-1 w-full !py-1.5 text-sm disabled:opacity-50" />
+                </label>
+              </div>
+            )}
+            <p className="mt-1.5 text-[11px] text-slate-400">Filters by each record's most recent call. “Any interaction” + a window shows records last contacted in that window; “Never contacted” shows records with no calls.</p>
           </div>
 
           <div className="border-t border-line pt-4">
