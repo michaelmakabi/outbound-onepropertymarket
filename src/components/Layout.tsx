@@ -8,14 +8,14 @@ import NotificationBell from './NotificationBell';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare, Layers, Phone, Home,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare, Layers, Phone, Home, CalendarDays,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
 function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const { workspaces, active, activeName, viewAll, setActive } = useWorkspace();
   const [open, setOpen] = useState(false);
-  if (workspaces.length <= 1) return null; // single tenant → nothing to switch
+  if (workspaces.length <= 1) return null; // single tenant -> nothing to switch
   return (
     <div className="relative mb-3">
       <button onClick={() => setOpen((o) => !o)} title="Switch workspace"
@@ -54,6 +54,7 @@ const NAV = [
   { to: '/pipelines', label: 'Pipelines', icon: Columns3 },
   { to: '/properties', label: 'Properties', icon: Home },
   { to: '/campaigns', label: 'Campaigns', icon: Radio },
+  { to: '/calendar', label: 'Calendar', icon: CalendarDays },
   { to: '/phone-numbers', label: 'Phone Numbers', icon: Phone },
   { to: '/team', label: 'Team', icon: MessageSquare },
   { to: '/workspaces', label: 'Workspaces', icon: Building2, op: true },
@@ -150,7 +151,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         )}
       </nav>
       <div className="mt-3 border-t border-white/10 pt-3">
-        {/* Notification bell — present on every page for all users (desktop sidebar). */}
+        {/* Notification bell - present on every page for all users (desktop sidebar). */}
         <div className={`mb-2 flex items-center ${collapsed ? 'justify-center' : 'justify-between px-1'}`}>
           {!collapsed && <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notifications</span>}
           <NotificationBell variant="sidebar" panelClassName={collapsed ? 'fixed left-[72px] bottom-4' : 'fixed left-[248px] bottom-4'} />
