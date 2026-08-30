@@ -29,12 +29,14 @@ async function call(action: string, opts: { method?: string; params?: Record<str
 export type Property = {
   id: string; workspace: string; title: string;
   status: 'on_market' | 'off_market'; visibility: 'public' | 'private';
+  listing_intent: 'for_sale' | 'for_lease' | 'to_buy' | 'to_rent' | null;
   property_type: string | null;
   street: string | null; unit: string | null; city: string | null; state: string | null; zip: string | null; county: string | null;
   lat: number | null; lng: number | null;
   beds: number | null; baths: number | null; half_baths: number | null; sqft: number | null; lot_sqft: number | null;
   year_built: number | null; units: number | null; stories: number | null; parking: string | null; zoning: string | null;
-  headline: string | null; description: string | null;
+  headline: string | null; description: string | null; public_description: string | null; private_notes: string | null;
+  highlights: string[];
   acquisition_price: number | null; disposition_price: number | null; margin: number | null;
   media: { url: string; type: 'image' | 'video'; caption?: string }[];
   specs: Record<string, any>;
@@ -64,17 +66,67 @@ export type Profile = {
 export const PROPERTY_TYPES = [
   { v: 'single_family', label: 'Single Family' },
   { v: 'multi_family', label: 'Multi Family' },
+  { v: 'duplex', label: 'Duplex' },
+  { v: 'triplex', label: 'Triplex' },
+  { v: 'fourplex', label: 'Fourplex' },
+  { v: 'apartment', label: 'Apartment Building' },
   { v: 'condo', label: 'Condo' },
+  { v: 'co_op', label: 'Co-op' },
   { v: 'townhouse', label: 'Townhouse' },
-  { v: 'land', label: 'Land' },
-  { v: 'commercial', label: 'Commercial' },
+  { v: 'land', label: 'Land / Lot' },
   { v: 'mixed_use', label: 'Mixed Use' },
+  { v: 'commercial', label: 'Commercial' },
+  { v: 'retail', label: 'Retail' },
+  { v: 'office', label: 'Office' },
+  { v: 'industrial', label: 'Industrial' },
+  { v: 'warehouse', label: 'Warehouse' },
+  { v: 'hospitality', label: 'Hotel / Motel' },
+  { v: 'medical', label: 'Medical' },
+  { v: 'self_storage', label: 'Self Storage' },
+  { v: 'mobile_home', label: 'Mobile / Manufactured' },
+  { v: 'farm_ranch', label: 'Farm / Ranch' },
+  { v: 'new_construction', label: 'New Construction' },
+  { v: 'special_purpose', label: 'Special Purpose' },
   { v: 'other', label: 'Other' },
+];
+
+// What the listing is for. A property record can sit on either side of a deal, so the intent
+// pairs with the party it's associated with (seller/landlord = we hold it; buyer/tenant = we want it).
+export const LISTING_INTENTS = [
+  { v: 'for_sale', label: 'For Sale', hint: 'We are selling this — associate a seller.' },
+  { v: 'for_lease', label: 'For Lease', hint: 'We are leasing this out — associate a landlord.' },
+  { v: 'to_buy', label: 'To Buy', hint: 'A buyer is looking for this — associate a buyer.' },
+  { v: 'to_rent', label: 'To Rent', hint: 'A tenant is looking for this — associate a tenant.' },
 ];
 
 export const PARTY_ROLES = [
   'buyer', 'seller', 'tenant', 'landlord', 'broker', 'agent', 'vendor', 'attorney', 'owner_rep', 'lender', 'title', 'inspector', 'teammate', 'other',
 ];
+
+// Extended specification fields stored inside the `specs` jsonb (so we don't need a column each).
+// kind drives the input: money → comma-formatted $, percent → %, select → dropdown, number/text plain.
+export type SpecKind = 'number' | 'money' | 'percent' | 'text' | 'select';
+export const SPEC_FIELDS: { key: string; label: string; kind: SpecKind; icon: string; options?: string[] }[] = [
+  { key: 'lot_acres', label: 'Lot (acres)', kind: 'number', icon: 'Trees' },
+  { key: 'garage_spaces', label: 'Garage spaces', kind: 'number', icon: 'Car' },
+  { key: 'pool', label: 'Pool', kind: 'select', icon: 'Waves', options: ['', 'Yes', 'No'] },
+  { key: 'basement', label: 'Basement', kind: 'select', icon: 'Layers', options: ['', 'Full', 'Partial', 'Finished', 'None'] },
+  { key: 'heating', label: 'Heating', kind: 'text', icon: 'Flame' },
+  { key: 'cooling', label: 'Cooling', kind: 'text', icon: 'Snowflake' },
+  { key: 'roof', label: 'Roof', kind: 'text', icon: 'Home' },
+  { key: 'exterior', label: 'Exterior', kind: 'text', icon: 'Building' },
+  { key: 'flood_zone', label: 'Flood zone', kind: 'text', icon: 'Droplets' },
+  { key: 'apn', label: 'Parcel / APN', kind: 'text', icon: 'Hash' },
+  { key: 'hoa_fee', label: 'HOA (monthly)', kind: 'money', icon: 'Receipt' },
+  { key: 'taxes_annual', label: 'Taxes (annual)', kind: 'money', icon: 'Landmark' },
+  { key: 'gross_rent', label: 'Gross rent (monthly)', kind: 'money', icon: 'DollarSign' },
+  { key: 'noi', label: 'NOI (annual)', kind: 'money', icon: 'TrendingUp' },
+  { key: 'cap_rate', label: 'Cap rate', kind: 'percent', icon: 'Percent' },
+  { key: 'occupancy', label: 'Occupancy', kind: 'percent', icon: 'Users' },
+];
+
+// Public host for listing teaser pages (Phase 2 pages are served from here).
+export const PUBLIC_HOST = 'outbound.onepropertymarket.com';
 
 export const listings = {
   list: (params?: Record<string, any>) => call('list', { params }),

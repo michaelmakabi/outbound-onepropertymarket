@@ -5,7 +5,7 @@ import { listings, Property, Branding, Profile, PROPERTY_TYPES } from '../lib/li
 import { PageHeader, KpiCard, SectionCard, LoadingBlock, EmptyState, ToolbarButton, SlideOver } from '../components/dash';
 import {
   Building2, Plus, Search, MapPin, LayoutGrid, Map as MapIcon, Home, DollarSign, Globe, Lock,
-  SlidersHorizontal, X, Palette, UserCircle, Save, BedDouble, Bath, Ruler, Tag,
+  SlidersHorizontal, X, Palette, UserCircle, Save, BedDouble, Bath, Ruler, Tag, BadgeCheck,
 } from 'lucide-react';
 
 const money = (n: number | null | undefined) => (n == null ? '—' : '$' + Math.round(Number(n)).toLocaleString());
@@ -82,6 +82,26 @@ function Field({ label, value, onChange, placeholder, type = 'text' }: { label: 
   );
 }
 
+// Larger, cleaner field for the side panels (bigger tap target + optional icon/hint).
+function PInput({ label, value, onChange, placeholder, icon: Icon, hint, className = '' }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; icon?: any; hint?: string; className?: string }) {
+  return (
+    <label className={`flex flex-col gap-1.5 ${className}`}>
+      <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{Icon && <Icon className="h-3.5 w-3.5 text-slate-400" />}{label}</span>
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+        className="rounded-xl border border-line bg-white px-3.5 py-2.5 text-[15px] outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15" />
+      {hint && <span className="text-[11px] text-slate-400">{hint}</span>}
+    </label>
+  );
+}
+function PanelSection({ title, children }: { title: string; children: any }) {
+  return (
+    <div className="flex flex-col gap-3.5">
+      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{title}</div>
+      {children}
+    </div>
+  );
+}
+
 // ---- Branding editor (admin) ----
 function BrandingPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [b, setB] = useState<Branding | null>(null);
@@ -89,26 +109,39 @@ function BrandingPanel({ open, onClose }: { open: boolean; onClose: () => void }
   useEffect(() => { if (open) listings.getBranding().then((d: any) => setB(d.branding || {})).catch(() => setB({} as any)); }, [open]);
   const set = (k: keyof Branding, v: string) => setB((p) => ({ ...(p as any), [k]: v }));
   const save = async () => { if (!b) return; setSaving(true); try { await listings.setBranding(b); onClose(); } catch (e: any) { alert(e.message); } finally { setSaving(false); } };
+  const color = b?.primary_color && /^#?[0-9a-fA-F]{6}$/.test((b.primary_color || '').replace('#', '')) ? (b!.primary_color!.startsWith('#') ? b!.primary_color! : '#' + b!.primary_color) : '#0f766e';
   return (
-    <SlideOver open={open} onClose={onClose} title="Workspace branding" width="w-full sm:max-w-lg">
+    <SlideOver open={open} onClose={onClose} title="Workspace branding" icon={Palette} width="w-full sm:max-w-xl"
+      footer={b ? <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save branding'}</button> : undefined}>
       {!b ? <LoadingBlock /> : (
-        <div className="flex flex-col gap-4">
-          <p className="text-xs text-slate-500">This appears on every public listing page for this workspace — logo, firm name, license and contact details.</p>
-          {b.logo_url ? <img src={b.logo_url} alt="logo" className="h-16 w-auto rounded border border-line bg-white object-contain p-1" /> : null}
-          <Field label="Logo URL" value={b.logo_url || ''} onChange={(v) => set('logo_url', v)} placeholder="https://…/logo.png" />
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Brand name" value={b.brand_name || ''} onChange={(v) => set('brand_name', v)} />
-            <Field label="Firm / company name" value={b.firm_name || ''} onChange={(v) => set('firm_name', v)} />
-            <Field label="License number" value={b.license_number || ''} onChange={(v) => set('license_number', v)} />
-            <Field label="Primary color" value={b.primary_color || ''} onChange={(v) => set('primary_color', v)} placeholder="#0f766e" />
-            <Field label="Website" value={b.website || ''} onChange={(v) => set('website', v)} />
-            <Field label="Email" value={b.email || ''} onChange={(v) => set('email', v)} />
-            <Field label="Phone" value={b.phone || ''} onChange={(v) => set('phone', v)} />
-            <Field label="Physical address" value={b.address || ''} onChange={(v) => set('address', v)} />
-          </div>
-          <button onClick={save} disabled={saving} className="mt-2 inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
-            <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save branding'}
-          </button>
+        <div className="flex flex-col gap-6">
+          <p className="text-sm text-slate-500">Shown on every public listing page for this workspace — logo, firm name, license and contact details.</p>
+
+          <PanelSection title="Brand">
+            <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-4">
+              {b.logo_url ? <img src={b.logo_url} alt="logo" className="h-16 w-16 rounded-xl border border-line bg-white object-contain p-1" /> : <div className="flex h-16 w-16 items-center justify-center rounded-xl border border-dashed border-line bg-white text-slate-300"><Building2 className="h-7 w-7" /></div>}
+              <div className="min-w-0 flex-1"><PInput label="Logo URL" value={b.logo_url || ''} onChange={(v) => set('logo_url', v)} placeholder="https://…/logo.png" /></div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <PInput label="Brand name" value={b.brand_name || ''} onChange={(v) => set('brand_name', v)} placeholder="1PropertyMarket" />
+              <PInput label="Firm / company name" value={b.firm_name || ''} onChange={(v) => set('firm_name', v)} placeholder="Pitman Real Estate LLC" />
+              <PInput label="License number" value={b.license_number || ''} onChange={(v) => set('license_number', v)} icon={BadgeCheck} placeholder="e.g. 10401234567" />
+              <label className="flex flex-col gap-1.5"><span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500"><Palette className="h-3.5 w-3.5 text-slate-400" />Primary color</span>
+                <div className="flex items-center gap-2">
+                  <input type="color" value={color} onChange={(e) => set('primary_color', e.target.value)} className="h-11 w-12 shrink-0 cursor-pointer rounded-xl border border-line bg-white p-1" />
+                  <input value={b.primary_color || ''} onChange={(e) => set('primary_color', e.target.value)} placeholder="#0f766e" className="w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-[15px] outline-none focus:border-brand" />
+                </div></label>
+            </div>
+          </PanelSection>
+
+          <PanelSection title="Contact">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <PInput label="Website" value={b.website || ''} onChange={(v) => set('website', v)} icon={Globe} placeholder="firm.com" />
+              <PInput label="Email" value={b.email || ''} onChange={(v) => set('email', v)} placeholder="hello@firm.com" />
+              <PInput label="Phone" value={b.phone || ''} onChange={(v) => set('phone', v)} placeholder="(555) 555-5555" />
+              <PInput label="Physical address" value={b.address || ''} onChange={(v) => set('address', v)} placeholder="123 Main St, City, ST" />
+            </div>
+          </PanelSection>
         </div>
       )}
     </SlideOver>
@@ -123,25 +156,34 @@ function ProfilePanel({ open, onClose }: { open: boolean; onClose: () => void })
   const set = (k: keyof Profile, v: string) => setP((prev) => ({ ...(prev as any), [k]: v }));
   const save = async () => { if (!p) return; setSaving(true); try { await listings.setProfile(p); onClose(); } catch (e: any) { alert(e.message); } finally { setSaving(false); } };
   return (
-    <SlideOver open={open} onClose={onClose} title="My profile (shown on my listings)" width="w-full sm:max-w-lg">
+    <SlideOver open={open} onClose={onClose} title="My profile (shown on my listings)" icon={UserCircle} width="w-full sm:max-w-xl"
+      footer={p ? <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-bold text-white hover:bg-brand/90 disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save profile'}</button> : undefined}>
       {!p ? <LoadingBlock /> : (
-        <div className="flex flex-col gap-4">
-          <p className="text-xs text-slate-500">Your details appear as the listing agent on properties assigned to you.</p>
-          {p.photo_url ? <img src={p.photo_url} alt="me" className="h-20 w-20 rounded-full border border-line object-cover" /> : null}
-          <Field label="Photo URL" value={p.photo_url || ''} onChange={(v) => set('photo_url', v)} placeholder="https://…/me.jpg" />
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Name" value={p.name || ''} onChange={(v) => set('name', v)} />
-            <Field label="Title" value={p.title || ''} onChange={(v) => set('title', v)} />
-            <Field label="Company / firm" value={p.company || ''} onChange={(v) => set('company', v)} />
-            <Field label="License number" value={p.license_number || ''} onChange={(v) => set('license_number', v)} />
-            <Field label="Direct phone" value={p.phone || ''} onChange={(v) => set('phone', v)} />
-            <Field label="Company phone" value={p.company_phone || ''} onChange={(v) => set('company_phone', v)} />
-            <Field label="Website" value={p.website || ''} onChange={(v) => set('website', v)} />
-            <Field label="Physical address" value={p.address || ''} onChange={(v) => set('address', v)} />
+        <div className="flex flex-col gap-6">
+          <p className="text-sm text-slate-500">Your details appear as the listing agent on properties assigned to you.</p>
+
+          <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-4">
+            {p.photo_url ? <img src={p.photo_url} alt="me" className="h-16 w-16 rounded-full border border-line object-cover" /> : <div className="flex h-16 w-16 items-center justify-center rounded-full border border-dashed border-line bg-white text-slate-300"><UserCircle className="h-8 w-8" /></div>}
+            <div className="min-w-0 flex-1"><PInput label="Photo URL" value={p.photo_url || ''} onChange={(v) => set('photo_url', v)} placeholder="https://…/me.jpg" /></div>
           </div>
-          <button onClick={save} disabled={saving} className="mt-2 inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
-            <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save profile'}
-          </button>
+
+          <PanelSection title="Identity">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <PInput label="Name" value={p.name || ''} onChange={(v) => set('name', v)} />
+              <PInput label="Title" value={p.title || ''} onChange={(v) => set('title', v)} placeholder="Managing Broker" />
+              <PInput label="Company / firm" value={p.company || ''} onChange={(v) => set('company', v)} />
+              <PInput label="License number" value={p.license_number || ''} onChange={(v) => set('license_number', v)} icon={BadgeCheck} />
+            </div>
+          </PanelSection>
+
+          <PanelSection title="Contact">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <PInput label="Direct phone" value={p.phone || ''} onChange={(v) => set('phone', v)} />
+              <PInput label="Company phone" value={p.company_phone || ''} onChange={(v) => set('company_phone', v)} />
+              <PInput label="Website" value={p.website || ''} onChange={(v) => set('website', v)} icon={Globe} />
+              <PInput label="Physical address" value={p.address || ''} onChange={(v) => set('address', v)} />
+            </div>
+          </PanelSection>
         </div>
       )}
     </SlideOver>
