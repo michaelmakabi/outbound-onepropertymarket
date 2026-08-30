@@ -1,10 +1,29 @@
-// API client for the 1PropertyMarket — Outbound data function (Supabase edge function).
+// API client for the 1PropertyMarket - Outbound data function (Supabase edge function).
 // Override at build time with VITE_API_BASE if you ever move the backend.
 const API_BASE =
   (import.meta as any).env?.VITE_API_BASE ||
   'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/api';
 
 const TOKEN_KEY = 'opm_outbound_token';
+
+// The AI's on-call identity for a campaign - what it says when a prospect asks "who is this?",
+// "what company?", or "how'd you get my number?". Reusable per workspace; falls back to the generic
+// Adrian / BB Real Estate persona when a campaign leaves it unset.
+export interface AgentIdentity {
+  id?: string;
+  workspace?: string;
+  label?: string;
+  agent_name?: string | null;
+  company_name?: string | null;
+  company_blurb?: string | null;
+  caller_context?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  is_default?: boolean;
+  created_by_id?: number | null;
+  created_at?: string;
+  updated_at?: string;
+}
 
 export const tokenStore = {
   get: () => localStorage.getItem(TOKEN_KEY),
@@ -74,7 +93,7 @@ const OPM_BASE =
   (import.meta as any).env?.VITE_OPM_BASE ||
   ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm');
 
-// Active CRM workspace (tenant) — set by the WorkspaceProvider; injected into every opm call.
+// Active CRM workspace (tenant) - set by the WorkspaceProvider; injected into every opm call.
 const WS_KEY = 'opm_active_workspace';
 let activeWorkspace: string | null = localStorage.getItem(WS_KEY);
 export const workspaceStore = {
@@ -84,7 +103,7 @@ export const workspaceStore = {
 
 // Tenant-scoped analytics actions on the shared `api` function. When a workspace is active these are
 // HARD-locked to it, so no page can surface another tenant's data. Super-admins change scope by
-// switching the active workspace in the sidebar — never via per-page pickers (which are being removed).
+// switching the active workspace in the sidebar - never via per-page pickers (which are being removed).
 const WS_SCOPED_ACTIONS = new Set(['overview', 'workspace', 'dispositions', 'agents', 'calls', 'contacts', 'contact']);
 
 async function opmCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
@@ -153,7 +172,7 @@ async function opmImportCall(action: string, opts: { method?: string; params?: R
   return data;
 }
 
-// ---- CUE report engine (dedicated `opm-cue` function): Comping · Underwriting · Evaluation.
+// ---- CUE report engine (dedicated `opm-cue` function): Comping - Underwriting - Evaluation.
 // Pulls subject + comps + AVM + HUD rents from RealEstateAPI and caches per lead. `cueGet` is a free
 // cached read; `cueGenerate` hits the paid API. Shares OPM auth + active-workspace scoping. ----
 const OPMCUE_BASE =
@@ -225,21 +244,21 @@ async function opmLoiCall(action: string, opts: { method?: string; params?: Reco
 
 export const opm = {
   workspaces: () => opmCall('workspaces'),
-  // CUE report (Comping · Underwriting · Evaluation) for a lead's property.
+  // CUE report (Comping - Underwriting - Evaluation) for a lead's property.
   cueGet: (leadId: string) => opmCueCall('cue_get', { params: { lead_id: leadId } }),
-  // LOI (Letter of Intent) — draft/generate/save/send an offer letter for a lead.
+  // LOI (Letter of Intent) - draft/generate/save/send an offer letter for a lead.
   loiGet: (leadId: string) => opmLoiCall('get', { params: { lead_id: leadId } }),
   loiGenerate: (leadId: string, fields: any) => opmLoiCall('generate', { method: 'POST', body: { lead_id: leadId, fields } }),
   loiSave: (leadId: string, fields: any, body_text: string) => opmLoiCall('save', { method: 'POST', body: { lead_id: leadId, fields, body_text } }),
   loiSend: (leadId: string, fields: any, body_text: string) => opmLoiCall('send', { method: 'POST', body: { lead_id: leadId, fields, body_text } }),
   cueGenerate: (leadId: string) => opmCueCall('cue_generate', { method: 'POST', body: { lead_id: leadId } }),
-  // Opportunities — a contact can live in several pipelines at once (one opportunity per pipeline).
+  // Opportunities - a contact can live in several pipelines at once (one opportunity per pipeline).
   oppsBoard: (pipeline_id: number | string) => opmOppsCall('board', { params: { pipeline_id } }),
   oppsForLead: (leadId: string) => opmOppsCall('for_lead', { params: { lead_id: leadId } }),
   oppsMove: (b: { opportunity_id: number; stage_id: number | null }) => opmOppsCall('move', { method: 'POST', body: b }),
   oppsAdd: (b: { lead_id: string; pipeline_id: number; stage_id?: number | null }) => opmOppsCall('add', { method: 'POST', body: b }),
   oppsRemove: (opportunity_id: number) => opmOppsCall('remove', { method: 'POST', body: { opportunity_id } }),
-  // Most-recent-call map (lead_id → last call) for the active workspace — enriches board cards.
+  // Most-recent-call map (lead_id -> last call) for the active workspace - enriches board cards.
   lastCallsMap: () => opmCampaignCall('last_calls', { method: 'POST', body: {} }),
   summary: () => opmCall('summary'),
   pipelines: () => opmCall('pipelines'),
@@ -256,7 +275,7 @@ export const opm = {
   saveStage: (b: any) => opmCall('save_stage', { method: 'POST', body: b }),
   deleteStage: (id: number) => opmCall('delete_stage', { method: 'POST', body: { id } }),
   leads: (p: any) => opmCall('leads', { params: p }),
-  // Fast record-centric contacts list — served by opm-ext (parallelized; ~1s vs ~26s on `opm`).
+  // Fast record-centric contacts list - served by opm-ext (parallelized; ~1s vs ~26s on `opm`).
   sellerContacts: (p: any = {}) => opmExtCall('contacts', { params: p }),
   resolve: (phones: string[]) => opmCall('resolve', { params: { phones: phones.join(',') } }),
   placeCall: (b: any) => opmCall('place_call', { method: 'POST', body: b }),
@@ -265,7 +284,7 @@ export const opm = {
   addNote: (b: any) => opmCall('add_note', { method: 'POST', body: b }),
   updateContact: (b: any) => opmCall('update_contact', { method: 'POST', body: b }),
   // Import a batch of mapped rows into a (possibly new) CRM tenant.
-  // Pass workspace:'' so the active-tenant param is NOT injected — target_workspace governs.
+  // Pass workspace:'' so the active-tenant param is NOT injected - target_workspace governs.
   importLeads: (b: { target_workspace: string; rows: any[]; allow_pitman?: boolean }) =>
     opmCall('import_leads', { method: 'POST', params: { workspace: '' }, body: b }),
   // Smart import: consolidate/dedupe by phone. mode:'preview' returns stats only; 'commit' writes.
@@ -275,7 +294,7 @@ export const opm = {
     opmImportCall('import_smart', { method: 'POST', body: b }),
   addContact: (b: any) => opmCall('add_contact', { method: 'POST', body: b }),
   customFields: () => opmCall('custom_fields'),
-  // Custom-field management — served by `opm-import` so any workspace member can manage the account's fields.
+  // Custom-field management - served by `opm-import` so any workspace member can manage the account's fields.
   saveCustomField: (b: any) => opmImportCall('custom_field_save', { method: 'POST', body: b }),
   deleteCustomField: (id: number) => opmImportCall('custom_field_delete', { method: 'POST', body: { id } }),
   // ---- Tag vocabulary management (opm-import; role-gated server-side) ----
@@ -329,8 +348,21 @@ export const opm = {
     opmCampaignCall('campaign_preflight', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
   // Attach disposition metadata (kind + assigned listing) to a campaign right after it's created.
   // The drip reads these off the campaign row to inject the listing's context into every buyer call.
-  campaignSetMeta: (b: { id: string; campaign_kind?: 'acquisition' | 'disposition'; property_id?: string | null; workspace?: string; timezone?: string; window_start_hour?: number; window_end_hour?: number; window_days?: number[]; scheduled_at?: string | null }) =>
+  campaignSetMeta: (b: { id: string; campaign_kind?: 'acquisition' | 'disposition'; property_id?: string | null; workspace?: string; timezone?: string; window_start_hour?: number; window_end_hour?: number; window_days?: number[]; scheduled_at?: string | null; agent_identity?: AgentIdentity | null }) =>
     opmCampaignCall('campaign_set_meta', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
+  // ---- Dynamic agent identity (opm-campaign): the AI's on-call name / company / blurb / caller-context.
+  // Injected as {{agent_name}}/{{company_name}}/{{company_blurb}}/{{caller_context}} into every campaign
+  // call so a team can run as their own brand or the generic Adrian / BB Real Estate persona. ----
+  identityList: (workspace?: string) =>
+    opmCampaignCall('identity_list', { params: workspace ? { workspace } : undefined }) as Promise<{ profiles: AgentIdentity[]; generic: AgentIdentity }>,
+  // Front-load a "my company" identity from the caller's saved user + workspace-branding details.
+  identityPrefill: (workspace?: string) =>
+    opmCampaignCall('identity_prefill', { params: workspace ? { workspace } : undefined }) as Promise<{ generic: AgentIdentity; prefill: AgentIdentity; has_company: boolean }>,
+  // Save (or update, when id is passed) a reusable identity profile for the workspace.
+  identitySave: (b: AgentIdentity & { workspace?: string }) =>
+    opmCampaignCall('identity_save', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }) as Promise<{ ok: boolean; profile: AgentIdentity }>,
+  identityDelete: (id: string, workspace?: string) =>
+    opmCampaignCall('identity_delete', { method: 'POST', params: workspace ? { workspace } : undefined, body: { id } }),
   // Caller-ID numbers assigned to a workspace's dialer + usage (total calls, last used), most-used first.
   // Powers the launch wizard's "which numbers this agent uses" panel. Served by opm-campaign.
   campaignNumberUsage: (workspace?: string) =>
@@ -341,13 +373,13 @@ export const opm = {
   campaignProjection: (b: { workspace?: string; agent_id: string; lead_ids?: string[]; count?: number; dial_mode: 'primary' | 'all_numbers'; timezone?: string }) =>
     opmCall('campaign_projection', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
   // Campaigns visible to the caller (own workspaces; super_admin all) + per-campaign cost/disposition rollup.
-  // The workspace key is always present (possibly undefined) so the active-tenant param is NOT auto-injected —
+  // The workspace key is always present (possibly undefined) so the active-tenant param is NOT auto-injected -
   // an unset workspace means "all my workspaces" (customer) or "all workspaces" (super_admin).
   campaignsList: (p: { workspace?: string; from?: string; to?: string } = {}) => opmCall('campaigns_list', { params: { workspace: p.workspace, from: p.from, to: p.to } }),
   // One campaign + its leads + KPIs (cost, pickup, voicemail, disposition breakdown) computed from `calls`.
   campaignDetail: (id: string) => opmCall('campaign_detail', { params: { id } }),
   // Retail multiplier map for the caller (opm-campaign). Campaign costs are stored as raw hard cost;
-  // customers (and a super_admin impersonating one) must see hard × the workspace's billing multiplier,
+  // customers (and a super_admin impersonating one) must see hard x the workspace's billing multiplier,
   // while true platform staff see the raw cost. Returns { apply:boolean, mult:{ [workspace]:number } }:
   // `apply` is false for staff (show true cost) and true otherwise. Applied client-side on the campaign
   // pages so we didn't have to re-emit the large `opm` function.
@@ -355,17 +387,17 @@ export const opm = {
   // Super-admin: manually advance any due drip batches (same processor pg_cron calls every minute). Served by opm-campaign.
   campaignDripRun: () => opmCampaignCall('campaign_drip_run', { method: 'POST' }),
   // ---- Campaign lifecycle controls (opm-campaign): pause / resume / cancel a running campaign. ----
-  // pause → stops new calls (resumable). resume → re-enters the drip. cancel → terminal (marks remaining
+  // pause -> stops new calls (resumable). resume -> re-enters the drip. cancel -> terminal (marks remaining
   // pending leads canceled). In-flight calls already handed to the dialer cannot be recalled.
   campaignPause: (id: string) => opmCampaignCall('campaign_pause', { method: 'POST', body: { id } }),
   campaignResume: (id: string) => opmCampaignCall('campaign_resume', { method: 'POST', body: { id } }),
   campaignCancel: (id: string) => opmCampaignCall('campaign_cancel', { method: 'POST', body: { id } }),
-  // Resolve phone numbers → matched CRM contact { name, email, lead_id, property_ref } (last-10 keyed),
+  // Resolve phone numbers -> matched CRM contact { name, email, lead_id, property_ref } (last-10 keyed),
   // scoped to the active workspace. Powers the name/email + lead link on Call History and Call Detail.
   resolveContacts: (phones: string[]) => opmCampaignCall('resolve_contacts', { method: 'POST', body: { phones } }),
   // Reliability: read / toggle Retell "Stable Server" routing for a workspace. When ON, that tenant's
   // outbound calls + preflight probe route through Retell's stable cluster. The toggle only changes
-  // routing — the stable cluster must first be enabled on that Retell account by Retell support.
+  // routing - the stable cluster must first be enabled on that Retell account by Retell support.
   dialerConfig: (workspace?: string) => opmCampaignCall('dialer_config', workspace ? { params: { workspace } } : {}),
   setStableServer: (on: boolean, workspace?: string) => opmCampaignCall('set_stable_server', { method: 'POST', ...(workspace ? { params: { workspace } } : {}), body: { stable_server: on } }),
   // Rich workspace call analytics (volume, dispositions, agents, cost, pickup/voicemail, duration,
@@ -374,7 +406,7 @@ export const opm = {
   workspaceActivity: (p: { workspace: string; from?: number; to?: number }) =>
     opmCall('workspace_activity', { params: { workspace: p.workspace, from: p.from, to: p.to } }),
 
-  // ---- Lead routing engine (companion `opm-ext` routing_* actions; owner/admin/manager only — server 403s otherwise) ----
+  // ---- Lead routing engine (companion `opm-ext` routing_* actions; owner/admin/manager only - server 403s otherwise) ----
   // Ordered list of routing rules for the active workspace (or a specific one).
   routingRulesList: (workspace?: string) => opmExtCall('routing_rules_list', workspace ? { params: { workspace } } : {}),
   // Create/update one rule. Server returns the persisted rule (with id, sort_order, resolved target/fallback names).
@@ -383,13 +415,13 @@ export const opm = {
   routingRuleDelete: (id: string | number) => opmExtCall('routing_rule_delete', { method: 'POST', body: { id } }),
   // Persist a new rule order (ordered array of rule ids).
   routingRulesReorder: (ids: (string | number)[], workspace?: string) => opmExtCall('routing_rules_reorder', { method: 'POST', body: { ...(workspace ? { workspace } : {}), ids } }),
-  // Simulate (dry_run:true → {plan}) or apply (dry_run:false → {assigned, results}) rules over a lead set.
+  // Simulate (dry_run:true -> {plan}) or apply (dry_run:false -> {assigned, results}) rules over a lead set.
   runRules: (b: { lead_ids: string[]; dry_run: boolean; trigger?: string; workspace?: string }) => opmExtCall('run_rules', { method: 'POST', body: b }),
   // Per-rep load snapshot (open primary leads + assigned today) for the balance strip.
   routingStats: (workspace?: string) => opmExtCall('routing_stats', workspace ? { params: { workspace } } : {}),
 };
 
-// ---- Notifications (Phase 3) — dedicated `opm-notif` edge function; shares OPM auth + active-workspace scoping. ----
+// ---- Notifications (Phase 3) - dedicated `opm-notif` edge function; shares OPM auth + active-workspace scoping. ----
 const OPMNOTIF_BASE =
   (import.meta as any).env?.VITE_OPMNOTIF_BASE ||
   ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-notif') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-notif');
@@ -416,7 +448,7 @@ async function opmNotifCall(action: string, opts: { method?: string; params?: Re
 }
 
 export const notif = {
-  // ---- Per-user Notification Center (inbox + personal mute prefs) — for ALL users. ----
+  // ---- Per-user Notification Center (inbox + personal mute prefs) - for ALL users. ----
   // The caller's own recent notifications (optionally a single workspace, unread-only, limited).
   inboxList: (p: { workspace?: string; limit?: number; unread_only?: boolean } = {}) =>
     opmNotifCall('inbox_list', { params: { ...(p.workspace ? { workspace: p.workspace } : {}), ...(p.limit ? { limit: p.limit } : {}), ...(p.unread_only ? { unread_only: true } : {}) } }),
@@ -431,7 +463,7 @@ export const notif = {
 
   // Current notification settings + capability flags + the 20-status catalog for the disposition picker.
   settingsGet: (workspace?: string) => opmNotifCall('notif_settings_get', workspace ? { params: { workspace } } : {}),
-  // Persist settings (owner/admin/super only — server 403s otherwise).
+  // Persist settings (owner/admin/super only - server 403s otherwise).
   settingsSave: (settings: any, workspace?: string) => opmNotifCall('notif_settings_save', { method: 'POST', body: { ...(workspace ? { workspace } : {}), settings } }),
   // Fire a test notification to the current user (or an explicit target). status may be 'sent' or 'pending'.
   test: (b: { channel: 'email' | 'sms'; to_user_id?: number; to_email?: string; workspace?: string }) =>
@@ -442,7 +474,7 @@ export const notif = {
   workspaceNumbers: (workspace?: string) => opmNotifCall('workspace_numbers', workspace ? { params: { workspace } } : {}),
 };
 
-// ---- Phase 4 team collaboration — dedicated `opm-team` edge function; shares OPM auth + active-workspace scoping. ----
+// ---- Phase 4 team collaboration - dedicated `opm-team` edge function; shares OPM auth + active-workspace scoping. ----
 const OPMTEAM_BASE =
   (import.meta as any).env?.VITE_OPMTEAM_BASE ||
   ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-team') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-team');
@@ -469,7 +501,7 @@ async function opmTeamCall(action: string, opts: { method?: string; params?: Rec
 }
 
 export const team = {
-  // ---- Per-lead internal comment thread (@mentions) — visible to anyone who can see the lead. ----
+  // ---- Per-lead internal comment thread (@mentions) - visible to anyone who can see the lead. ----
   leadComments: (lead_id: string, workspace?: string) => opmTeamCall('lead_comments_list', { params: { lead_id, ...(workspace ? { workspace } : {}) } }),
   leadCommentAdd: (b: { lead_id: string; body: string; mentions?: number[]; workspace?: string }) => opmTeamCall('lead_comment_add', { method: 'POST', body: b }),
   // ---- Workspace internal status channel. ----
@@ -478,11 +510,11 @@ export const team = {
   // ---- Team settings (pulse cadence / no-touch SLA). settingsGet returns { settings, can_manage }; save is owner/admin. ----
   settingsGet: (workspace?: string) => opmTeamCall('team_settings_get', workspace ? { params: { workspace } } : {}),
   settingsSave: (b: { pulse_hours?: number; no_touch_hours?: number; pulse_enabled?: boolean; workspace?: string }) => opmTeamCall('team_settings_save', { method: 'POST', body: b }),
-  // ---- Manager dashboard (owner/admin/manager) — per-rep KPIs + totals. May 403 for reps. ----
+  // ---- Manager dashboard (owner/admin/manager) - per-rep KPIs + totals. May 403 for reps. ----
   dashboard: (p: { from?: string; to?: string; workspace?: string } = {}) => opmTeamCall('team_dashboard', { params: { ...(p.from ? { from: p.from } : {}), ...(p.to ? { to: p.to } : {}), ...(p.workspace ? { workspace: p.workspace } : {}) } }),
 };
 
-// companion `opm-ext` edge function — shares OPM auth + active-workspace scoping.
+// companion `opm-ext` edge function - shares OPM auth + active-workspace scoping.
 const OPMEXT_BASE =
   (import.meta as any).env?.VITE_OPMEXT_BASE ||
   ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-ext') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-ext');
@@ -504,7 +536,7 @@ async function opmExtCall(action: string, opts: { method?: string; params?: Reco
   return data;
 }
 
-// ---- Test AI (separate `test-call` edge function) — place live test calls ----
+// ---- Test AI (separate `test-call` edge function) - place live test calls ----
 const TESTAI_BASE =
   (import.meta as any).env?.VITE_TESTAI_BASE ||
   ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/test-call') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/test-call');
@@ -532,9 +564,9 @@ export const testai = {
   agentsDetailed: (workspace: string) => testaiCall('agents_detailed', { params: { workspace } }),
   // Full editable snapshot of one agent (agent settings + its LLM settings) for the editor page.
   agentFull: (workspace: string, agent_id: string) => testaiCall('agent_full', { params: { workspace, agent_id } }),
-  // Retell voice catalog for the workspace (avatars + preview URLs) — powers the voice picker.
+  // Retell voice catalog for the workspace (avatars + preview URLs) - powers the voice picker.
   listVoices: (workspace: string) => testaiCall('list_voices', { params: { workspace } }),
-  // Retell knowledge bases for the workspace — powers the KB multi-select.
+  // Retell knowledge bases for the workspace - powers the KB multi-select.
   listKbs: (workspace: string) => testaiCall('list_kbs', { params: { workspace } }),
   // Admin/owner: push edits to the live Retell agent (browser never sees the key). Accepts the
   // legacy flat fields plus the full editor's grouped agent {} / llm {} payloads.
@@ -599,12 +631,12 @@ export const billing = {
   cardLinkCreate: (workspace: string) => billingCall('card_link_create', { body: { workspace } }),
   cardLinkGet: (token: string) => billingGet('card_link_get', { token }),
   // Identity/billing fields (full_name, email, billing_address, member_id) are saved against the
-  // authorization for this token. No PAN/CVV — the card itself is captured via the tokenized processor flow.
+  // authorization for this token. No PAN/CVV - the card itself is captured via the tokenized processor flow.
   cardLinkStart: (b: { token: string; signature_name: string; agreement_accepted: boolean; full_name?: string; email?: string; billing_address?: string; member_id?: string }) => billingCall('card_link_start', { body: b }),
   cardLinkComplete: (token: string, session_id?: string) => billingCall('card_link_complete', { body: { token, session_id } }),
-  // Feature 1 — direct-pay capability (super-admin). Toggle whether the customer pays providers directly (no rebill).
+  // Feature 1 - direct-pay capability (super-admin). Toggle whether the customer pays providers directly (no rebill).
   setDirectPay: (workspace: string, enabled: boolean) => billingCall('set_direct_pay', { body: { workspace, enabled } }),
-  // Feature 2 — signed authorization PDF (super-admin). Generate/list/fetch flattened PDF records (card = brand+last4 only).
+  // Feature 2 - signed authorization PDF (super-admin). Generate/list/fetch flattened PDF records (card = brand+last4 only).
   authorizationPdf: (workspace: string) => billingCall('authorization_pdf', { body: { workspace } }),
   authorizationPdfList: (workspace: string) => billingGet('authorization_pdf_list', { workspace }),
   authorizationPdfGet: (id: string) => billingGet('authorization_pdf_get', { id }),
@@ -697,6 +729,6 @@ export const fmt = {
     const r = s % 60;
     return m > 0 ? `${m}m ${r}s` : `${r}s`;
   },
-  dateTime: (ms: number | null) => (ms ? new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'),
+  dateTime: (ms: number | null) => (ms ? new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '-'),
   title: (s: string) => (s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
 };
