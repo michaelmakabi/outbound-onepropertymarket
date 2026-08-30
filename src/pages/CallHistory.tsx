@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, opm } from '../lib/api';
 import { useFilters } from '../lib/filters';
 import {
-  PageHeader, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews, AudioPlayer,
+  PageHeader, SectionCard, LoadingBlock, EmptyState, MultiSelect, SavedViews, AudioPlayer, KpiCard,
   ColumnDef, ColumnToggleMenu, SortableHead, useColumnVisibility, SortState,
 } from '../components/dash';
 import AiPromptModal from '../components/AiPromptModal';
@@ -169,6 +169,12 @@ export default function CallHistory() {
   return (
     <div>
       <PageHeader title="Call History" description="Every call in this workspace — click a row for the recording & transcript" />
+
+      {/* Live roll-up — the big number reflects the active filters in real time (server-counted across
+          all matching calls, not just the loaded page). */}
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiCard label={hasFilters ? 'Calls (filtered)' : 'Total calls'} value={total.toLocaleString()} sub={hasFilters ? 'match current filters' : 'in this workspace'} icon={PhoneOutgoing} accent="blue" />
+      </div>
 
       <SectionCard title="Filters" description={`${total.toLocaleString()} call${total === 1 ? '' : 's'} match the current filters`} className="mb-4"
         action={<div className="flex items-center gap-2">
