@@ -17,24 +17,27 @@ import {
   Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing, Trash2, Home, Users, UserCheck, Lock, Send,
 } from 'lucide-react';
 
-const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) · OUTBOUND' };
+const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) - OUTBOUND' };
 // Retell workspace whose key places these outbound calls (also where its agents live).
 const DIAL_WORKSPACE = '1propertymarket';
 const DIAL_NUMBERS = [
-  { v: '+17184070959', label: 'Adrian NYC 1 · (718) 407-0959' },
-  { v: '+13475727425', label: 'Adrian NYC 2 · (347) 572-7425' },
-  { v: '+19295127448', label: 'Adrian NYC 3 · (929) 512-7448' },
-  { v: '+17862446185', label: 'Adrian Miami 3 · (786) 244-6185' },
-  { v: '+17868827159', label: 'Adrian Miami 4 · (786) 882-7159' },
-  { v: '+19544668132', label: 'Adrian · (954) 466-8132' },
+  { v: '+17184070959', label: 'Adrian NYC 1 - (718) 407-0959' },
+  { v: '+13475727425', label: 'Adrian NYC 2 - (347) 572-7425' },
+  { v: '+19295127448', label: 'Adrian NYC 3 - (929) 512-7448' },
+  { v: '+17862446185', label: 'Adrian Miami 3 - (786) 244-6185' },
+  { v: '+17868827159', label: 'Adrian Miami 4 - (786) 882-7159' },
+  { v: '+19544668132', label: 'Adrian - (954) 466-8132' },
 ];
 
 function fmtNum(n: string) {
   const d = (n || '').replace(/\D/g, '').replace(/^1/, '');
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : n;
 }
-const money = (n: any) => (n ? `$${Number(n).toLocaleString('en-US')}` : '—');
-const money0 = (n: any) => { const v = Number(n); return isFinite(v) ? `$${Math.round(v).toLocaleString('en-US')}` : '—'; };
+const money = (n: any) => (n ? `$${Number(n).toLocaleString('en-US')}` : '-');
+const money0 = (n: any) => { const v = Number(n); return isFinite(v) ? `$${Math.round(v).toLocaleString('en-US')}` : '-'; };
+// Digits-only value for storage, and a comma-grouped display value for money inputs.
+const onlyNum = (s: any) => String(s ?? '').replace(/[^0-9.]/g, '');
+const withCommas = (s: any) => { const d = onlyNum(s); if (d === '') return ''; const [i, dec] = d.split('.'); const wi = i ? Number(i).toLocaleString('en-US') : '0'; return dec != null ? `${wi}.${dec}` : wi; };
 const durLabel = (s: any) => { const n = Math.round(Number(s) || 0); return `${Math.floor(n / 60)}m ${n % 60}s`; };
 
 // ---- Property address helpers: format a structured address, detect its state, and build the
@@ -105,7 +108,7 @@ function ledgerDetail(a: any): string {
   if (d.name && !d.primary_name) parts.push(String(d.name));
   if (d.to || d.stage) parts.push(String(d.to || d.stage));
   if (d.override) parts.push('override');
-  return parts.join(' · ');
+  return parts.join(' - ');
 }
 const NOTE_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -173,7 +176,7 @@ export default function LeadDetail() {
   const [addNumOpen, setAddNumOpen] = useState(false);
   const [newNum, setNewNum] = useState<{ phone: string; phone_label: string; contact_kind: string; related_name: string }>({ phone: '', phone_label: 'primary', contact_kind: 'owner', related_name: '' });
 
-  // ---- Phase 4: internal team discussion (@mentions) — visible to everyone who can see the lead ----
+  // ---- Phase 4: internal team discussion (@mentions) - visible to everyone who can see the lead ----
   const [comments, setComments] = useState<any[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<Member[]>([]);
@@ -225,7 +228,7 @@ export default function LeadDetail() {
     try {
       const r: any = await opm.updateNote({ id: n.id, text: editNoteText, html: editNoteText.replace(/\n/g, '<br>') });
       setEditNoteId(null); load(); loadLedger();
-      flash(r?.override ? 'Override recorded — this edit was logged.' : 'Note updated.');
+      flash(r?.override ? 'Override recorded - this edit was logged.' : 'Note updated.');
     } catch (e: any) { const m = String(e?.message || ''); flash(/forbidden/i.test(m) ? 'This note is locked.' : (m || 'Could not update note.'), 4000); }
     finally { setNoteBusy(false); }
   }
@@ -234,7 +237,7 @@ export default function LeadDetail() {
     try {
       const r: any = await opm.deleteNote(n.id);
       load(); loadLedger();
-      flash(r?.override ? 'Override recorded — deletion logged.' : 'Note deleted.');
+      flash(r?.override ? 'Override recorded - deletion logged.' : 'Note deleted.');
     } catch (e: any) { const m = String(e?.message || ''); flash(/forbidden/i.test(m) ? 'This note is locked.' : (m || 'Could not delete note.'), 4000); }
   }
   useEffect(() => { if (!ids.length) opm.leads({}).then((d) => setIds((d.leads || []).map((l: any) => l.lead_id))).catch(() => {}); }, []);
@@ -285,7 +288,7 @@ export default function LeadDetail() {
   // newest first
   const notes = useMemo(() => [...rawNotes].sort((a, b) => noteTime(b) - noteTime(a)), [rawNotes]);
   const sortedCalls = useMemo(() => [...leadCalls].sort((a, b) => Number(b.start_timestamp || 0) - Number(a.start_timestamp || 0)), [leadCalls]);
-  // Most recent communication on this record — surfaced "in context" (left column) so the last
+  // Most recent communication on this record - surfaced "in context" (left column) so the last
   // call's date, duration, disposition and a play-in-place recording show without opening the Calls tab.
   const lastCall = sortedCalls[0] || null;
   // Most recent AI-captured follow-up / appointment across this record's calls (evolved
@@ -344,7 +347,7 @@ export default function LeadDetail() {
     setToast('Custom fields saved.');
     setTimeout(() => setToast(''), 3000);
   }
-  // Move one opportunity's stage (this pipeline only — other pipeline positions are untouched).
+  // Move one opportunity's stage (this pipeline only - other pipeline positions are untouched).
   async function changeOppStage(o: any, stageId: number) {
     setOpps((prev) => prev.map((x) => (x.opportunity_id === o.opportunity_id ? { ...x, stage_id: stageId } : x)));
     try { await opm.oppsMove({ opportunity_id: o.opportunity_id, stage_id: stageId }); load(); }
@@ -384,9 +387,10 @@ export default function LeadDetail() {
   const setLf = (k: string, v: any) => setLoiFields((f: any) => ({ ...f, [k]: v }));
   // Purchase price drives a 5% standard down payment (earnest), auto-filled unless manually overridden.
   const setOfferPrice = (v: any) => setLoiFields((f: any) => {
-    const n = Number(String(v).replace(/[^0-9.]/g, ''));
+    const digits = String(v).replace(/[^0-9.]/g, '');
+    const n = Number(digits);
     const auto = isFinite(n) && n > 0 ? Math.round(n * 0.05) : '';
-    return { ...f, offer_price: v, earnest_money: auto };
+    return { ...f, offer_price: digits, earnest_money: auto };
   });
 
   // ---- Deal-terms negotiation tracker: OUR terms (fed by the LOI) vs the CUSTOMER's, dated, auto-delta ----
@@ -431,9 +435,9 @@ export default function LeadDetail() {
     catch (e: any) { flash(e?.message || 'Could not save.'); } finally { setLoiBusy(''); }
   }
   async function sendLoi() {
-    if (!confirm('Mark this LOI as sent and move the contact to “Offer sent”?')) return;
+    if (!confirm('Mark this LOI as sent and move the contact to "Offer sent"?')) return;
     setLoiBusy('send');
-    try { const r: any = await opm.loiSend(id, loiFields, loiBody); setLoiSentAt(new Date().toISOString()); loadOpps(); load(); loadDocs(); loadTerms(); flash(r?.advanced_to ? 'LOI sent — moved to “Offer sent”.' : 'LOI marked sent.'); }
+    try { const r: any = await opm.loiSend(id, loiFields, loiBody); setLoiSentAt(new Date().toISOString()); loadOpps(); load(); loadDocs(); loadTerms(); flash(r?.advanced_to ? 'LOI sent - moved to "Offer sent".' : 'LOI marked sent.'); }
     catch (e: any) { flash(e?.message || 'Could not send.'); } finally { setLoiBusy(''); }
   }
   async function exportLoiPdf() {
@@ -449,7 +453,7 @@ export default function LeadDetail() {
     const esc = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const bodyHtml = esc(loiBody).replace(/\n/g, '<br>');
     const brand = esc(loiFields.buyer_name || '1PropertyMarket');
-    w.document.write(`<html><head><title>Letter of Intent — ${esc(lead.name || '')}</title><style>body{font-family:Georgia,'Times New Roman',serif;color:#111;max-width:720px;margin:40px auto;padding:0 24px;line-height:1.65;font-size:14px}.brand{color:#0A2E73;font-weight:800;font-size:20px;letter-spacing:.3px;border-bottom:2px solid #3DC2F2;padding-bottom:8px;margin-bottom:22px}.sig{margin-top:52px}.line{border-bottom:1px solid #888;width:280px;margin:30px 0 6px}@media print{body{margin:0}}</style></head><body><div class="brand">${brand}</div>${bodyHtml}<div class="sig"><div class="line"></div>Seller signature &nbsp;&nbsp; Date: ______________</div><script>window.onload=function(){window.print()}<\/script></body></html>`);
+    w.document.write(`<html><head><title>Letter of Intent - ${esc(lead.name || '')}</title><style>body{font-family:Georgia,'Times New Roman',serif;color:#111;max-width:720px;margin:40px auto;padding:0 24px;line-height:1.65;font-size:14px}.brand{color:#0A2E73;font-weight:800;font-size:20px;letter-spacing:.3px;border-bottom:2px solid #3DC2F2;padding-bottom:8px;margin-bottom:22px}.sig{margin-top:52px}.line{border-bottom:1px solid #888;width:280px;margin:30px 0 6px}@media print{body{margin:0}}</style></head><body><div class="brand">${brand}</div>${bodyHtml}<div class="sig"><div class="line"></div>Seller signature &nbsp;&nbsp; Date: ______________</div><script>window.onload=function(){window.print()}<\/script></body></html>`);
     w.document.close();
   }
   const toggleTx = (cid: string) => setOpenTx((s) => { const n = new Set(s); n.has(cid) ? n.delete(cid) : n.add(cid); return n; });
@@ -457,7 +461,7 @@ export default function LeadDetail() {
   async function saveActivity() {
     const srcMap: Record<string, string> = { note: 'manual', email: 'email', text: 'text', call: 'call' };
     let text = body.trim();
-    if (mode === 'call') { if (!callOutcome) return; text = `☎ ${callOutcome}${text ? ` — ${text}` : ''}`; }
+    if (mode === 'call') { if (!callOutcome) return; text = ` ${callOutcome}${text ? ` - ${text}` : ''}`; }
     else if (mode === 'email') { if (!text && !subject.trim()) return; text = `✉ ${subject ? `${subject}: ` : ''}${text}`; }
     else if (mode === 'text') { if (!text) return; text = `💬 ${text}`; }
     if (!text) return;
@@ -476,17 +480,17 @@ export default function LeadDetail() {
     const addr = lead.addresses?.[0];
     const brief = [
       `SELLER: ${lead.name}`,
-      `PROPERTY: ${lead.property_ref || '—'}${addr ? `  |  ${addr.Street}, ${addr.City} ${addr.State} ${addr.Zip}` : ''}`,
-      `PIPELINE/STAGE: ${lead.pipeline_name || 'Pitman'} · ${lead.stage_name || lead.crm_stage || '—'}`,
+      `PROPERTY: ${lead.property_ref || '-'}${addr ? `  |  ${addr.Street}, ${addr.City} ${addr.State} ${addr.Zip}` : ''}`,
+      `PIPELINE/STAGE: ${lead.pipeline_name || 'Pitman'} - ${lead.stage_name || lead.crm_stage || '-'}`,
       `OUR VALUE: ${money(lead.deal_price)}`,
-      `PRIMARY #: ${primary ? fmtNum(primary.phone) : '—'} (${primary?.phone_channel || 'unknown'})`,
-      `PARCEL: ${Object.entries(parcel).filter(([k, v]) => v && k !== 'lat long' && k !== 'is related').map(([k, v]) => `${PARCEL_LABELS[k] || k} ${v}`).join(' · ')}`,
+      `PRIMARY #: ${primary ? fmtNum(primary.phone) : '-'} (${primary?.phone_channel || 'unknown'})`,
+      `PARCEL: ${Object.entries(parcel).filter(([k, v]) => v && k !== 'lat long' && k !== 'is related').map(([k, v]) => `${PARCEL_LABELS[k] || k} ${v}`).join(' - ')}`,
       '',
       'CALL HISTORY / NOTES (newest first):',
-      ...notes.slice(0, 12).map((n) => `• [${n.note_date || ''}] ${n.author || 'System'}: ${cleanNote(n.body_html || n.body_text || '').replace(/\n/g, ' ')}`),
+      ...notes.slice(0, 12).map((n) => `- [${n.note_date || ''}] ${n.author || 'System'}: ${cleanNote(n.body_html || n.body_text || '').replace(/\n/g, ' ')}`),
     ].join('\n');
     try { navigator.clipboard.writeText(brief); } catch {}
-    setToast('AI call brief copied — this context is what the voice agent ingests on dial.');
+    setToast('AI call brief copied - this context is what the voice agent ingests on dial.');
     setTimeout(() => setToast(''), 4000);
   }
   function openCallModal() {
@@ -521,7 +525,7 @@ export default function LeadDetail() {
         if (i < targets.length - 1) await new Promise((res) => setTimeout(res, 8000)); // non-overlapping
       }
       setCallOpen(false);
-      setToast(targets.length === 1 ? (ok ? `AI call launched to ${fmtNum(targets[0])} — Adrian is dialing now.` : 'Call failed.') : `Dialed ${ok}/${targets.length} number${targets.length === 1 ? '' : 's'}${fail ? ` (${fail} failed)` : ''}.`);
+      setToast(targets.length === 1 ? (ok ? `AI call launched to ${fmtNum(targets[0])} - Adrian is dialing now.` : 'Call failed.') : `Dialed ${ok}/${targets.length} number${targets.length === 1 ? '' : 's'}${fail ? ` (${fail} failed)` : ''}.`);
       setTimeout(() => setToast(''), 6000);
       load(); loadCalls();
     } catch (e: any) {
@@ -530,7 +534,7 @@ export default function LeadDetail() {
     } finally { setCalling(false); }
   }
 
-  if (loading) return <div className="mx-auto max-w-[1200px]"><LoadingBlock label="Loading lead…" /></div>;
+  if (loading) return <div className="mx-auto max-w-[1200px]"><LoadingBlock label="Loading lead..." /></div>;
   if (!lead) return <EmptyState text="Lead not found." />;
 
   const initials = (lead.name || '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('');
@@ -555,7 +559,7 @@ export default function LeadDetail() {
         <div className="flex items-center gap-2">
           {idx >= 0 && ids.length > 0 && <span className="text-xs tabular-nums text-slate-400">{idx + 1} of {ids.length}</span>}
           <button onClick={() => goto(prevId)} disabled={!prevId} title="Previous (←)" className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-slate-600 transition enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40"><ChevronLeft className="h-4 w-4" /> Prev</button>
-          <button onClick={() => goto(nextId)} disabled={!nextId} title="Next (→)" className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-slate-600 transition enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40">Next <ChevronRight className="h-4 w-4" /></button>
+          <button onClick={() => goto(nextId)} disabled={!nextId} title="Next (-)" className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2.5 py-1.5 text-sm font-semibold text-slate-600 transition enabled:hover:border-brand enabled:hover:text-brand disabled:opacity-40">Next <ChevronRight className="h-4 w-4" /></button>
         </div>
       </div>
 
@@ -587,18 +591,18 @@ export default function LeadDetail() {
         <div className="flex items-center gap-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat icon={DollarSign} label="Our Value" value={money(lead.deal_price)} />
-            <Stat icon={GitBranch} label="Source" value={lead.lead_source || '—'} />
-            <Stat icon={User} label="Assigned" value={assignees.primary?.name || lead.assigned_to || '—'} />
-            <Stat icon={PhoneCall} label="Calls" value={`${leadCalls.length} · ${contacts.length}#`} />
+            <Stat icon={GitBranch} label="Source" value={lead.lead_source || '-'} />
+            <Stat icon={User} label="Assigned" value={assignees.primary?.name || lead.assigned_to || '-'} />
+            <Stat icon={PhoneCall} label="Calls" value={`${leadCalls.length} - ${contacts.length}#`} />
           </div>
-          <button onClick={() => nav(`/leads/${encodeURIComponent(id)}/cue`)} title="Comping · Underwriting · Evaluation report for this property" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><Home className="h-4 w-4" /> CUE Report</button>
+          <button onClick={() => nav(`/leads/${encodeURIComponent(id)}/cue`)} title="Comping - Underwriting - Evaluation report for this property" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><Home className="h-4 w-4" /> CUE Report</button>
           <button onClick={openCallModal} title="Launch a live AI voice call to this lead" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white transition hover:brightness-125"><Bot className="h-4 w-4" /> AI Call</button>
         </div>
       </div>
 
       {toast && <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700"><Check className="h-4 w-4" /> {toast}</div>}
 
-      {/* Property address bar — the property/properties tied to this contact, each with quick look-ups:
+      {/* Property address bar - the property/properties tied to this contact, each with quick look-ups:
           Google Maps (always), PropertyShark (NY only), Miami-Dade property search (FL only), Google. */}
       {propAddrs.length > 0 && (
         <div className="mb-4 rounded-2xl border border-line bg-white p-3">
@@ -622,7 +626,7 @@ export default function LeadDetail() {
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)_340px]">
-        {/* LEFT column — dialing essentials only */}
+        {/* LEFT column - dialing essentials only */}
         <div className="space-y-4">
           <Card title="Phone Numbers" count={owners.length}>
             <div className="space-y-2">{owners.map((c) => <PhoneRow key={c.contact_id} c={c} onPatch={patch} onSave={saveNumberEdit} onDelete={deleteNumber} />)}</div>
@@ -650,10 +654,10 @@ export default function LeadDetail() {
             </Card>
           )}
 
-          {/* Last communication — in-context summary of the most recent call on this record. */}
+          {/* Last communication - in-context summary of the most recent call on this record. */}
           <Card title="Last communication">
             {callsLoading ? (
-              <div className="py-2 text-xs text-slate-400">Loading…</div>
+              <div className="py-2 text-xs text-slate-400">Loading...</div>
             ) : !lastCall ? (
               <div className="py-2 text-xs text-slate-400">No calls matched to this record yet.</div>
             ) : (() => {
@@ -670,21 +674,21 @@ export default function LeadDetail() {
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2 gap-y-1 text-xs text-slate-500">
-                    <span className="font-semibold text-ink">{lastCall.start_timestamp ? new Date(Number(lastCall.start_timestamp)).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</span>
+                    <span className="font-semibold text-ink">{lastCall.start_timestamp ? new Date(Number(lastCall.start_timestamp)).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '-'}</span>
                     <span>{durLabel(lastCall.duration_seconds)}</span>
                     <InitiatorTag c={lastCall} />
                     <OurLineTag c={lastCall} />
                   </div>
                   {lastCall.call_summary && <div className="text-xs leading-relaxed text-slate-600 line-clamp-3">{lastCall.call_summary}</div>}
                   {lastCall.recording_url && <AudioPlayer src={lastCall.recording_url} />}
-                  <button onClick={() => setTab('calls')} className="text-xs font-semibold text-brand hover:underline">View all {leadCalls.length} call{leadCalls.length === 1 ? '' : 's'} →</button>
+                  <button onClick={() => setTab('calls')} className="text-xs font-semibold text-brand hover:underline">View all {leadCalls.length} call{leadCalls.length === 1 ? '' : 's'} -</button>
                 </div>
               );
             })()}
           </Card>
 
           <Card title="Assignment">
-            {/* Primary owner — mirrors the record's assigned_to; owner/admin/manager can change it. */}
+            {/* Primary owner - mirrors the record's assigned_to; owner/admin/manager can change it. */}
             <div className="pb-2">
               <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400"><UserCheck className="h-3 w-3" /> Primary owner</div>
               {canManageLead ? (
@@ -711,7 +715,7 @@ export default function LeadDetail() {
               </div>
               {canManageLead && (
                 <select value="" onChange={(e) => { const v = e.target.value; e.currentTarget.value = ''; if (v) addFollower(Number(v)); }} className="input mt-1.5 h-8 w-full text-xs">
-                  <option value="">+ Add follower…</option>
+                  <option value="">+ Add follower...</option>
                   {members.filter((m) => m.user_id !== assignees.primary?.user_id && !assignees.followers.some((f) => f.user_id === m.user_id)).map((m) => <option key={m.user_id} value={m.user_id}>{m.name || m.email || `User ${m.user_id}`}</option>)}
                 </select>
               )}
@@ -739,13 +743,13 @@ export default function LeadDetail() {
                 </div>
               )}
               <textarea value={body} onChange={(e) => setBody(e.target.value)}
-                placeholder={mode === 'note' ? 'Add a note… (saved with your name + timestamp)' : mode === 'email' ? 'Email body — logged to the timeline' : mode === 'text' ? 'Text message — logged to the timeline' : 'Call notes (optional)'}
+                placeholder={mode === 'note' ? 'Add a note... (saved with your name + timestamp)' : mode === 'email' ? 'Email body - logged to the timeline' : mode === 'text' ? 'Text message - logged to the timeline' : 'Call notes (optional)'}
                 className="input min-h-[80px] w-full resize-y text-sm" />
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-400">{mode === 'note' ? 'Saved as a note' : mode === 'call' ? 'Logs a call activity' : `Logs ${mode === 'email' ? 'an email' : 'a text'} touch`}</span>
                 <div className="flex gap-2">
                   {mode === 'note' && <button onClick={aiNote} disabled={saving || !body.trim()} className="inline-flex items-center gap-1 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> AI Note</button>}
-                  <button onClick={saveActivity} disabled={saving} className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{saving ? 'Saving…' : COMPOSE_TABS.find((t) => t.k === mode)!.label}</button>
+                  <button onClick={saveActivity} disabled={saving} className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{saving ? 'Saving...' : COMPOSE_TABS.find((t) => t.k === mode)!.label}</button>
                 </div>
               </div>
             </div>
@@ -763,7 +767,7 @@ export default function LeadDetail() {
             <div className="p-4">
               {tab === 'details' ? (
                 <div className="space-y-0">
-            {/* Opportunities — this contact can sit in several pipelines at once. The Standard 1PM
+            {/* Opportunities - this contact can sit in several pipelines at once. The Standard 1PM
                 opportunity is call-driven; each custom pipeline moves independently. */}
             <div className="border-b border-dashed border-line py-2">
               <div className="mb-1.5 flex items-center gap-1.5 text-slate-500"><GitBranch className="h-3 w-3" /> Opportunities <span className="text-[10px] text-slate-400">({opps.length})</span></div>
@@ -791,7 +795,7 @@ export default function LeadDetail() {
               </div>
               {oppAvail.length > 0 && (
                 <select value="" disabled={oppBusy} onChange={(e) => { const v = e.target.value; e.currentTarget.value = ''; if (v) addOpp(Number(v)); }} className="input mt-1.5 h-8 w-full text-xs">
-                  <option value="">+ Add to another pipeline…</option>
+                  <option value="">+ Add to another pipeline...</option>
                   {oppAvail.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               )}
@@ -848,7 +852,7 @@ export default function LeadDetail() {
             {/* Background */}
             <div className="mt-2 border-t border-line pt-2">
               <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Background</div>
-              <textarea value={bg} onChange={(e) => setBg(e.target.value)} rows={3} placeholder="Notes about this lead…" className="input w-full text-xs" />
+              <textarea value={bg} onChange={(e) => setBg(e.target.value)} rows={3} placeholder="Notes about this lead..." className="input w-full text-xs" />
               <div className="mt-1.5 flex justify-end">
                 <button onClick={saveBg} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white hover:brightness-110"><Save className="h-3.5 w-3.5" /> Save background</button>
               </div>
@@ -866,7 +870,7 @@ export default function LeadDetail() {
                         <input type="checkbox" checked={!!customDraft[f.field_key]} onChange={(e) => setCustomDraft((d) => ({ ...d, [f.field_key]: e.target.checked }))} className="h-4 w-4 accent-[#1f6feb]" />
                       ) : f.field_type === 'select' ? (
                         <select value={customDraft[f.field_key] ?? ''} onChange={(e) => setCustomDraft((d) => ({ ...d, [f.field_key]: e.target.value }))} className="input h-8 w-40 text-xs">
-                          <option value="">—</option>
+                          <option value="">-</option>
                           {(Array.isArray(f.options) ? f.options : String(f.options || '').split(',').map((s) => s.trim()).filter(Boolean)).map((o: string) => <option key={o} value={o}>{o}</option>)}
                         </select>
                       ) : (
@@ -888,7 +892,7 @@ export default function LeadDetail() {
               </div>
             )}
 
-            <button onClick={() => setTab('property')} className="mt-2 text-xs font-semibold text-brand hover:underline">View all property & parcel data →</button>
+            <button onClick={() => setTab('property')} className="mt-2 text-xs font-semibold text-brand hover:underline">View all property & parcel data -</button>
                 </div>
               ) : tab === 'loi' ? (
                 <div className="space-y-3">
@@ -896,35 +900,56 @@ export default function LeadDetail() {
                     <div className="text-sm font-semibold text-ink">Letter of Intent</div>
                     {loiSentAt && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Sent {new Date(loiSentAt).toLocaleDateString()}</span>}
                   </div>
+                  {/* Property address - highlighted at the top so it's unmistakable. */}
+                  <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Property address
+                    <input value={loiFields.property_address ?? ''} onChange={(e) => setLf('property_address', e.target.value)}
+                      placeholder="123 Main St, City, ST 00000"
+                      style={{ backgroundImage: 'linear-gradient(transparent 58%, #fde047 58%)' }}
+                      className="mt-1.5 h-11 w-full rounded-lg border border-yellow-300 bg-transparent px-3 text-base font-extrabold tracking-tight text-ink outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-200" />
+                  </label>
+
+                  {/* Money terms - comma-formatted and enlarged for readability. */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Offer price
+                      <div className="relative mt-1">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-bold text-slate-400">$</span>
+                        <input inputMode="numeric" value={withCommas(loiFields.offer_price)} onChange={(e) => setOfferPrice(e.target.value)} placeholder="0" className="input h-11 w-full pl-7 text-lg font-bold tabular-nums" />
+                      </div>
+                    </label>
+                    <label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Down payment <span className="text-slate-400">(5%)</span>
+                      <div className="relative mt-1">
+                        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-bold text-slate-400">$</span>
+                        <input inputMode="numeric" value={withCommas(loiFields.earnest_money)} onChange={(e) => setLf('earnest_money', onlyNum(e.target.value))} placeholder="0" className="input h-11 w-full pl-7 text-lg font-bold tabular-nums" />
+                      </div>
+                    </label>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    <label className="text-[11px] font-semibold text-slate-500">Offer price<input type="number" value={loiFields.offer_price ?? ''} onChange={(e) => setOfferPrice(e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
-                    <label className="text-[11px] font-semibold text-slate-500">Down payment <span className="text-slate-400">(5%)</span><input type="number" value={loiFields.earnest_money ?? ''} onChange={(e) => setLf('earnest_money', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
-                    <label className="text-[11px] font-semibold text-slate-500">Closing (days)<input type="number" value={loiFields.closing_days ?? ''} onChange={(e) => setLf('closing_days', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
-                    <label className="text-[11px] font-semibold text-slate-500">Inspection (days)<input type="number" value={loiFields.inspection_days ?? ''} onChange={(e) => setLf('inspection_days', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
-                    <label className="text-[11px] font-semibold text-slate-500">Buyer / entity<input value={loiFields.buyer_name ?? ''} onChange={(e) => setLf('buyer_name', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
-                    <label className="col-span-2 text-[11px] font-semibold text-slate-500 sm:col-span-3">Property address<input value={loiFields.property_address ?? ''} onChange={(e) => setLf('property_address', e.target.value)} className="input mt-1 h-8 w-full text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-500">Closing (days)<input inputMode="numeric" value={loiFields.closing_days ?? ''} onChange={(e) => setLf('closing_days', onlyNum(e.target.value))} className="input mt-1 h-9 w-full text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-500">Inspection (days)<input inputMode="numeric" value={loiFields.inspection_days ?? ''} onChange={(e) => setLf('inspection_days', onlyNum(e.target.value))} className="input mt-1 h-9 w-full text-sm" /></label>
+                    <label className="col-span-2 text-[11px] font-semibold text-slate-500 sm:col-span-1">Buyer / entity<input value={loiFields.buyer_name ?? ''} onChange={(e) => setLf('buyer_name', e.target.value)} className="input mt-1 h-9 w-full text-sm" /></label>
                   </div>
                   <div>
                     <button onClick={genLoi} disabled={loiBusy === 'gen'} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50">{loiBusy === 'gen' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Generate draft from these terms</button>
                   </div>
-                  <textarea value={loiBody} onChange={(e) => setLoiBody(e.target.value)} rows={16} placeholder="Generate a draft above, or write the LOI here…" className="input w-full resize-y font-mono text-xs leading-relaxed" />
+                  <textarea value={loiBody} onChange={(e) => setLoiBody(e.target.value)} rows={16} placeholder="Generate a draft above, or write the LOI here..." className="input w-full resize-y font-mono text-xs leading-relaxed" />
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <button onClick={saveLoi} disabled={loiBusy === 'save' || !loiBody.trim()} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50">{loiBusy === 'save' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save</button>
                     <button onClick={exportLoiPdf} disabled={!loiBody.trim()} className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50"><FileText className="h-3.5 w-3.5" /> Export PDF</button>
-                    <button onClick={sendLoi} disabled={loiBusy === 'send' || !loiBody.trim()} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{loiBusy === 'send' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Mark sent → Offer sent</button>
+                    <button onClick={sendLoi} disabled={loiBusy === 'send' || !loiBody.trim()} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{loiBusy === 'send' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Mark sent - Offer sent</button>
                   </div>
-                  <p className="text-[11px] text-slate-400">Export opens a print-ready page — choose “Save as PDF”. This is a non-binding letter of intent.</p>
+                  <p className="text-[11px] text-slate-400">Export opens a print-ready page - choose "Save as PDF". This is a non-binding letter of intent.</p>
                 </div>
               ) : tab === 'team' ? (
                 <div>
                   <div className="mb-3 flex items-center gap-2">
                     <span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-100 text-indigo-600"><MessagesSquare className="h-4 w-4" /></span>
                     <div>
-                      <h3 className="text-sm font-bold text-ink">Team discussion — internal</h3>
+                      <h3 className="text-sm font-bold text-ink">Team discussion - internal</h3>
                       <p className="text-[11px] text-slate-500">Private to your workspace. The customer never sees this. @mention a teammate to notify them.</p>
                     </div>
                   </div>
-                  <MentionThread members={teamMembers} messages={comments} loading={commentsLoading} onPost={postComment} heightClass="max-h-[520px]" placeholder="Discuss this lead with your team… type @ to mention a teammate" emptyText="No internal comments yet. Start the discussion — @mention a teammate to loop them in." />
+                  <MentionThread members={teamMembers} messages={comments} loading={commentsLoading} onPost={postComment} heightClass="max-h-[520px]" placeholder="Discuss this lead with your team... type @ to mention a teammate" emptyText="No internal comments yet. Start the discussion - @mention a teammate to loop them in." />
                 </div>
               ) : tab === 'property' ? (
                 parcelEntries.length === 0 ? <EmptyState text="No property data on this lead." /> : (
@@ -938,7 +963,7 @@ export default function LeadDetail() {
                   </dl>
                 )
               ) : tab === 'calls' ? (
-                callsLoading ? <LoadingBlock label="Loading call history…" /> :
+                callsLoading ? <LoadingBlock label="Loading call history..." /> :
                 sortedCalls.length === 0 ? <EmptyState text="No dialer calls matched to this record's numbers yet." /> :
                 <>
                 {aiFollowUp && (
@@ -963,7 +988,7 @@ export default function LeadDetail() {
                           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${inbound ? 'bg-sky-100 text-sky-700' : 'bg-violet-100 text-violet-700'}`}>
                             {inbound ? <PhoneIncoming className="h-3 w-3" /> : <PhoneOutgoing className="h-3 w-3" />}{inbound ? 'Inbound' : 'Outbound'}
                           </span>
-                          <span className="text-xs font-semibold text-ink">{c.start_timestamp ? new Date(Number(c.start_timestamp)).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}</span>
+                          <span className="text-xs font-semibold text-ink">{c.start_timestamp ? new Date(Number(c.start_timestamp)).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '-'}</span>
                         </div>
                         {c.disposition && (
                           <span className="inline-flex items-center gap-1.5">
@@ -1001,8 +1026,8 @@ export default function LeadDetail() {
                 })}</ol>
                 </>
               ) : tab === 'ledger' ? (
-                ledgerLoading ? <LoadingBlock label="Loading activity…" /> :
-                ledger.length === 0 ? <EmptyState text="No activity recorded yet — assignments, follower changes, stage moves and note edits will appear here." /> :
+                ledgerLoading ? <LoadingBlock label="Loading activity..." /> :
+                ledger.length === 0 ? <EmptyState text="No activity recorded yet - assignments, follower changes, stage moves and note edits will appear here." /> :
                 <ol className="space-y-2">{ledger.map((a, i) => (
                   <li key={a.id || i} className="flex items-start gap-3 border-b border-dashed border-line pb-2 text-sm last:border-0">
                     <div className="grid h-6 w-6 flex-none place-items-center rounded-full bg-surface text-[9px] font-bold text-slate-500">{(a.actor_name || 'SY').split(' ').map((w: string) => w[0]).slice(0, 2).join('')}</div>
@@ -1010,14 +1035,14 @@ export default function LeadDetail() {
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="font-semibold text-ink">{a.actor_name || 'System'}</span>
                         <span className="text-slate-600">{LEDGER_LABEL[a.action] || fmt.title(a.action || '')}</span>
-                        {ledgerDetail(a) && <span className="text-slate-400">· {ledgerDetail(a)}</span>}
+                        {ledgerDetail(a) && <span className="text-slate-400">- {ledgerDetail(a)}</span>}
                       </div>
                       <div className="text-xs text-slate-400">{a.created_at ? new Date(a.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</div>
                     </div>
                   </li>
                 ))}</ol>
               ) : (
-                activityList.length === 0 ? <EmptyState text="No activity yet — add a note, log a call, or record an email/text above." /> :
+                activityList.length === 0 ? <EmptyState text="No activity yet - add a note, log a call, or record an email/text above." /> :
                 <ol className="space-y-3">{activityList.map((n) => {
                   const text = cleanNote(n.body_html || n.body_text || '');
                   const editing = editNoteId === n.id;
@@ -1031,12 +1056,12 @@ export default function LeadDetail() {
                             <span className="text-xs text-slate-400">{n.note_date || ''}</span>
                             {!editing && (noteEditable(n) ? (
                               <>
-                                <button onClick={() => { setEditNoteId(n.id); setEditNoteText(text); }} title={noteIsOverride(n) ? 'Edit note (super-admin override — logged)' : 'Edit note'} className="rounded p-1 text-slate-300 transition hover:text-brand"><Pencil className="h-3.5 w-3.5" /></button>
-                                <button onClick={() => deleteNoteById(n)} title={noteIsOverride(n) ? 'Delete note (super-admin override — logged)' : 'Delete note'} className="rounded p-1 text-slate-300 transition hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                                <button onClick={() => { setEditNoteId(n.id); setEditNoteText(text); }} title={noteIsOverride(n) ? 'Edit note (super-admin override - logged)' : 'Edit note'} className="rounded p-1 text-slate-300 transition hover:text-brand"><Pencil className="h-3.5 w-3.5" /></button>
+                                <button onClick={() => deleteNoteById(n)} title={noteIsOverride(n) ? 'Delete note (super-admin override - logged)' : 'Delete note'} className="rounded p-1 text-slate-300 transition hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
                                 {noteIsOverride(n) && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">override</span>}
                               </>
                             ) : (
-                              <span title="Locked — editable only by the author within 24 hours" className="p-1 text-slate-300"><Lock className="h-3.5 w-3.5" /></span>
+                              <span title="Locked - editable only by the author within 24 hours" className="p-1 text-slate-300"><Lock className="h-3.5 w-3.5" /></span>
                             ))}
                           </div>
                         </div>
@@ -1044,13 +1069,13 @@ export default function LeadDetail() {
                           <div>
                             <textarea autoFocus value={editNoteText} onChange={(e) => setEditNoteText(e.target.value)} rows={3} className="input w-full resize-y text-sm" />
                             <div className="mt-1.5 flex items-center justify-end gap-1">
-                              {noteIsOverride(n) && <span className="mr-auto text-[11px] font-semibold text-amber-600">Editing as super-admin override — this is logged.</span>}
+                              {noteIsOverride(n) && <span className="mr-auto text-[11px] font-semibold text-amber-600">Editing as super-admin override - this is logged.</span>}
                               <button onClick={() => setEditNoteId(null)} className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-white">Cancel</button>
                               <button onClick={() => saveNoteEdit(n)} disabled={noteBusy || !editNoteText.trim()} className="inline-flex items-center gap-1 rounded-lg bg-brand px-2.5 py-1 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{noteBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save</button>
                             </div>
                           </div>
                         ) : (
-                          <div className="whitespace-pre-line text-sm leading-relaxed text-slate-700">{text || <span className="text-slate-400">—</span>}</div>
+                          <div className="whitespace-pre-line text-sm leading-relaxed text-slate-700">{text || <span className="text-slate-400">-</span>}</div>
                         )}
                       </div>
                     </li>
@@ -1061,18 +1086,18 @@ export default function LeadDetail() {
           </div>
         </div>
 
-        {/* RIGHT column — deal status, negotiation tracker, LOI documents/email, deals, placeholders */}
+        {/* RIGHT column - deal status, negotiation tracker, LOI documents/email, deals, placeholders */}
         <div className="space-y-4">
           {/* Deal terms: OUR terms (from the LOI) vs the CUSTOMER's, with auto-deltas + dated history. */}
-          <Card title="Deal terms — ours vs theirs">
+          <Card title="Deal terms - ours vs theirs">
             {(() => {
               const o = terms.ours, th = terms.theirs, dl = terms.delta;
-              const fmtD = (v: any) => (v == null ? '—' : String(v));
+              const fmtD = (v: any) => (v == null ? '-' : String(v));
               const TRow = ({ label, ov, tv, dv, f }: any) => (
                 <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 border-b border-dashed border-line py-1.5 text-xs last:border-0">
                   <span className="text-slate-500">{label}</span>
-                  <span className="w-16 text-right font-semibold text-ink">{ov == null ? '—' : f(ov)}</span>
-                  <span className="w-16 text-right font-semibold text-violet-600">{tv == null ? '—' : f(tv)}</span>
+                  <span className="w-16 text-right font-semibold text-ink">{ov == null ? '-' : f(ov)}</span>
+                  <span className="w-16 text-right font-semibold text-violet-600">{tv == null ? '-' : f(tv)}</span>
                   <span className={`w-16 text-right font-bold ${dv == null ? 'text-slate-300' : dv === 0 ? 'text-slate-400' : dv > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{dv == null ? '' : (dv > 0 ? '+' : '') + f(dv)}</span>
                 </div>
               );
@@ -1108,7 +1133,7 @@ export default function LeadDetail() {
 
                   {/* Snapshot the current terms onto the record's custom data for quick reference. */}
                   {(o || th) && (
-                    <button onClick={() => { saveLead({ custom: { ...(lead.custom || {}), loi_price: o?.price ?? '', loi_down: o?.down_payment ?? '', loi_closing: o?.closing_days ?? '', loi_inspection: o?.inspection_days ?? '', their_price: th?.price ?? '' } }); flash('Deal terms saved to the record.'); }} className="mt-2 text-[11px] font-semibold text-brand hover:underline">Save deal terms to record →</button>
+                    <button onClick={() => { saveLead({ custom: { ...(lead.custom || {}), loi_price: o?.price ?? '', loi_down: o?.down_payment ?? '', loi_closing: o?.closing_days ?? '', loi_inspection: o?.inspection_days ?? '', their_price: th?.price ?? '' } }); flash('Deal terms saved to the record.'); }} className="mt-2 text-[11px] font-semibold text-brand hover:underline">Save deal terms to record -</button>
                   )}
 
                   {/* Dated negotiation log. */}
@@ -1120,8 +1145,8 @@ export default function LeadDetail() {
                           <li key={h.id} className="flex items-start gap-1.5 text-[11px]">
                             <span className={`mt-0.5 rounded px-1 py-0.5 text-[9px] font-bold uppercase ${h.side === 'theirs' ? 'bg-violet-100 text-violet-700' : 'bg-brand/10 text-brand'}`}>{h.side === 'theirs' ? 'Them' : 'Us'}</span>
                             <div className="min-w-0 flex-1">
-                              <span className="text-slate-600">{[h.price != null && money0(h.price), h.closing_days != null && `${h.closing_days}d close`].filter(Boolean).join(' · ') || h.note || '—'}</span>
-                              <div className="text-[10px] text-slate-400">{h.created_by || 'System'} · {h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</div>
+                              <span className="text-slate-600">{[h.price != null && money0(h.price), h.closing_days != null && `${h.closing_days}d close`].filter(Boolean).join(' - ') || h.note || '-'}</span>
+                              <div className="text-[10px] text-slate-400">{h.created_by || 'System'} - {h.created_at ? new Date(h.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</div>
                             </div>
                           </li>
                         ))}
@@ -1133,7 +1158,7 @@ export default function LeadDetail() {
             })()}
           </Card>
 
-          {/* Letter of Intent — export, email (compose + secure link), and the versioned history. */}
+          {/* Letter of Intent - export, email (compose + secure link), and the versioned history. */}
           <Card title="Letter of Intent" count={loiDocs.length}>
             <div className="flex flex-wrap gap-1.5">
               <button onClick={() => setTab('loi')} className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><FileText className="h-3.5 w-3.5" /> Open / edit</button>
@@ -1142,17 +1167,17 @@ export default function LeadDetail() {
               <button onClick={() => emailLoi('outlook')} disabled={!!emailBusy} className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand disabled:opacity-50">{emailBusy === 'outlook' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />} Outlook</button>
             </div>
             <div className="mt-2 space-y-1">
-              {loiDocs.length === 0 ? <div className="text-xs text-slate-400">No versions yet — Generate on the LOI tab. Each generation is saved here with a timestamp.</div> : loiDocs.slice(0, 6).map((d) => (
+              {loiDocs.length === 0 ? <div className="text-xs text-slate-400">No versions yet - Generate on the LOI tab. Each generation is saved here with a timestamp.</div> : loiDocs.slice(0, 6).map((d) => (
                 <div key={d.id} className="flex items-center justify-between gap-2 border-b border-dashed border-line py-1 text-[11px] last:border-0">
                   <span className="text-slate-600">{d.created_at ? new Date(d.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''}</span>
-                  <span className="truncate text-slate-400">{d.created_by || 'System'}{d.sent_at ? ' · sent' : ''}</span>
+                  <span className="truncate text-slate-400">{d.created_by || 'System'}{d.sent_at ? ' - sent' : ''}</span>
                 </div>
               ))}
             </div>
             <p className="mt-1.5 text-[10px] text-slate-400">Email opens a compose window with an AI intro + a secure link to the LOI.</p>
           </Card>
 
-          {/* Deals / pipelines — a contact can sit in several at once; each shows distinctly. */}
+          {/* Deals / pipelines - a contact can sit in several at once; each shows distinctly. */}
           <Card title="Deals / Pipelines" count={opps.length}>
             <div className="space-y-1.5">
               {opps.length === 0 && <div className="text-xs text-slate-400">Not in any pipeline yet.</div>}
@@ -1162,14 +1187,14 @@ export default function LeadDetail() {
                     <span className="truncate text-xs font-semibold text-ink" title={o.pipeline_name}>{o.pipeline_name}</span>
                     {o.is_standard && <span className="shrink-0 rounded bg-brand/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-brand">Calls</span>}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">Stage: <span className="font-semibold text-slate-600">{o.stage_name || '—'}</span></div>
+                  <div className="mt-0.5 text-[11px] text-slate-500">Stage: <span className="font-semibold text-slate-600">{o.stage_name || '-'}</span></div>
                 </div>
               ))}
             </div>
-            <button onClick={() => setTab('details')} className="mt-2 text-[11px] font-semibold text-brand hover:underline">Manage pipelines →</button>
+            <button onClick={() => setTab('details')} className="mt-2 text-[11px] font-semibold text-brand hover:underline">Manage pipelines -</button>
           </Card>
 
-          {/* Placeholders — wired to real backends in a later pass. */}
+          {/* Placeholders - wired to real backends in a later pass. */}
           <Card title="Tasks"><div className="text-xs text-slate-400">No open tasks</div></Card>
           <Card title="Appointments"><div className="text-xs text-slate-400">No upcoming appointments</div></Card>
           <Card title="Files"><div className="text-xs text-slate-400">No files yet</div></Card>
@@ -1190,7 +1215,7 @@ export default function LeadDetail() {
                 <label className="mb-1 block text-xs font-semibold text-slate-500">AI Voice Agent</label>
                 {agents.length ? (
                   <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="input w-full">
-                    {!agents.some((a) => a.agent_id === agentId) && <option value="">Select an agent…</option>}
+                    {!agents.some((a) => a.agent_id === agentId) && <option value="">Select an agent...</option>}
                     {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
                   </select>
                 ) : (
@@ -1209,7 +1234,7 @@ export default function LeadDetail() {
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-500">Number</label>
                   <select value={callTo} onChange={(e) => setCallTo(e.target.value)} className="input w-full">
-                    {contacts.filter((c) => String(c.phone || '').replace(/\D/g, '').length >= 10).map((c) => <option key={c.contact_id} value={c.phone}>{fmtNum(c.phone)}{c.is_primary_number ? ' · primary' : ''}{c.do_not_call ? ' · DNC' : ''}</option>)}
+                    {contacts.filter((c) => String(c.phone || '').replace(/\D/g, '').length >= 10).map((c) => <option key={c.contact_id} value={c.phone}>{fmtNum(c.phone)}{c.is_primary_number ? ' - primary' : ''}{c.do_not_call ? ' - DNC' : ''}</option>)}
                   </select>
                 </div>
               )}
@@ -1226,7 +1251,7 @@ export default function LeadDetail() {
               <button onClick={aiCallBrief} className="text-xs font-semibold text-slate-500 hover:text-brand">Copy context brief</button>
               <div className="flex gap-2">
                 <button onClick={() => setCallOpen(false)} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-surface">Cancel</button>
-                <button onClick={launchCall} disabled={calling || !agentId || (callScope === 'one' && !callTo)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{calling ? <><Loader2 className="h-4 w-4 animate-spin" /> Dialing…</> : <><PhoneCall className="h-4 w-4" /> {callScope === 'all' ? 'Launch Calls' : 'Launch Call'}</>}</button>
+                <button onClick={launchCall} disabled={calling || !agentId || (callScope === 'one' && !callTo)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">{calling ? <><Loader2 className="h-4 w-4 animate-spin" /> Dialing...</> : <><PhoneCall className="h-4 w-4" /> {callScope === 'all' ? 'Launch Calls' : 'Launch Call'}</>}</button>
               </div>
             </div>
           </div>
@@ -1237,8 +1262,8 @@ export default function LeadDetail() {
 }
 
 function StagePill({ name, color }: { name?: string; color?: string }) {
-  if (!color) return <span className="pill bg-brand/10 text-brand">{name || '—'}</span>;
-  return <span className="pill" style={{ backgroundColor: `${color}1a`, color }}>{name || '—'}</span>;
+  if (!color) return <span className="pill bg-brand/10 text-brand">{name || '-'}</span>;
+  return <span className="pill" style={{ backgroundColor: `${color}1a`, color }}>{name || '-'}</span>;
 }
 
 function Stat({ icon: Icon, label, value }: { icon: any; label: string; value: any }) {
@@ -1285,7 +1310,7 @@ function EditRow({ k, value, type = 'text', display, onSave }: { k: string; valu
         </span>
       ) : (
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-right font-medium text-ink">{display ?? (value || '—')}</span>
+          <span className="truncate text-right font-medium text-ink">{display ?? (value || '-')}</span>
           <button onClick={() => setEditing(true)} title={`Edit ${k}`} className="shrink-0 rounded p-1 text-slate-300 transition hover:text-brand"><Pencil className="h-3 w-3" /></button>
         </span>
       )}
@@ -1321,7 +1346,7 @@ function PhoneRow({ c, onPatch, onSave, onDelete, showRel }: { c: any; onPatch: 
             <a href={`tel:${c.phone}`} className="font-mono text-sm font-semibold text-brand hover:underline">{fmtNum(c.phone)}</a>
             <div className="flex items-center gap-0.5">
               <Link to={`/contacts/${encodeURIComponent(String(c.phone).replace(/\D/g, '').slice(-10))}`} title="View this number's full call history" className="rounded-md p-1 text-slate-300 transition hover:text-brand"><History className="h-4 w-4" /></Link>
-              <button title={c.phone_verified ? 'Verified — click to unverify' : 'Mark verified'} onClick={() => onPatch(c.contact_id, { phone_verified: !c.phone_verified })} className={`rounded-md p-1 transition ${c.phone_verified ? 'text-emerald-600' : 'text-slate-300 hover:text-slate-500'}`}><BadgeCheck className="h-4 w-4" /></button>
+              <button title={c.phone_verified ? 'Verified - click to unverify' : 'Mark verified'} onClick={() => onPatch(c.contact_id, { phone_verified: !c.phone_verified })} className={`rounded-md p-1 transition ${c.phone_verified ? 'text-emerald-600' : 'text-slate-300 hover:text-slate-500'}`}><BadgeCheck className="h-4 w-4" /></button>
               <button title="Set as primary number" onClick={() => onPatch(c.contact_id, { is_primary_number: true })} className={`rounded-md p-1 transition ${c.is_primary_number ? 'text-amber-500' : 'text-slate-300 hover:text-slate-500'}`}><Star className={`h-4 w-4 ${c.is_primary_number ? 'fill-amber-400' : ''}`} /></button>
               <button title="Edit number" onClick={openEdit} className="rounded-md p-1 text-slate-300 transition hover:text-brand"><Pencil className="h-4 w-4" /></button>
               <button title="Delete number" onClick={() => onDelete(c.contact_id)} className="rounded-md p-1 text-slate-300 transition hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
@@ -1332,7 +1357,7 @@ function PhoneRow({ c, onPatch, onSave, onDelete, showRel }: { c: any; onPatch: 
             {c.phone_label && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{c.phone_label}</span>}
             {c.phone_verified && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">✓ verified</span>}
             {c.is_primary_number && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">★ primary</span>}
-            {showRel && c.related_name && <span className="text-slate-500">{c.related_name}{c.relation_type ? ` · ${c.relation_type}` : ''}</span>}
+            {showRel && c.related_name && <span className="text-slate-500">{c.related_name}{c.relation_type ? ` - ${c.relation_type}` : ''}</span>}
           </div>
         </>
       )}
