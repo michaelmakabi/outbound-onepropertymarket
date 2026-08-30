@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { testai } from '../lib/api';
 import { useWorkspace } from '../lib/workspace';
-import { useAuth } from '../lib/auth';
 import { Spinner } from '../components/ui';
 import {
   Bot, ArrowLeft, Save, Loader2, CheckCircle2, AlertCircle, X, Mic, Play, Pause,
@@ -49,7 +48,6 @@ export default function AgentEdit() {
   const nav = useNavigate();
   const { agentId = '' } = useParams();
   const { active, activeName, loading: wsLoading } = useWorkspace();
-  const { isAdmin } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -75,9 +73,8 @@ export default function AgentEdit() {
   const setA = (k: string, v: any) => setAgent((p) => ({ ...p, [k]: v }));
   const setL = (k: string, v: any) => setLlm((p) => ({ ...p, [k]: v }));
 
-  useEffect(() => {
-    if (!wsLoading && !isAdmin) nav('/ai-agents', { replace: true });
-  }, [wsLoading, isAdmin, nav]);
+  // Agent create/edit is open to every workspace member (never delete). The backend still enforces
+  // per-workspace / per-agent access on save, so there is no role gate here.
 
   useEffect(() => {
     if (!active || !agentId) return;
