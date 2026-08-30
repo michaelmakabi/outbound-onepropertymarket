@@ -8,7 +8,7 @@ import NotificationBell from './NotificationBell';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare, Layers, Phone,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare, Layers, Phone, Home,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -52,6 +52,7 @@ const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/seller-contacts', label: 'Contacts', icon: Contact },
   { to: '/pipelines', label: 'Pipelines', icon: Columns3 },
+  { to: '/properties', label: 'Properties', icon: Home },
   { to: '/campaigns', label: 'Campaigns', icon: Radio },
   { to: '/phone-numbers', label: 'Phone Numbers', icon: Phone },
   { to: '/team', label: 'Team', icon: MessageSquare },
