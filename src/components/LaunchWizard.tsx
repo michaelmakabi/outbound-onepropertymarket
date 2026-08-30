@@ -8,6 +8,7 @@
 // already chosen. The pre-seeded selection is preserved (never cleared on mount).
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { opm, testai, fmt } from '../lib/api';
+import { listings as listingsApi } from '../lib/listings';
 import { num } from '../lib/format';
 import { LOGO_MARK } from '../lib/logo';
 import ImportWizard from './ImportWizard';
@@ -92,6 +93,10 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
   const [showImport, setShowImport] = useState(false);
 
   const [dialMode, setDialMode] = useState<'primary' | 'all_numbers'>('primary');
+  // Campaign kind: acquisition (call sellers) or disposition (qualify buyers for an assigned listing).
+  const [campaignKind, setCampaignKind] = useState<'acquisition' | 'disposition'>('acquisition');
+  const [propertyId, setPropertyId] = useState('');
+  const [properties, setProperties] = useState<{ id: string; title: string; status: string; city: string | null; state: string | null; disposition_price: number | null }[]>([]);
   const [name, setName] = useState(initialName || '');
   // Launch timing: 'now' starts immediately; 'schedule' holds the campaign until scheduleAt.
   const [launchMode, setLaunchMode] = useState<'now' | 'schedule'>('now');
@@ -195,6 +200,15 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
     fetchLeads(lockedWorkspace);
     loadLists(lockedWorkspace);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Disposition campaigns: load this workspace's listings for the "which property" picker, and
+  // auto-suggest the Adrian Disposition agent so the wizard is pre-wired for buyer qualification.
+  useEffect(() => {
+    if (campaignKind !== 'disposition' || !ws) return;
+    listingsApi.list().then((d: any) => setProperties(d.properties || [])).catch(() => setProperties([]));
+    const dispo = agents.find((a) => /disposition/i.test(a.agent_name) && /outbound/i.test(a.agent_name)) || agents.find((a) => /disposition/i.test(a.agent_name));
+    if (dispo && (!agentId || !/disposition/i.test(agents.find((a) => a.agent_id === agentId)?.agent_name || ''))) setAgentId(dispo.agent_id);
+  }, [campaignKind, ws, agents]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -305,10 +319,16 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
       const payload: any = { workspace: ws, name: name.trim(), agent_id: agentId, agent_name: agentName, lead_ids: [...selected], dial_mode: dialMode, timezone };
       if (launchMode === 'schedule' && scheduleAt) payload.scheduled_at = new Date(scheduleAt).toISOString();
       const r = await opm.campaignLaunch(payload);
+      const newId = r?.campaign?.id || r?.id || null;
+      // Disposition campaign: attach the kind + assigned listing so the drip injects the property's
+      // context (address-safe) into every buyer call. Set immediately, before the first drip tick.
+      if (newId && campaignKind === 'disposition') {
+        try { await opm.campaignSetMeta({ id: newId, workspace: ws, campaign_kind: 'disposition', property_id: propertyId || null }); } catch (_e) { /* non-fatal */ }
+      }
       // Let the final "Launching…" frame breathe for a beat so the transition doesn't feel abrupt.
       setLaunchStep(LAUNCH_STEPS.length - 1);
       await new Promise((res) => setTimeout(res, 500));
-      onLaunched(r?.campaign?.id);
+      onLaunched(newId);
     } catch (e: any) { setErr(String(e?.message || e)); setBusy(false); }
   };
 
@@ -369,6 +389,34 @@ export default function LaunchWizard({ workspaces, lockedWorkspace, initialLeadI
 
         {step === 1 && (
           <div>
+            {/* Campaign type: acquisition (call sellers) vs disposition (qualify buyers for a listing). */}
+            <label className="mb-2 block text-base font-bold text-ink">Campaign type</label>
+            <div className="mb-4 grid grid-cols-2 gap-3">
+              <button type="button" onClick={() => setCampaignKind('acquisition')}
+                className={`rounded-2xl border p-4 text-left transition ${campaignKind === 'acquisition' ? 'border-brand bg-brand-light/30' : 'border-line hover:bg-surface'}`}>
+                <div className="text-sm font-bold text-ink">Acquisition</div>
+                <div className="mt-0.5 text-xs text-slate-500">Call owners / sellers about their property (Adrian Acquisition).</div>
+              </button>
+              <button type="button" onClick={() => setCampaignKind('disposition')}
+                className={`rounded-2xl border p-4 text-left transition ${campaignKind === 'disposition' ? 'border-brand bg-brand-light/30' : 'border-line hover:bg-surface'}`}>
+                <div className="text-sm font-bold text-ink">Disposition</div>
+                <div className="mt-0.5 text-xs text-slate-500">Qualify buyers for a listing (Adrian Disposition). Off-market address stays private until qualified.</div>
+              </button>
+            </div>
+            {campaignKind === 'disposition' && (
+              <div className="mb-4">
+                <label className="mb-1.5 block text-sm font-bold text-ink">Property / listing to pitch</label>
+                <select className="input !py-3 text-base" value={propertyId} onChange={(e) => setPropertyId(e.target.value)}>
+                  <option value="">No specific listing — source buyers for our inventory generally</option>
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title || 'Untitled'} · {p.status === 'on_market' ? 'On-market' : 'Off-market'}{[p.city, p.state].filter(Boolean).length ? ' · ' + [p.city, p.state].filter(Boolean).join(', ') : ''}{p.disposition_price != null ? ' · $' + Math.round(Number(p.disposition_price)).toLocaleString() : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-slate-500">The agent pulls this property in real time. For off-market listings it discusses area, type and numbers but never the exact street address until the buyer is qualified. Leave blank to have the agent match buyers to inventory live.</p>
+              </div>
+            )}
             <label className="mb-2 block text-base font-bold text-ink">AI voice agent</label>
             <select className="input !py-3.5 text-base" value={agentId} onChange={(e) => setAgentId(e.target.value)}>
               {!agents.length && <option value="">Loading agents…</option>}
