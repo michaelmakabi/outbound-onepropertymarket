@@ -327,6 +327,10 @@ export const opm = {
   // credit_reason, credit_message, issues[] }. Block Launch when !ok and show issues. Served by opm-campaign.
   campaignPreflight: (b: { workspace?: string; agent_id: string }) =>
     opmCampaignCall('campaign_preflight', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
+  // Attach disposition metadata (kind + assigned listing) to a campaign right after it's created.
+  // The drip reads these off the campaign row to inject the listing's context into every buyer call.
+  campaignSetMeta: (b: { id: string; campaign_kind: 'acquisition' | 'disposition'; property_id?: string | null; workspace?: string }) =>
+    opmCampaignCall('campaign_set_meta', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
   // Caller-ID numbers assigned to a workspace's dialer + usage (total calls, last used), most-used first.
   // Powers the launch wizard's "which numbers this agent uses" panel. Served by opm-campaign.
   campaignNumberUsage: (workspace?: string) =>
