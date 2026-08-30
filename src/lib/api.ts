@@ -329,7 +329,7 @@ export const opm = {
     opmCampaignCall('campaign_preflight', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
   // Attach disposition metadata (kind + assigned listing) to a campaign right after it's created.
   // The drip reads these off the campaign row to inject the listing's context into every buyer call.
-  campaignSetMeta: (b: { id: string; campaign_kind: 'acquisition' | 'disposition'; property_id?: string | null; workspace?: string }) =>
+  campaignSetMeta: (b: { id: string; campaign_kind?: 'acquisition' | 'disposition'; property_id?: string | null; workspace?: string; timezone?: string; window_start_hour?: number; window_end_hour?: number; window_days?: number[]; scheduled_at?: string | null }) =>
     opmCampaignCall('campaign_set_meta', { method: 'POST', params: b.workspace ? { workspace: b.workspace } : undefined, body: b }),
   // Caller-ID numbers assigned to a workspace's dialer + usage (total calls, last used), most-used first.
   // Powers the launch wizard's "which numbers this agent uses" panel. Served by opm-campaign.
