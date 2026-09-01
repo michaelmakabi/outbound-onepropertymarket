@@ -49,6 +49,7 @@ import PhoneNumbers from './pages/PhoneNumbers';
 import Properties from './pages/Properties';
 import PropertyDetail from './pages/PropertyDetail';
 import Calendar from './pages/Calendar';
+import Tutorial from './pages/Tutorial';
 
 // admin: admin/super_admin only. op: operator tooling - hidden from customers (role=user).
 function Protected({ children, admin, op }: { children: JSX.Element; admin?: boolean; op?: boolean }) {
@@ -105,6 +106,7 @@ export default function App() {
       <Route path="/properties" element={<Protected><Properties /></Protected>} />
       <Route path="/properties/:id" element={<Protected><PropertyDetail /></Protected>} />
       <Route path="/calendar" element={<Protected><Calendar /></Protected>} />
+      <Route path="/tutorial" element={<Protected><Tutorial /></Protected>} />
       <Route path="/routing" element={<Protected><LeadRouting /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/notifications-center" element={<Protected><NotificationCenter /></Protected>} />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { StageIcon } from '../lib/statusIcons';
+import { StageIcon, STAGE_ICON_NAMES } from '../lib/statusIcons';
 import SmartLists from '../components/SmartLists';
 import type { Dispatch, SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -10,8 +10,24 @@ import { useWorkspace } from '../lib/workspace';
 import {
   Plus, Trash2, GripVertical, LayoutGrid, Table as TableIcon, Columns3,
   Search, Calendar, Phone, MapPin, Layers, TrendingUp, Target, Activity, Pencil, X, DollarSign, Filter, Check,
-  PhoneIncoming, PhoneOutgoing, Clock, Bot,
+  PhoneIncoming, PhoneOutgoing, Clock, Bot, ChevronLeft, ChevronRight, Sliders,
 } from 'lucide-react';
+
+// Curated color palette for pipeline stages (Tailwind-ish hues). Stored as hex on each stage.
+const STAGE_PALETTE = [
+  '#2563eb', '#0ea5e9', '#06b6d4', '#14b8a6', '#10b981', '#22c55e', '#84cc16', '#eab308',
+  '#f59e0b', '#f97316', '#ef4444', '#e11d48', '#ec4899', '#a855f7', '#8b5cf6', '#6366f1',
+  '#64748b', '#0f172a',
+];
+// Default stage set seeded when a user creates a brand-new pipeline (fully editable before save).
+const DEFAULT_NEW_STAGES: { name: string; color: string; icon: string }[] = [
+  { name: 'New Lead', color: '#2563eb', icon: 'UserPlus' },
+  { name: 'Contacted', color: '#f59e0b', icon: 'PhoneForwarded' },
+  { name: 'Appointment Set', color: '#8b5cf6', icon: 'CalendarCheck' },
+  { name: 'Offer Sent', color: '#06b6d4', icon: 'Send' },
+  { name: 'Won', color: '#22c55e', icon: 'Trophy' },
+  { name: 'Lost', color: '#ef4444', icon: 'XCircle' },
+];
 
 type Stage = { id: number; name: string; color: string; sort_order: number; leadCount: number; valueSum?: number; icon?: string | null };
 type Pipeline = { id: number; name: string; workspace?: string; sort_order?: number; stages: Stage[] };
@@ -170,10 +186,55 @@ export default function Pipelines() {
     return () => { cancelled = true; };
   }, [active]);
 
-  // ---- CRUD (unchanged behaviour) ----
-  async function addPipeline() {
-    const name = prompt('New pipeline name'); if (!name) return;
-    await opm.savePipeline({ name, sort_order: pipelines.length }); loadPipelines();
+  // Stage curation modals: single-stage editor (add/edit color+icon) + new-pipeline builder.
+  const [stageEdit, setStageEdit] = useState<{ stage: Stage | null } | null>(null);
+  const [newPipeOpen, setNewPipeOpen] = useState(false);
+  const [stageBusy, setStageBusy] = useState(false);
+
+  // ---- CRUD ----
+  function addPipeline() { setNewPipeOpen(true); }
+  // Create a pipeline + its curated stages (color + icon) in order, then focus it.
+  async function createPipeline(name: string, draft: { name: string; color: string; icon: string }[]) {
+    setStageBusy(true);
+    try {
+      const r: any = await opm.savePipeline({ name, sort_order: pipelines.length });
+      const pid = r?.pipeline?.id;
+      if (pid) {
+        for (let i = 0; i < draft.length; i++) {
+          const d = draft[i];
+          await opm.saveStage({ pipeline_id: pid, name: d.name, color: d.color, icon: d.icon, sort_order: i });
+        }
+      }
+      setNewPipeOpen(false);
+      await loadPipelines();
+      if (pid) setActive(pid);
+    } finally { setStageBusy(false); }
+  }
+  // Persist a single stage (create when no id, else update) with color + icon.
+  async function submitStage(vals: { name: string; color: string; icon: string | null }) {
+    if (!current) return;
+    setStageBusy(true);
+    try {
+      const s = stageEdit?.stage;
+      await opm.saveStage(s
+        ? { id: s.id, name: vals.name, color: vals.color, icon: vals.icon, sort_order: s.sort_order }
+        : { pipeline_id: current.id, name: vals.name, color: vals.color, icon: vals.icon, sort_order: current.stages.length });
+      setStageEdit(null);
+      loadPipelines();
+    } finally { setStageBusy(false); }
+  }
+  // Reorder a stage left/right on the board and persist the new order.
+  async function moveStage(s: Stage, dir: -1 | 1) {
+    if (!current) return;
+    const ordered = [...current.stages].sort((a, b) => a.sort_order - b.sort_order);
+    const i = ordered.findIndex((x) => x.id === s.id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ordered.length) return;
+    const next = [...ordered];
+    [next[i], next[j]] = [next[j], next[i]];
+    const reindexed = next.map((x, k) => ({ ...x, sort_order: k }));
+    setPipelines((prev) => prev.map((p) => (p.id === current.id ? { ...p, stages: reindexed } : p))); // optimistic
+    try { await opm.reorderStages(reindexed.map((x) => x.id)); } catch { loadPipelines(); }
   }
   async function delPipeline(id: number) {
     const p = pipelines.find((x) => x.id === id);
@@ -200,15 +261,8 @@ export default function Pipelines() {
       loadPipelines(); // resync on failure
     }
   }
-  async function addStage() {
-    if (!current) return;
-    const name = prompt('New stage name'); if (!name) return;
-    await opm.saveStage({ pipeline_id: current.id, name, sort_order: current.stages.length }); loadPipelines();
-  }
-  async function renameStage(s: Stage) {
-    const name = prompt('Rename stage', s.name); if (!name || name === s.name) return;
-    await opm.saveStage({ id: s.id, name, color: s.color, sort_order: s.sort_order }); loadPipelines();
-  }
+  function addStage() { if (current) setStageEdit({ stage: null }); }
+  function renameStage(s: Stage) { setStageEdit({ stage: s }); }
   async function delStage(s: Stage) {
     if (!confirm(`Delete stage "${s.name}"? Leads in it keep their data but lose the stage.`)) return;
     await opm.deleteStage(s.id); loadPipelines();
@@ -550,6 +604,7 @@ export default function Pipelines() {
               current={current} filtered={filtered} dragId={dragId} dragOver={dragOver}
               setDragId={setDragId} setDragOver={setDragOver} moveTo={moveTo}
               openRecord={openRecord} onAddStage={addStage} onRenameStage={renameStage} onDelStage={delStage}
+              onMoveStage={moveStage}
             />
           )}
           {view === 'table' && (
@@ -562,6 +617,159 @@ export default function Pipelines() {
           )}
         </>
       )}
+
+      {/* Single-stage editor (add / edit) - name, color, icon */}
+      {stageEdit && (
+        <StageEditor
+          initial={stageEdit.stage ? { name: stageEdit.stage.name, color: stageEdit.stage.color, icon: stageEdit.stage.icon ?? null } : null}
+          title={stageEdit.stage ? 'Edit stage' : 'New stage'}
+          submitLabel={stageEdit.stage ? 'Save stage' : 'Add stage'}
+          busy={stageBusy}
+          onCancel={() => setStageEdit(null)}
+          onSubmit={submitStage}
+        />
+      )}
+
+      {/* New-pipeline builder - name + curated stages */}
+      {newPipeOpen && (
+        <NewPipelineModal busy={stageBusy} onCancel={() => setNewPipeOpen(false)} onCreate={createPipeline} />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ stage curation modals */
+
+// Reusable color + icon picker body (shared by the stage editor and the new-pipeline row editor).
+function ColorIconPicker({ color, icon, onColor, onIcon }: { color: string; icon: string | null; onColor: (c: string) => void; onIcon: (i: string | null) => void }) {
+  return (
+    <>
+      <div>
+        <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Color</div>
+        <div className="flex flex-wrap gap-1.5">
+          {STAGE_PALETTE.map((c) => (
+            <button key={c} type="button" onClick={() => onColor(c)} title={c}
+              className={cx('h-7 w-7 rounded-full border-2 transition', color === c ? 'border-ink ring-2 ring-offset-1' : 'border-white')}
+              style={{ background: c }}>
+              {color === c && <Check className="mx-auto h-3.5 w-3.5 text-white" />}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Icon</div>
+        <div className="grid max-h-40 grid-cols-8 gap-1 overflow-y-auto rounded-lg border border-line p-2">
+          {STAGE_ICON_NAMES.map((n) => (
+            <button key={n} type="button" onClick={() => onIcon(icon === n ? null : n)} title={n}
+              className={cx('grid h-8 w-8 place-items-center rounded-lg border transition', icon === n ? 'border-brand bg-brand/10' : 'border-transparent hover:bg-surface')}>
+              <StageIcon name={n} color={color} className="h-4 w-4" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function StageEditor({ initial, title, submitLabel, busy, onCancel, onSubmit }: {
+  initial: { name: string; color: string; icon: string | null } | null;
+  title: string; submitLabel: string; busy?: boolean;
+  onCancel: () => void; onSubmit: (v: { name: string; color: string; icon: string | null }) => void;
+}) {
+  const [name, setName] = useState(initial?.name || '');
+  const [color, setColor] = useState(initial?.color || STAGE_PALETTE[0]);
+  const [icon, setIcon] = useState<string | null>(initial?.icon ?? null);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-base font-bold text-ink">{title}</div>
+          <button onClick={onCancel} className="rounded p-1 text-slate-400 hover:text-ink"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Stage name</div>
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Warm Lead" className="input h-10 w-full text-sm"
+              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) onSubmit({ name: name.trim(), color, icon }); }} />
+          </div>
+          <ColorIconPicker color={color} icon={icon} onColor={setColor} onIcon={setIcon} />
+          <div>
+            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Preview</div>
+            <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: `${color}1a`, color }}>
+              <StageIcon name={icon} color={color} className="h-3.5 w-3.5" /> {name.trim() || 'Stage name'}
+            </span>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-surface">Cancel</button>
+          <button onClick={() => onSubmit({ name: name.trim(), color, icon })} disabled={!name.trim() || busy}
+            className="rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">{submitLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type DraftStage = { name: string; color: string; icon: string };
+function NewPipelineModal({ busy, onCancel, onCreate }: { busy?: boolean; onCancel: () => void; onCreate: (name: string, stages: DraftStage[]) => void }) {
+  const [name, setName] = useState('');
+  const [stages, setStages] = useState<DraftStage[]>(DEFAULT_NEW_STAGES.map((s) => ({ ...s })));
+  const [editIdx, setEditIdx] = useState<number | null>(null); // index editing, or -1 to add
+  const move = (i: number, dir: -1 | 1) => setStages((prev) => { const j = i + dir; if (j < 0 || j >= prev.length) return prev; const n = [...prev]; [n[i], n[j]] = [n[j], n[i]]; return n; });
+  const remove = (i: number) => setStages((prev) => prev.filter((_, k) => k !== i));
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-2xl border border-line bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-base font-bold text-ink">New pipeline</div>
+          <button onClick={onCancel} className="rounded p-1 text-slate-400 hover:text-ink"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="mb-4">
+          <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">Pipeline name</div>
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Disposition Pipeline" className="input h-10 w-full text-sm" />
+        </div>
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Stages ({stages.length})</div>
+          <button onClick={() => setEditIdx(-1)} className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line px-2 py-1 text-xs font-semibold text-slate-500 hover:border-brand hover:text-brand"><Plus className="h-3.5 w-3.5" /> Add stage</button>
+        </div>
+        <div className="space-y-1.5">
+          {stages.length === 0 && <div className="rounded-lg border border-dashed border-line py-3 text-center text-xs text-slate-400">No stages yet - add at least one.</div>}
+          {stages.map((s, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg border border-line px-2 py-1.5">
+              <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: `${s.color}1a`, color: s.color }}>
+                <StageIcon name={s.icon} color={s.color} className="h-3.5 w-3.5" /> {s.name}
+              </span>
+              <div className="ml-auto flex items-center gap-0.5">
+                <button title="Up" disabled={i === 0} onClick={() => move(i, -1)} className="rounded p-1 text-slate-300 enabled:hover:text-brand disabled:opacity-30"><ChevronLeft className="h-3.5 w-3.5 rotate-90" /></button>
+                <button title="Down" disabled={i === stages.length - 1} onClick={() => move(i, 1)} className="rounded p-1 text-slate-300 enabled:hover:text-brand disabled:opacity-30"><ChevronRight className="h-3.5 w-3.5 rotate-90" /></button>
+                <button title="Edit" onClick={() => setEditIdx(i)} className="rounded p-1 text-slate-300 hover:text-brand"><Pencil className="h-3.5 w-3.5" /></button>
+                <button title="Remove" onClick={() => remove(i)} className="rounded p-1 text-slate-300 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onCancel} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-surface">Cancel</button>
+          <button onClick={() => onCreate(name.trim(), stages)} disabled={!name.trim() || stages.length === 0 || busy}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-1.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
+            <Sliders className="h-4 w-4" /> Create pipeline
+          </button>
+        </div>
+
+        {editIdx !== null && (
+          <StageEditor
+            initial={editIdx >= 0 ? stages[editIdx] : null}
+            title={editIdx >= 0 ? 'Edit stage' : 'New stage'}
+            submitLabel={editIdx >= 0 ? 'Save' : 'Add'}
+            onCancel={() => setEditIdx(null)}
+            onSubmit={(v) => {
+              const row: DraftStage = { name: v.name, color: v.color, icon: v.icon || 'Circle' };
+              setStages((prev) => editIdx >= 0 ? prev.map((x, k) => (k === editIdx ? row : x)) : [...prev, row]);
+              setEditIdx(null);
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -621,18 +829,19 @@ function LastCallLine({ lc }: { lc?: Lead['last_call'] }) {
 
 function BoardView({
   current, filtered, dragId, dragOver, setDragId, setDragOver, moveTo, openRecord,
-  onAddStage, onRenameStage, onDelStage,
+  onAddStage, onRenameStage, onDelStage, onMoveStage,
 }: {
   current: Pipeline; filtered: Lead[];
   dragId: string | null; dragOver: number | null;
   setDragId: Dispatch<SetStateAction<string | null>>; setDragOver: Dispatch<SetStateAction<number | null>>;
   moveTo: (stageId: number, leadId: string) => void; openRecord: (id: string) => void;
   onAddStage: () => void; onRenameStage: (s: Stage) => void; onDelStage: (s: Stage) => void;
+  onMoveStage: (s: Stage, dir: -1 | 1) => void;
 }) {
   const stages = [...current.stages].sort((a, b) => a.sort_order - b.sort_order);
   return (
     <div className="flex gap-3 overflow-x-auto pb-4">
-      {stages.map((s) => {
+      {stages.map((s, si) => {
         const cards = filtered.filter((l) => l.stage_id === s.id);
         const value = cards.reduce((a, l) => a + (l.deal_price || 0), 0);
         return (
@@ -647,10 +856,12 @@ function BoardView({
                   <StageIcon name={s.icon} color={s.color} className="h-4 w-4 shrink-0" />
                   <button onClick={() => onRenameStage(s)} className="truncate text-sm font-bold text-ink hover:text-brand" title={s.name}>{s.name}</button>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <span className="rounded-full bg-white px-2 text-xs font-semibold text-slate-500">{cards.length}</span>
-                  <Pencil className="h-3.5 w-3.5 cursor-pointer text-slate-300 hover:text-brand" onClick={() => onRenameStage(s)} />
-                  <Trash2 className="h-3.5 w-3.5 cursor-pointer text-slate-300 hover:text-red-500" onClick={() => onDelStage(s)} />
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <span className="mr-0.5 rounded-full bg-white px-2 text-xs font-semibold text-slate-500">{cards.length}</span>
+                  <button title="Move stage left" disabled={si === 0} onClick={() => onMoveStage(s, -1)} className="rounded p-0.5 text-slate-300 enabled:hover:text-brand disabled:opacity-30"><ChevronLeft className="h-3.5 w-3.5" /></button>
+                  <button title="Move stage right" disabled={si === stages.length - 1} onClick={() => onMoveStage(s, 1)} className="rounded p-0.5 text-slate-300 enabled:hover:text-brand disabled:opacity-30"><ChevronRight className="h-3.5 w-3.5" /></button>
+                  <button title="Edit stage (name, color, icon)" onClick={() => onRenameStage(s)} className="rounded p-0.5 text-slate-300 hover:text-brand"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button title="Delete stage" onClick={() => onDelStage(s)} className="rounded p-0.5 text-slate-300 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               <div className="mt-1 text-xs font-bold text-emerald-600">{value > 0 ? usd(value) : <span className="font-normal text-slate-300">$0</span>}</div>
@@ -736,11 +947,21 @@ function TableView({
               <tr key={l.lead_id} onClick={() => openRecord(l.lead_id)} className="cursor-pointer border-b border-line/60 hover:bg-surface">
                 <td className="px-3 py-2 font-semibold text-ink">{l.name}</td>
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                  <select value={l.stage_id ?? ''} onChange={(e) => onMove(Number(e.target.value), l.lead_id)}
-                    className="w-full min-w-[150px] max-w-[210px] rounded-md border border-line bg-white px-2 py-1.5 text-xs font-medium outline-none focus:border-brand">
-                    {l.stage_id == null && <option value="">—</option>}
-                    {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+                  {(() => {
+                    const cur = l.stage_id != null ? stageById.get(l.stage_id) : undefined;
+                    return (
+                      <div className="flex min-w-[150px] max-w-[210px] items-center gap-1.5 rounded-md border bg-white pl-2 pr-1"
+                        style={cur ? { borderColor: `${cur.color}66` } : undefined}>
+                        {cur && <StageIcon name={cur.icon} color={cur.color} className="h-3.5 w-3.5 shrink-0" />}
+                        <select value={l.stage_id ?? ''} onChange={(e) => onMove(Number(e.target.value), l.lead_id)}
+                          className="w-full bg-transparent py-1.5 text-xs font-semibold outline-none"
+                          style={cur ? { color: cur.color } : undefined}>
+                          {l.stage_id == null && <option value="">—</option>}
+                          {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      </div>
+                    );
+                  })()}
                 </td>
                 <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">{l.phone || '—'}</td>
                 <td className="hidden max-w-[200px] truncate px-3 py-2 text-slate-600 md:table-cell" title={l.property_ref || ''}>{l.property_ref || '—'}</td>

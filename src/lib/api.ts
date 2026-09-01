@@ -272,8 +272,10 @@ export const opm = {
   // Persist a new pipeline order (ordered array of pipeline ids for the active workspace).
   // The pinned "Standard 1PM Pipeline" is always forced first server-side regardless of position.
   reorderPipelines: (ids: number[]) => opmCall('reorder_pipelines', { method: 'POST', body: { ids } }),
-  saveStage: (b: any) => opmCall('save_stage', { method: 'POST', body: b }),
-  deleteStage: (id: number) => opmCall('delete_stage', { method: 'POST', body: { id } }),
+  // Stage curation lives on opm-stages so color + ICON persist (legacy opm save_stage dropped icon).
+  saveStage: (b: any) => opmStageCall('save_stage', { method: 'POST', body: b }),
+  deleteStage: (id: number) => opmStageCall('delete_stage', { method: 'POST', body: { id } }),
+  reorderStages: (ids: number[]) => opmStageCall('reorder_stages', { method: 'POST', body: { ids } }),
   leads: (p: any) => opmCall('leads', { params: p }),
   // Fast record-centric contacts list - served by opm-ext (parallelized; ~1s vs ~26s on `opm`).
   sellerContacts: (p: any = {}) => opmExtCall('contacts', { params: p }),
@@ -436,6 +438,26 @@ const OPMCAL_BASE =
 
 async function opmCalCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
   const url = new URL(OPMCAL_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) { if (v === undefined || v === null || v === '') continue; url.searchParams.set(k, String(v)); }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+// ---- Pipeline STAGE curation (dedicated `opm-stages` edge function). Persists color + ICON
+// (the legacy opm save_stage dropped icon) and supports reordering. Same OPM auth + workspace scope. ----
+const OPMSTAGE_BASE =
+  (import.meta as any).env?.VITE_OPMSTAGE_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-stages') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-stages');
+
+async function opmStageCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMSTAGE_BASE);
   url.searchParams.set('action', action);
   if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
   for (const [k, v] of Object.entries(opts.params || {})) { if (v === undefined || v === null || v === '') continue; url.searchParams.set(k, String(v)); }
