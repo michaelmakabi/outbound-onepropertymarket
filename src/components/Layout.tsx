@@ -8,7 +8,7 @@ import NotificationBell from './NotificationBell';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
-  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare, Layers, Phone, Home, CalendarDays,
+  Columns3, ChevronDown, Check, DollarSign, PhoneOutgoing, Webhook, Boxes, CreditCard, FileSignature, Copy, Camera, Headset, Radio, Waypoints, Bell, MessageSquare, Layers, Phone, Home, CalendarDays, PlayCircle,
 } from 'lucide-react';
 import { LOGO_MARK } from '../lib/logo';
 
@@ -50,6 +50,7 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 // op:true = operator tooling, hidden from customers (role=user).
 const NAV = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/tutorial', label: 'Tutorial', icon: PlayCircle },
   { to: '/seller-contacts', label: 'Contacts', icon: Contact },
   { to: '/pipelines', label: 'Pipelines', icon: Columns3 },
   { to: '/properties', label: 'Properties', icon: Home },
