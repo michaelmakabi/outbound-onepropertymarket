@@ -137,6 +137,10 @@ export default function LeadDetail() {
   const [noteBusy, setNoteBusy] = useState(false);
   const flash = (m: string, ms = 3000) => { setToast(m); setTimeout(() => setToast(''), ms); };
 
+  // ---- Email deliverability (free MX + syntax + disposable check; persisted onto the lead) ----
+  const [emailChk, setEmailChk] = useState<{ status: string; reason: string } | null>(null);
+  const [emailBusyV, setEmailBusyV] = useState(false);
+
   const [mode, setMode] = useState<'note' | 'email' | 'text' | 'call'>('note');
   const [body, setBody] = useState('');
   const [subject, setSubject] = useState('');
@@ -261,6 +265,7 @@ export default function LeadDetail() {
     setAddr({ Street: a.Street || '', City: a.City || '', State: a.State || '', Zip: a.Zip || '' });
     setBg(L?.background || '');
     setNameVal(L?.name || '');
+    setEmailChk(L?.email_status ? { status: L.email_status, reason: L.email_status_reason || '' } : null);
     setEditName(false); setAddNumOpen(false);
   }, [data?.lead?.lead_id]);
   // Load this contact's opportunities (all pipelines it sits in) + the pipelines it can still be added to.
@@ -318,6 +323,19 @@ export default function LeadDetail() {
     setData((d: any) => (d ? { ...d, lead: { ...d.lead, ...p } } : d));
     await opm.updateLead({ lead_id: id, ...p }).catch(() => load());
   }
+  // Verify a captured email is deliverable (free MX + syntax check) and persist the status on the lead.
+  async function verifyEmailNow(email: string) {
+    const e = String(email || '').trim();
+    if (!e) { setEmailChk(null); return; }
+    setEmailBusyV(true);
+    try {
+      const r: any = await opm.verifyEmail(e, id);
+      setEmailChk({ status: r.status, reason: `${r.reason || ''}${r.suggestion ? ` (${r.suggestion})` : ''}` });
+      setData((d: any) => (d ? { ...d, lead: { ...d.lead, email_status: r.status, email_status_reason: r.reason } } : d));
+    } catch { /* verification is best-effort; never blocks saving the email */ } finally { setEmailBusyV(false); }
+  }
+  // Save the lead's email AND immediately verify its deliverability.
+  function saveEmail(v: string) { saveLead({ emails: v ? [v] : [] }); if (v) verifyEmailNow(v); else setEmailChk(null); }
   function addTag() {
     const t = tagInput.trim();
     if (!t || tags.includes(t)) { setTagInput(''); return; }
@@ -612,7 +630,8 @@ export default function LeadDetail() {
               const st = addrState(a);
               return (
                 <div key={i} className="flex flex-wrap items-center gap-2">
-                  <span className="mr-1 text-sm font-semibold text-ink">{a}</span>
+                  {/* Thin amber outline draws the eye to the property address without a heavy highlighter. */}
+                  <span className="mr-1 rounded-md border border-amber-300 bg-amber-50/60 px-2 py-0.5 text-sm font-semibold text-ink">{a}</span>
                   <a href={mapsUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><Home className="h-3.5 w-3.5" /> Maps</a>
                   {st === 'NY' && <a href={propertySharkUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">PropertyShark</a>}
                   {st === 'FL' && <a href={miamiDadeUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">Miami-Dade</a>}
@@ -832,8 +851,19 @@ export default function LeadDetail() {
               <EditRow k="Assigned" value={lead.assigned_to} onSave={(v) => saveLead({ assigned_to: v })} />
               <EditRow k="Source" value={lead.lead_source} onSave={(v) => saveLead({ lead_source: v })} />
               <EditRow k="Property ref" value={lead.property_ref} onSave={(v) => saveLead({ property_ref: v })} />
-              <EditRow k="Email" value={lead.emails?.[0]?.email || lead.emails?.[0] || ''} onSave={(v) => saveLead({ emails: v ? [v] : [] })} />
+              <EditRow k="Email" value={lead.emails?.[0]?.email || lead.emails?.[0] || ''} onSave={saveEmail} />
             </dl>
+            {/* Email deliverability - captured emails (from a call, a form, or typed here) are checked
+                so you know whether an inbox will actually receive an LOI or follow-up. */}
+            {(lead.emails?.[0]?.email || lead.emails?.[0]) && (
+              <div className="mt-1.5 flex items-center justify-between gap-2 px-0.5">
+                <EmailStatusBadge status={emailChk?.status} reason={emailChk?.reason} />
+                <button onClick={() => verifyEmailNow(lead.emails?.[0]?.email || lead.emails?.[0] || '')} disabled={emailBusyV}
+                  className="inline-flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-brand hover:text-brand disabled:opacity-50">
+                  {emailBusyV ? <Loader2 className="h-3 w-3 animate-spin" /> : <BadgeCheck className="h-3 w-3" />} Verify email
+                </button>
+              </div>
+            )}
 
             {/* Property address (structured) */}
             <div className="mt-2 border-t border-line pt-2">
@@ -900,12 +930,11 @@ export default function LeadDetail() {
                     <div className="text-sm font-semibold text-ink">Letter of Intent</div>
                     {loiSentAt && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Sent {new Date(loiSentAt).toLocaleDateString()}</span>}
                   </div>
-                  {/* Property address - highlighted at the top so it's unmistakable. */}
+                  {/* Property address - auto-filled from the record; plain field (no highlighter). */}
                   <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Property address
                     <input value={loiFields.property_address ?? ''} onChange={(e) => setLf('property_address', e.target.value)}
                       placeholder="123 Main St, City, ST 00000"
-                      style={{ backgroundImage: 'linear-gradient(transparent 58%, #fde047 58%)' }}
-                      className="mt-1.5 h-11 w-full rounded-lg border border-yellow-300 bg-transparent px-3 text-base font-extrabold tracking-tight text-ink outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-200" />
+                      className="mt-1.5 h-11 w-full rounded-lg border border-line bg-white px-3 text-base font-bold text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20" />
                   </label>
 
                   {/* Money terms - comma-formatted and enlarged for readability. */}
@@ -1258,6 +1287,22 @@ export default function LeadDetail() {
         </div>
       )}
     </div>
+  );
+}
+
+// Deliverability chip for a lead's email. Colors: green=deliverable, amber=risky, red=undeliverable.
+function EmailStatusBadge({ status, reason }: { status?: string; reason?: string }) {
+  const map: Record<string, { cls: string; label: string }> = {
+    deliverable: { cls: 'bg-emerald-100 text-emerald-700', label: 'Deliverable' },
+    risky: { cls: 'bg-amber-100 text-amber-700', label: 'Risky' },
+    undeliverable: { cls: 'bg-red-100 text-red-700', label: 'Undeliverable' },
+    unknown: { cls: 'bg-slate-100 text-slate-500', label: 'Unknown' },
+  };
+  const s = status ? (map[status] || map.unknown) : { cls: 'bg-slate-100 text-slate-400', label: 'Not verified' };
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${s.cls}`} title={reason || ''}>
+      <BadgeCheck className="h-3 w-3" /> {s.label}
+    </span>
   );
 }
 
