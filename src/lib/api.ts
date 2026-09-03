@@ -276,6 +276,10 @@ export const opm = {
   saveStage: (b: any) => opmStageCall('save_stage', { method: 'POST', body: b }),
   deleteStage: (id: number) => opmStageCall('delete_stage', { method: 'POST', body: { id } }),
   reorderStages: (ids: number[]) => opmStageCall('reorder_stages', { method: 'POST', body: { ids } }),
+  // Verify a captured email is deliverable (free MX + syntax + disposable check). Persists the
+  // status onto the lead when lead_id is passed. Returns { deliverable, status, reason, suggestion? }.
+  verifyEmail: (email: string, lead_id?: string) =>
+    opmVerifyCall({ email, ...(lead_id ? { lead_id } : {}) }) as Promise<{ email: string; deliverable: boolean; status: 'deliverable' | 'risky' | 'undeliverable' | 'unknown'; reason: string; suggestion?: string }>,
   leads: (p: any) => opmCall('leads', { params: p }),
   // Fast record-centric contacts list - served by opm-ext (parallelized; ~1s vs ~26s on `opm`).
   sellerContacts: (p: any = {}) => opmExtCall('contacts', { params: p }),
@@ -465,6 +469,22 @@ async function opmStageCall(action: string, opts: { method?: string; params?: Re
   const token = tokenStore.get();
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+// ---- Email deliverability verifier (dedicated `email-verify` edge function). Free MX + syntax +
+// disposable check today; a paid mailbox-level provider can slot in later. Session-authed. ----
+const OPMVERIFY_BASE =
+  (import.meta as any).env?.VITE_OPMVERIFY_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/email-verify') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/email-verify');
+
+async function opmVerifyCall(body: { email: string; lead_id?: string }) {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(OPMVERIFY_BASE, { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
