@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { opm, testai, fmt } from '../lib/api';
+import { opm, testai, fmt, guard } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
 import LaunchWizard from '../components/LaunchWizard';
@@ -54,6 +54,32 @@ export default function OpmCampaigns() {
   const [wizard, setWizard] = useState(false);
   const [dripBusy, setDripBusy] = useState(false);
 
+  // ---- Emergency dialing halt (kill switch) for the active workspace ----
+  const [halted, setHalted] = useState(false);
+  const [haltBusy, setHaltBusy] = useState(false);
+  const canHalt = !viewAll && !!active; // a specific workspace must be active to halt it
+  const loadHalt = useCallback(() => {
+    if (!canHalt) { setHalted(false); return; }
+    guard.status(active as string).then((d) => setHalted(!!d.halted)).catch(() => {});
+  }, [canHalt, active]);
+  useEffect(() => { loadHalt(); }, [loadHalt]);
+  const haltDialing = async () => {
+    if (!canHalt) return;
+    if (!confirm('EMERGENCY STOP: halt ALL dialing for this workspace?\n\nThis cancels every active campaign and its remaining leads, and removes any rogue/external agent still placing calls. You can resume afterward.')) return;
+    setHaltBusy(true);
+    try {
+      const r = await guard.halt('manual emergency stop', active as string);
+      setHalted(true);
+      alert(`Dialing halted.\nCampaigns canceled: ${r.canceled_campaigns}\nPending leads canceled: ${r.canceled_leads}\nRogue agents removed: ${r.rogue_agents_removed}`);
+      load();
+    } catch (e: any) { setError(String(e?.message || e)); } finally { setHaltBusy(false); }
+  };
+  const resumeDialing = async () => {
+    if (!canHalt) return;
+    setHaltBusy(true);
+    try { await guard.resume(active as string); setHalted(false); } catch (e: any) { setError(String(e?.message || e)); } finally { setHaltBusy(false); }
+  };
+
   // Retail pricing: campaign costs are stored as raw hard cost. A customer (or a super_admin
   // impersonating one) must see hard × their workspace's billing multiplier; true staff see raw cost.
   // `apply` is false for staff, true otherwise; `mult` is keyed by workspace slug.
@@ -86,7 +112,32 @@ export default function OpmCampaigns() {
   return (
     <div>
       <PageHeader title="Campaigns" description="Every AI-calling campaign, its drip progress, cost and outcomes — in one place" showDate={false}
-        actions={<button className="btn-primary" onClick={() => setWizard(true)}><Plus className="h-4 w-4" /> New campaign</button>} />
+        actions={
+          <div className="flex items-center gap-2">
+            {canHalt && !halted && (
+              <button onClick={haltDialing} disabled={haltBusy} title="Immediately stop all dialing for this workspace"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:opacity-50">
+                {haltBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />} Stop all dialing
+              </button>
+            )}
+            <button className="btn-primary" onClick={() => setWizard(true)}><Plus className="h-4 w-4" /> New campaign</button>
+          </div>
+        } />
+
+      {halted && (
+        <div className="card mb-5 flex flex-wrap items-center justify-between gap-3 border-red-300 bg-red-50 p-4">
+          <div className="flex items-start gap-2 text-sm text-red-800">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+            <div>
+              <div className="font-bold">Dialing is halted for this workspace.</div>
+              <div className="text-red-700">No campaign can dial while this is on, and the watchdog will keep removing any rogue agent that tries. Resume when you're ready.</div>
+            </div>
+          </div>
+          <button onClick={resumeDialing} disabled={haltBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">
+            {haltBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Resume dialing
+          </button>
+        </div>
+      )}
 
       {error && <div className="card mb-5 border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
 
