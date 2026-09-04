@@ -490,6 +490,36 @@ async function opmVerifyCall(body: { email: string; lead_id?: string }) {
   return data;
 }
 
+// ---- Dialing guard / emergency stop (dedicated `opm-guard` edge function). One-click "stop all
+// dialing" for a workspace: cancels active campaigns + pending leads AND neutralizes rogue/external
+// dialing agents. A watchdog cron also auto-halts runaway dialing. Shares OPM auth + active workspace. ----
+const OPMGUARD_BASE =
+  (import.meta as any).env?.VITE_OPMGUARD_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-guard') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-guard');
+
+async function opmGuardCall(action: string, opts: { method?: string; params?: Record<string, any>; body?: any } = {}) {
+  const url = new URL(OPMGUARD_BASE);
+  url.searchParams.set('action', action);
+  if (activeWorkspace && !(opts.params && 'workspace' in opts.params)) url.searchParams.set('workspace', activeWorkspace);
+  for (const [k, v] of Object.entries(opts.params || {})) { if (v === undefined || v === null || v === '') continue; url.searchParams.set(k, String(v)); }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = tokenStore.get();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
+export const guard = {
+  // Is dialing halted for the active (or given) workspace?
+  status: (workspace?: string) => opmGuardCall('status', workspace ? { params: { workspace } } : {}) as Promise<{ workspace: string; halted: boolean; reason: string | null; halted_at: string | null }>,
+  // Emergency stop: halt dialing, cancel active campaigns + pending leads, and remove rogue dialing agents.
+  halt: (reason?: string, workspace?: string) => opmGuardCall('workspace_halt', { method: 'POST', body: { ...(workspace ? { workspace } : {}), ...(reason ? { reason } : {}) } }) as Promise<{ ok: boolean; halted: boolean; canceled_campaigns: number; canceled_leads: number; rogue_agents_removed: number }>,
+  // Lift the halt so dialing can resume.
+  resume: (workspace?: string) => opmGuardCall('workspace_resume', { method: 'POST', body: workspace ? { workspace } : {} }) as Promise<{ ok: boolean; halted: boolean }>,
+};
+
 export const calendar = {
   // Appointments in a date range (ISO bounds) for the active workspace, soonest first.
   list: (p: { from?: string; to?: string; status?: string; workspace?: string } = {}) =>
