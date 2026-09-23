@@ -520,6 +520,33 @@ export const guard = {
   resume: (workspace?: string) => opmGuardCall('workspace_resume', { method: 'POST', body: workspace ? { workspace } : {} }) as Promise<{ ok: boolean; halted: boolean }>,
 };
 
+// ---- Universal search (dedicated `opm-search` edge function): one query across contacts, calls,
+// pipelines, properties, contracts (LOIs) and appointments for the active workspace. ----
+const OPMSEARCH_BASE =
+  (import.meta as any).env?.VITE_OPMSEARCH_BASE ||
+  ((import.meta as any).env?.VITE_API_BASE ? String((import.meta as any).env.VITE_API_BASE).replace(/\/api$/, '/opm-search') : 'https://sehrlbmatklgghrvyxes.supabase.co/functions/v1/opm-search');
+
+export interface SearchHit { id: string; lead_id?: string; title: string; sub?: string }
+export interface SearchResults { contacts: SearchHit[]; calls: SearchHit[]; pipelines: SearchHit[]; properties: SearchHit[]; contracts: SearchHit[]; appointments: SearchHit[] }
+
+export const search = {
+  // Type-ahead global search. Scoped to the active workspace (or a given one). Returns grouped hits.
+  global: (q: string, workspace?: string) => {
+    const url = new URL(OPMSEARCH_BASE);
+    url.searchParams.set('q', q);
+    const ws = workspace || activeWorkspace;
+    if (ws) url.searchParams.set('workspace', ws);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = tokenStore.get();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return fetch(url.toString(), { headers }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+      return data as { q: string; results: Partial<SearchResults> };
+    });
+  },
+};
+
 export const calendar = {
   // Appointments in a date range (ISO bounds) for the active workspace, soonest first.
   list: (p: { from?: string; to?: string; status?: string; workspace?: string } = {}) =>
