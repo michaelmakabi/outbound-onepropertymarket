@@ -620,6 +620,9 @@ export default function LeadDetail() {
 
       {toast && <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700"><Check className="h-4 w-4" /> {toast}</div>}
 
+      {/* Enriched call intelligence - top-of-mind bullet summary of the last substantive call. */}
+      {lead.custom?.lead_intel && <EnrichedCallCard intel={lead.custom.lead_intel} />}
+
       {/* Property address bar - the property/properties tied to this contact, each with quick look-ups:
           Google Maps (always), PropertyShark (NY only), Miami-Dade property search (FL only), Google. */}
       {propAddrs.length > 0 && (
@@ -1309,6 +1312,37 @@ function EmailStatusBadge({ status, reason }: { status?: string; reason?: string
 function StagePill({ name, color }: { name?: string; color?: string }) {
   if (!color) return <span className="pill bg-brand/10 text-brand">{name || '-'}</span>;
   return <span className="pill" style={{ backgroundColor: `${color}1a`, color }}>{name || '-'}</span>;
+}
+
+// Top-of-contact enriched summary of the most recent substantive call, generated from the transcript
+// (stored on lead.custom.lead_intel). Highlighted, scannable: headline, realism, asking price, terms,
+// key points, and next actions - so a rep knows what to do without reading the full transcript.
+function EnrichedCallCard({ intel }: { intel: any }) {
+  if (!intel) return null;
+  const kp: string[] = Array.isArray(intel.key_points) ? intel.key_points : [];
+  const na: string[] = Array.isArray(intel.next_actions) ? intel.next_actions : [];
+  const realism: string = intel.seller_realism || intel.buyer_realism || '';
+  const realismLabel: Record<string, string> = { under_market: 'Under-market opportunity', at_market: 'At-market seller', overpriced: 'Overpriced / unrealistic', realistic: 'Realistic buyer', unrealistic: 'Unrealistic buyer', deal_interest: 'Deal-specific interest' };
+  const realismClass: Record<string, string> = { under_market: 'border-emerald-300 bg-emerald-100 text-emerald-700', at_market: 'border-sky-300 bg-sky-100 text-sky-700', overpriced: 'border-orange-300 bg-orange-100 text-orange-700', realistic: 'border-emerald-300 bg-emerald-100 text-emerald-700', unrealistic: 'border-orange-300 bg-orange-100 text-orange-700', deal_interest: 'border-indigo-300 bg-indigo-100 text-indigo-700' };
+  return (
+    <div className="mb-4 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-700"><Sparkles className="h-3.5 w-3.5" /> Call intelligence</span>
+        {realism && <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${realismClass[realism] || 'border-slate-300 bg-slate-100 text-slate-600'}`}>{realismLabel[realism] || realism}</span>}
+        {intel.confidence && <span className="rounded-full border border-line bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-slate-400">confidence: {intel.confidence}</span>}
+      </div>
+      {intel.headline && <div className="mb-3 text-[15px] font-semibold leading-snug text-ink">{intel.headline}</div>}
+      <div className="mb-3 grid gap-2 sm:grid-cols-2">
+        {intel.asking_price && <div className="flex items-start gap-2 rounded-lg bg-white/70 px-3 py-2"><DollarSign className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" /><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Asking price</div><div className="text-sm font-semibold text-ink">{intel.asking_price}</div></div></div>}
+        {intel.terms && <div className="flex items-start gap-2 rounded-lg bg-white/70 px-3 py-2"><FileText className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" /><div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Terms</div><div className="text-sm text-ink">{intel.terms}</div></div></div>}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {kp.length > 0 && <div><div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Key points</div><ul className="space-y-1">{kp.map((p, i) => (<li key={i} className="flex gap-2 text-sm text-ink"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />{p}</li>))}</ul></div>}
+        {na.length > 0 && <div><div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Next actions</div><ul className="space-y-1">{na.map((p, i) => (<li key={i} className="flex gap-2 text-sm font-medium text-ink"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />{p}</li>))}</ul></div>}
+      </div>
+      <div className="mt-2 text-[10px] text-slate-400">AI summary of the most recent substantive call{intel.generated_at ? ' - ' + new Date(intel.generated_at).toLocaleDateString() : ''}</div>
+    </div>
+  );
 }
 
 function Stat({ icon: Icon, label, value }: { icon: any; label: string; value: any }) {
