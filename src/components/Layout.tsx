@@ -5,6 +5,7 @@ import { useWorkspace, ALL_WORKSPACES } from '../lib/workspace';
 import { audit } from '../lib/audit';
 import ProfileModal from './ProfileModal';
 import NotificationBell from './NotificationBell';
+import GlobalSearch from './GlobalSearch';
 import {
   LayoutDashboard, Building2, PieChart, PhoneCall, GitCompare, Bot,
   Sparkles, PenLine, FileBarChart, Users, Activity, LogOut, Menu, X, PanelLeftClose, PanelLeft, UserCog, Contact,
@@ -214,6 +215,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       )}
 
       <main className={`flex-1 px-4 py-6 pt-20 transition-all md:px-6 md:pt-6 ${collapsed ? 'md:ml-[68px]' : 'md:ml-60'}`}>
+        {/* Universal search - available on every page */}
+        <div className="mb-4"><GlobalSearch /></div>
         {impersonating && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5">
             <span className="text-sm font-semibold text-amber-800">
