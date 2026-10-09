@@ -14,7 +14,7 @@ import { StageIcon } from '../lib/statusIcons';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Star, BadgeCheck, Phone, Smartphone,
   Sparkles, PenLine, Mail, MessageSquare, PhoneCall, User, DollarSign, GitBranch, Tag, Bot, Check, X, Loader2, History,
-  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing, Trash2, Home, Users, UserCheck, Lock, Send,
+  Save, ChevronDown, FileText, Pencil, Plus, PhoneIncoming, PhoneOutgoing, Trash2, Home, Users, UserCheck, Lock, Send, ExternalLink,
 } from 'lucide-react';
 
 const DIAL_AGENT = { id: 'agent_ee77a9e3c659964acc19d0be54', name: 'Adrian B (Aggressive) - OUTBOUND' };
@@ -43,11 +43,29 @@ const durLabel = (s: any) => { const n = Math.round(Number(s) || 0); return `${M
 // ---- Property address helpers: format a structured address, detect its state, and build the
 // external "look this property up" links the top bar exposes (Maps everywhere; PropertyShark for NY;
 // Miami-Dade property search for a Miami/FL address; Google fallback for anything else). ----
+const CITY_ABBR: Record<string, string> = { BK: 'Brooklyn', BX: 'Bronx', SI: 'Staten Island', QN: 'Queens', QNS: 'Queens', MN: 'Manhattan', NYC: 'New York' };
+function normCity(c: any): string {
+  const s = String(c || '').replace(/,+\s*$/, '').replace(/\s+/g, ' ').trim();
+  return CITY_ABBR[s.toUpperCase()] || s;
+}
+// Build a clean, geocodable address string. If the street field already holds a full address
+// (has a comma and a state/zip), trust it as-is; otherwise assemble street + normalized city + state/zip.
 function fmtAddress(a: any): string {
   if (!a) return '';
-  if (typeof a === 'string') return a.trim();
-  const parts = [a.Street || a.street || a.line1, a.City || a.city, [a.State || a.state, a.Zip || a.zip].filter(Boolean).join(' ')].filter(Boolean);
+  if (typeof a === 'string') return a.replace(/\s+/g, ' ').replace(/,+\s*$/, '').trim();
+  const street = String(a.Street || a.street || a.line1 || '').replace(/\s+/g, ' ').trim();
+  if (/,/.test(street) && /(\b[A-Z]{2}\b|\d{5})/.test(street)) return street.replace(/,+\s*$/, '').trim();
+  const parts = [street, normCity(a.City || a.city), [a.State || a.state, a.Zip || a.zip].filter(Boolean).join(' ')]
+    .map((x) => String(x || '').trim()).filter(Boolean);
   return parts.join(', ').trim();
+}
+// NYC deterministic parcel link from BBL (borough-block-lot) -> ZoLa.
+function zolaUrl(bbl: any): string | null {
+  const d = String(bbl || '').replace(/\D/g, '');
+  if (d.length !== 10) return null;
+  const boro = d[0]; const block = String(parseInt(d.slice(1, 6), 10)); const lot = String(parseInt(d.slice(6, 10), 10));
+  if (!['1','2','3','4','5'].includes(boro)) return null;
+  return `https://zola.planning.nyc.gov/l/lot/${boro}/${block}/${lot}`;
 }
 function addrState(a: string): 'NY' | 'FL' | '' {
   const s = ` ${String(a || '')} `;
@@ -312,7 +330,12 @@ export default function LeadDetail() {
   const parcel = lead?.parcel || {};
   const tags: string[] = Array.isArray(lead?.tags) ? lead.tags : [];
   // Property address(es) tied to this contact + their look-up links (Maps / PropertyShark NY / Miami-Dade FL / Google).
-  const propAddrs: string[] = (Array.isArray(lead?.addresses) && lead.addresses.length ? lead.addresses.map(fmtAddress) : (lead?.property_ref ? [lead.property_ref] : [])).filter(Boolean);
+  // Prefer the clean parcel "main address" (fully normalized) as the primary look-up address, then any
+  // address records on the lead. property_ref is a messy human note, used only as a last resort.
+  const parcelMain = String((lead?.parcel && (lead.parcel['main address'] || lead.parcel.main_address)) || '').replace(/\s+/g, ' ').trim();
+  const addrList: string[] = (Array.isArray(lead?.addresses) && lead.addresses.length ? lead.addresses.map(fmtAddress) : (lead?.property_ref ? [fmtAddress(lead.property_ref)] : [])).filter(Boolean);
+  const propAddrs: string[] = (parcelMain ? [parcelMain, ...addrList.filter((a) => a.toLowerCase() !== parcelMain.toLowerCase())] : addrList);
+  const zola = zolaUrl(lead?.parcel?.bbl);
 
   async function patch(contact_id: string, b: any) {
     setData((d: any) => ({ ...d, contacts: d.contacts.map((c: any) => c.contact_id === contact_id ? { ...c, ...b } : (b.is_primary_number ? { ...c, is_primary_number: false } : c)) }));
@@ -623,6 +646,17 @@ export default function LeadDetail() {
       {/* Enriched call intelligence - top-of-mind bullet summary of the last substantive call. */}
       {lead.custom?.lead_intel && <EnrichedCallCard intel={lead.custom.lead_intel} />}
 
+      {/* Open this same contact in Follow Up Boss (by its FUB contact id, matched on phone during sync). */}
+      {lead.custom?.fub_url && (
+        <div className="mb-4">
+          <a href={lead.custom.fub_url} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-brand hover:text-brand"
+            title="Open this contact in your Follow Up Boss account">
+            <ExternalLink className="h-4 w-4" /> View in Follow Up Boss
+          </a>
+        </div>
+      )}
+
       {/* Property address bar - the property/properties tied to this contact, each with quick look-ups:
           Google Maps (always), PropertyShark (NY only), Miami-Dade property search (FL only), Google. */}
       {propAddrs.length > 0 && (
@@ -637,6 +671,7 @@ export default function LeadDetail() {
                   <span className="mr-1 rounded-md border border-amber-300 bg-amber-50/60 px-2 py-0.5 text-sm font-semibold text-ink">{a}</span>
                   <a href={mapsUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand"><Home className="h-3.5 w-3.5" /> Maps</a>
                   {st === 'NY' && <a href={propertySharkUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">PropertyShark</a>}
+                  {st === 'NY' && zola && <a href={zola} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">County / ZoLa</a>}
                   {st === 'FL' && <a href={miamiDadeUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">Miami-Dade</a>}
                   <a href={googleUrl(a)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-brand hover:text-brand">Google</a>
                   {st && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{st}</span>}
