@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { billing, fmt } from '../lib/api';
+import { billingBreakdown } from '../lib/billingBreakdown';
 import { PageHead, Spinner } from '../components/ui';
 import { CreditCard, Receipt, TrendingUp, Calendar, ExternalLink, ShieldCheck, AlertCircle, Loader2, Package } from 'lucide-react';
 
@@ -14,12 +15,14 @@ export default function Account() {
   const [err, setErr] = useState('');
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalMsg, setPortalMsg] = useState('');
+  const [breakdown, setBreakdown] = useState<Record<string, any>>({});
 
   useEffect(() => {
     billing.myAccount()
       .then((d: any) => setWorkspaces(d.workspaces || []))
       .catch((e: any) => setErr(e?.message || 'Could not load your account.'))
       .finally(() => setLoading(false));
+    billingBreakdown().then((d) => setBreakdown(d.workspaces || {})).catch(() => {});
   }, []);
 
   const openPortal = async () => {
@@ -68,6 +71,33 @@ export default function Account() {
               <div className="text-[11px] text-slate-400">{fmt.int(w.usage?.events || 0)} calls billed</div>
             </div>
           </div>
+
+          {/* line items — what the usage is made of (AI Calls, AI Call Analysis, …) */}
+          {(breakdown[w.workspace_slug]?.line_items?.length > 0) && (
+            <div className="card mb-4 overflow-hidden p-0">
+              <div className="flex items-center gap-1.5 border-b border-line px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+                <Receipt className="h-3.5 w-3.5" /> What you're billed for
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                    <th className="px-4 py-2 font-semibold">Item</th>
+                    <th className="px-3 py-2 text-right font-semibold">Quantity</th>
+                    <th className="px-4 py-2 text-right font-semibold">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {breakdown[w.workspace_slug].line_items.map((li: any) => (
+                    <tr key={li.event_type}>
+                      <td className="px-4 py-2.5 font-medium text-ink">{li.label || li.event_type}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">{(li.events || 0).toLocaleString()}</td>
+                      <td className="px-4 py-2.5 text-right font-bold tabular-nums text-ink">{fmt.money(li.billable_amount || 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* subscription (when on a recurring plan) */}
           {w.subscription && (
