@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { opm, billing, fmt } from '../lib/api';
+import { billingBreakdown } from '../lib/billingBreakdown';
 import { useAuth } from '../lib/auth';
 import { PageHead, Spinner } from '../components/ui';
 import { DollarSign, Check, AlertCircle, TrendingUp, CreditCard, Info, RefreshCw, FileText, Loader2, ExternalLink, Package, Send, Copy, Calendar, Plus, Trash2, ShieldCheck, Download, Wallet } from 'lucide-react';
@@ -24,10 +25,12 @@ export default function Billing() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
   const [plans, setPlans] = useState<any[]>([]);
+  const [breakdown, setBreakdown] = useState<Record<string, any>>({});
 
   const load = () => opm.billingOverview().then((d: any) => { setRows(d.workspaces || []); setLedgerPopulated(!!d.ledger_populated); }).finally(() => setLoading(false));
   const loadPlans = () => billing.plansList().then((d: any) => setPlans(d.plans || [])).catch(() => {});
-  useEffect(() => { load(); loadPlans(); }, []);
+  const loadBreakdown = () => billingBreakdown().then((d) => setBreakdown(d.workspaces || {})).catch(() => {});
+  useEffect(() => { load(); loadPlans(); loadBreakdown(); }, []);
 
   if (user?.role !== 'super_admin') return <div className="py-16 text-center text-slate-400">Billing is restricted to super admins.</div>;
   if (loading) return <Spinner />;
@@ -72,7 +75,7 @@ export default function Billing() {
       <PlanManager plans={plans} onChanged={loadPlans} />
 
       <div className="space-y-4">
-        {rows.map((r) => <TenantCard key={r.workspace_slug} row={r} plans={plans} onChanged={load} />)}
+        {rows.map((r) => <TenantCard key={r.workspace_slug} row={r} plans={plans} lineItems={breakdown[r.workspace_slug]?.line_items || []} onChanged={load} />)}
         {rows.length === 0 && <div className="card p-8 text-center text-sm text-slate-400">No billing workspaces configured yet.</div>}
       </div>
     </div>
@@ -149,7 +152,7 @@ function PlanManager({ plans, onChanged }: { plans: any[]; onChanged: () => void
   );
 }
 
-function TenantCard({ row, plans, onChanged }: { row: any; plans: any[]; onChanged: () => void }) {
+function TenantCard({ row, plans, lineItems, onChanged }: { row: any; plans: any[]; lineItems: any[]; onChanged: () => void }) {
   const [form, setForm] = useState({
     display_name: row.display_name || '', billing_mode: row.billing_mode, status: row.status,
     default_multiplier: String(row.default_multiplier ?? '1'), stripe_customer_id: row.stripe_customer_id || '',
@@ -291,6 +294,39 @@ function TenantCard({ row, plans, onChanged }: { row: any; plans: any[]; onChang
         <div><div className="label">Margin</div><div className={`text-lg font-bold ${previewMargin > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>{fmt.money(previewMargin)}</div></div>
         <div><div className="label">Billable</div><div className="text-lg font-bold text-ink">{fmt.money(billable)}</div></div>
       </div>
+
+      {/* Line items by type (AI Calls, AI Call Analysis, …) — stacked, each with its own multiplier/retail */}
+      {lineItems && lineItems.length > 0 && (
+        <div className="mb-4 overflow-hidden rounded-xl border border-line">
+          <div className="flex items-center gap-1.5 border-b border-line bg-surface px-4 py-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+            <FileText className="h-3.5 w-3.5" /> Line items
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <th className="px-4 py-2 font-semibold">Item</th>
+                <th className="px-3 py-2 text-right font-semibold">Qty</th>
+                <th className="px-3 py-2 text-right font-semibold">Hard</th>
+                <th className="px-3 py-2 text-right font-semibold">Retail</th>
+                <th className="px-3 py-2 text-right font-semibold">Margin</th>
+                <th className="px-4 py-2 text-right font-semibold">Billable</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {lineItems.map((li: any) => (
+                <tr key={li.event_type}>
+                  <td className="px-4 py-2 font-medium text-ink">{li.label || li.event_type}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{(li.events || 0).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{fmt.money(li.hard_cost || 0)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-ink">{fmt.money(li.retail_price || 0)}</td>
+                  <td className={`px-3 py-2 text-right tabular-nums ${li.margin > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>{fmt.money(li.margin || 0)}</td>
+                  <td className="px-4 py-2 text-right font-bold tabular-nums text-ink">{fmt.money(li.billable_amount || 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Subscription panel (Requirement 3) — plan line items when on Subscription billing */}
       {isSubscription && (
